@@ -1,4 +1,4 @@
-"""Installation script for the 'omnicustomgym' python package."""
+"""Installation script for the 'omni_custom_gym' python package."""
 
 from __future__ import absolute_import
 from __future__ import print_function
@@ -28,11 +28,11 @@ INSTALL_REQUIRES = [
 
 # Installation operation
 setup(
-    name="omnicustomgym",
+    name="omni_custom_gym",
     author="AndPatr",
     version="1.0.0",
     description="",
-    keywords=["omnicustomgym", "stepping", "rl"],
+    keywords=["omni_custom_gym", "stepping", "rl"],
     include_package_data=True,
     python_requires=">=3.7, <3.8",
     install_requires=INSTALL_REQUIRES,

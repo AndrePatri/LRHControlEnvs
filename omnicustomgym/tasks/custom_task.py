@@ -22,8 +22,8 @@ from omni.isaac.core.utils.types import ArticulationActions
 
 from omni.isaac.core.scenes.scene import Scene
 
-from omnicustomgym.utils.jnt_imp_cntrl import OmniJntImpCntrl
-from omnicustomgym.utils.homing import OmniRobotHomer
+from omni_custom_gym.utils.jnt_imp_cntrl import OmniJntImpCntrl
+from omni_custom_gym.utils.homing import OmniRobotHomer
 
 from abc import ABC, abstractmethod
 from typing import List
