@@ -1,0 +1,125 @@
+[package]
+title = "Isaac Sim Python - Headless Render Gym"
+description = "A simplifed app for running Gym examples headlessly from Python with rendering"
+version = "2022.2.1"
+
+# That makes it browsable in UI with "experience" filter
+keywords = ["experience", "app", "usd"]
+
+[settings]
+app.name = "Isaac-Sim"
+app.version = "2022.2.1"
+
+[dependencies]
+"omni.kit.window.title" = {}
+"omni.physx" = {}
+"omni.physx.tensors" = {}
+"omni.warp" = {}
+
+"omni.kit.viewport.rtx" = {}
+"omni.kit.viewport.pxr" = {}
+"omni.kit.viewport.bundle" = {}
+"omni.kit.window.status_bar" = {}
+
+[settings]
+# MGPU is always on, you can turn it from the settings, and force this off to save even more resource if you
+# only want to use a single GPU on your MGPU system
+renderer.multiGpu.enabled = true
+
+# Improve determinism with physics and camera movement
+app.asyncRendering = false
+app.asyncRenderingLowLatency = false
+app.hydraEngine.waitIdle = true
+app.hydra.aperture.conform = 4 # Don't modify camera prim, stretch the image so it fits
+
+'rtx-transient'.resourcemanager.enableTextureStreaming = true
+
+# Setting the port for the embedded http server
+exts."omni.services.transport.server.http".port = 8211
+
+# These disable the kit app from also printing out python output, which gets confusing
+app.python.interceptSysStdOutput = false
+app.python.logSysStdOutput = false
+app.file.ignoreUnsavedOnExit = true # prevents save dialog when exiting
+exts."omni.kit.menu.utils".logDeprecated = false
+
+[settings.app.settings]
+persistent = false
+dev_build = false
+
+# Extensions
+###############################
+[settings.exts."omni.kit.registry.nucleus"]
+# FOR DEVELOPMENT #
+registries = [
+    { name = "kit/default", url = "omniverse://kit-extensions.ov.nvidia.com/exts/kit/default" },
+]
+postToSlack = false
+# # FOR PRODUCTION #
+# registries = [
+#     { name = "kit/public", url = "https://d1aiacozzchaiq.cloudfront.net/exts/kit/public/104.0/"},
+#     { name = "kit/community", url = "https://dw290v42wisod.cloudfront.net/exts/kit/community" }
+# ]
+
+[settings.app.extensions]
+skipPublishVerification = false
+registryEnabled = true # Need this for registry to load
+
+# Isaac Sim Settings
+###############################
+[settings.persistent]
+app.stage.upAxis = "Z"
+app.primCreation.DefaultXformOpType = "Scale, Orient, Translate"
+app.primCreation.DefaultXformOpOrder="xformOp:translate, xformOp:orient, xformOp:scale"
+simulation.minFrameRate = 15
+simulation.defaultMetersPerUnit = 1.0
+omnigraph.updateToUsd = false
+physics.visualizationDisplayJoints = false
+
+[settings.physics]
+updateToUsd = false
+updateVelocitiesToUsd = false
+updateForceSensorsToUsd = false
+outputVelocitiesLocalSpace = false
+
+# Misc Settings
+###############################
+[settings.ngx]
+enabled=true # Enable this for DLSS
+
+# FOR DEVELOPMENT - START #
+[settings]
+persistent.isaac.asset_root.default = "omniverse://isaac-dev.ov.nvidia.com"
+persistent.isaac.asset_root.nvidia = "omniverse://isaac-dev.ov.nvidia.com/NVIDIA"
+persistent.isaac.asset_root.isaac = "omniverse://isaac-dev.ov.nvidia.com/Isaac"
+persistent.isaac.asset_root.cloud = "http://omniverse-content-staging.s3-us-west-2.amazonaws.com/Assets/Isaac/2022.2.1"
+
+exts."omni.isaac.asset_browser".folders = [
+    "http://omniverse-content-staging.s3-us-west-2.amazonaws.com/Assets/Isaac/2022.2.1/Isaac/Robots",
+    "http://omniverse-content-staging.s3-us-west-2.amazonaws.com/Assets/Isaac/2022.2.1/Isaac/People",
+    "http://omniverse-content-staging.s3-us-west-2.amazonaws.com/Assets/Isaac/2022.2.1/Isaac/Props",
+    "http://omniverse-content-staging.s3-us-west-2.amazonaws.com/Assets/Isaac/2022.2.1/Isaac/Environments",
+    "http://omniverse-content-staging.s3-us-west-2.amazonaws.com/Assets/Isaac/2022.2.1/Isaac/Samples",
+]
+# FOR DEVELOPMENT - END #
+
+# Register extension folder from this repo in kit
+[settings.app.exts]
+folders.'++' = ["${app}/../exts", "${app}/../extscache"]
+
+# Isaac Sim Extensions
+###############################
+[dependencies]
+"omni.isaac.core" = {}
+"omni.isaac.core_archive" = {}
+"omni.isaac.cloner" = {}
+"omni.isaac.dynamic_control" = {}
+"omni.isaac.gym" = {}
+"omni.isaac.kit" = {}
+"omni.isaac.ml_archive" = {}
+"omni.kit.loop-isaac" = {}
+"omni.isaac.urdf" = {}
+
+# browsers
+# Added to deal with warp console message
+"omni.kit.browser.sample" = {}
