@@ -72,7 +72,7 @@ class CustomTask(BaseTask):
         # values used for defining RL buffers
         self._num_observations = 4
         self._num_actions = 1
-        self._device = device # defaults to "cuda" ("cpu" also valid)
+        self._device = torch.device(device) # defaults to "cuda" ("cpu" also valid)
 
         # a few class buffers to store RL-related states
         self.obs = torch.zeros((self.num_envs, self._num_observations))

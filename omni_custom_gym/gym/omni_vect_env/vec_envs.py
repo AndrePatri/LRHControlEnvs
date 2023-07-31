@@ -11,6 +11,7 @@ from omni.isaac.kit import SimulationApp
 import os
 import carb
 import gymnasium as gym 
+import torch
 
 class RobotVecEnv(gym.Env):
     """ This class provides a base interface for connecting RL policies with task implementations.
@@ -99,11 +100,11 @@ class RobotVecEnv(gym.Env):
         ## we first set up the World ##
         from omni.isaac.core.world import World
 
-        device = "cpu" # defaults to CPU, unless this is set in sim_params
+        device = torch.device("cpu") # defaults to CPU, unless this is set in sim_params
         if sim_params and "use_gpu_pipeline" in sim_params:
             if sim_params["use_gpu_pipeline"]:
-                device = "cuda" # 
-        print(f"[{self.__class__.__name__}]" + f"[{self.info}]" + ": using device: " + device)
+                device = torch.device("cuda") # 
+        print(f"[{self.__class__.__name__}]" + f"[{self.info}]" + ": using device: " + str(device))
         print(f"[{self.__class__.__name__}]" + f"[{self.info}]" + ": using backend: " + backend)
 
         if (sim_params is None):
@@ -131,7 +132,7 @@ class RobotVecEnv(gym.Env):
             physics_dt=sim_params["integration_dt"], 
             rendering_dt=sim_params["rendering_dt"],
             backend=backend,
-            device=device,
+            device=str(device),
             physics_prim_path="/physicsScene", 
             sim_params=sim_params
         )

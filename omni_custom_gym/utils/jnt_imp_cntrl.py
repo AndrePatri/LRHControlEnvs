@@ -678,7 +678,7 @@ class OmniJntImpCntrl:
                 default_pgain = 300.0, 
                 default_vgain = 30.0, 
                 backend = "torch", 
-                device = "cpu", 
+                device: torch.device = torch.device("cpu"), 
                 filter_BW = 50.0, # [Hz]
                 filter_dt = None): # [s]
         

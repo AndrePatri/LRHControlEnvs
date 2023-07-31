@@ -10,7 +10,7 @@ class OmniRobotHomer:
             articulation: ArticulationView, 
             srdf_path: str, 
             backend = "torch", 
-            device = "cpu"):
+            device: torch.device = torch.device("cpu")):
 
         self._info = "info"
         self._status = "status"
