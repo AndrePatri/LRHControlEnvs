@@ -12,6 +12,9 @@ import os
 import carb
 import gymnasium as gym 
 import torch
+from abc import ABC, abstractmethod
+from typing import Union, Tuple, Dict
+import numpy as np
 
 class RobotVecEnv(gym.Env):
     """ This class provides a base interface for connecting RL policies with task implementations.
@@ -214,16 +217,16 @@ class RobotVecEnv(gym.Env):
         distantLight.CreateIntensityAttr(500)
 
         self._world.add_task(task)
-        self._task = task
+        self.task = task
 
         # filter collisions between envs
-        self._task.apply_collision_filters(self._physics_scene_path, 
+        self.task.apply_collision_filters(self._physics_scene_path, 
                                 "/World/collisions")
         
-        self._num_envs = self._task.num_envs
+        self._num_envs = self.task.num_envs
 
-        self.observation_space = self._task.observation_space
-        self.action_space = self._task.action_space
+        self.observation_space = self.task.observation_space
+        self.action_space = self.task.action_space
 
         if sim_params and "enable_viewport" in sim_params:
             self._render = sim_params["enable_viewport"]
@@ -235,25 +238,25 @@ class RobotVecEnv(gym.Env):
             self._world.reset() # after the first reset we get get all quantities 
             # from the scene 
             
-            self._task.world_was_initialized() # we signal the task 
+            self.task.world_was_initialized() # we signal the task 
             # that the first reset was called -> all info is now available
             # to be retrieved
 
-            self._task.fill_robot_info_from_world() # populates robot info fields
+            self.task.fill_robot_info_from_world() # populates robot info fields
             # in task
 
-            self._task.init_homing_manager() 
+            self.task.init_homing_manager() 
 
-            self._task.set_robot_default_jnt_config()
-            # self._task.set_robot_root_default_config()
+            self.task.set_robot_default_jnt_config()
+            # self.task.set_robot_root_default_config()
 
-            # self._task.set_robot_imp_gains()
+            # self.task.set_robot_imp_gains()
 
-            self._task._get_robots_state()
+            self.task._get_robots_state()
             
-            self._task.init_imp_control() # initialized the impedance controller
+            self.task.init_imp_control() # initialized the impedance controller
 
-            self._task.print_envs_info() # debug prints
+            self.task.print_envs_info() # debug prints
 
     def render(self, mode="human") -> None:
         """ Step the renderer.
@@ -289,7 +292,13 @@ class RobotVecEnv(gym.Env):
 
         return set_seed(seed)
 
-    def step(self, actions = None):
+    @abstractmethod
+    def step(self, 
+            index: int,
+            actions = None) -> Tuple[Union[np.ndarray, torch.Tensor], 
+                                    Union[np.ndarray, torch.Tensor],
+                                    Union[np.ndarray, torch.Tensor],
+                                    Dict]:
         """ Basic implementation for stepping simulation. 
             Can be overriden by inherited Env classes
             to satisfy requirements of specific RL libraries. This method passes actions to task
@@ -303,27 +312,14 @@ class RobotVecEnv(gym.Env):
             dones(Union[numpy.ndarray, torch.Tensor]): Buffer of resets/dones data.
             info(dict): Dictionary of extras data.
         """
-
-        self._task.pre_physics_step(actions)
-
-        self._world.step(render=self._render)
-
-        self.sim_frame_count += 1
-
-        observations = self._task.get_observations()
-        rewards = self._task.calculate_metrics()
-        dones = self._task.is_done()
-        info = {}
-
-        return observations, rewards, dones, info
-
+        
+        pass
+    
+    @abstractmethod
     def reset(self):
         """ Resets the task and updates observations. """
-        self._task.reset()
-        self._world.step(render=self._render)
-        observations = self._task.get_observations()
 
-        return observations
+        pass
 
     @property
     def num_envs(self):
