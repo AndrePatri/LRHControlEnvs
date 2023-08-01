@@ -88,10 +88,10 @@ class CustomTask(BaseTask):
 
         self._world_initialized = False
 
-        self._robot_bodynames = []
-        self._robot_n_links = -1
-        self._robot_n_dofs = -1
-        self._robot_dof_names = []
+        self.robot_bodynames = []
+        self.robot_n_links = -1
+        self.robot_n_dofs = -1
+        self.robot_dof_names = []
 
         self._ground_plane_prim_path = "/World/ground_plane"
 
@@ -270,8 +270,8 @@ class CustomTask(BaseTask):
     #     # attach to the articulation a custom joint controller (e.g. jnt impedance), 
     #     # on top of the default articulation pd controller
 
-    #     self.joint_kps_envs = torch.zeros((self.num_envs, self._robot_n_dofs))
-    #     self.joint_kds_envs = torch.zeros((self.num_envs, self._robot_n_dofs)) 
+    #     self.joint_kps_envs = torch.zeros((self.num_envs, self.robot_n_dofs))
+    #     self.joint_kds_envs = torch.zeros((self.num_envs, self.robot_n_dofs)) 
 
     #     self._robots_art_view.set_gains(kps= self.joint_kps_envs, 
     #                                     kds= self.joint_kds_envs)
@@ -313,10 +313,10 @@ class CustomTask(BaseTask):
 
         if (self._world_initialized):
 
-            self._robot_bodynames = self._robots_art_view.body_names
-            self._robot_n_links = self._robots_art_view.num_bodies
-            self._robot_n_dofs = self._robots_art_view.num_dof
-            self._robot_dof_names = self._robots_art_view.dof_names
+            self.robot_bodynames = self._robots_art_view.body_names
+            self.robot_n_links = self._robots_art_view.num_bodies
+            self.robot_n_dofs = self._robots_art_view.num_dof
+            self.robot_dof_names = self._robots_art_view.dof_names
         
         else:
 
