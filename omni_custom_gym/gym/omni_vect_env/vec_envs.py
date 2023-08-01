@@ -249,7 +249,7 @@ class RobotVecEnv(gym.Env):
 
             # self._task.set_robot_imp_gains()
 
-            self._task._get_jnts_state()
+            self._task._get_robots_state()
             
             self._task.init_imp_control() # initialized the impedance controller
 

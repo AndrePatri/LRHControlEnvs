@@ -216,25 +216,37 @@ class CustomTask(BaseTask):
 
         return success
     
-    def _get_jnts_state(self):
-
-        self.robot_jnt_positions = self._robots_art_view.get_joint_positions(indices = None, 
-                                        joint_indices = None, 
-                                        clone = True)
+    def _get_robots_state(self):
         
-        self.robot_jnt_velocities = self._robots_art_view.get_joint_velocities(indices = None, 
+        pose = self._robots_art_view.get_world_poses(indices = None, 
+                                        clone = False) # tuple: (pos, quat)
+        
+        self.root_p = pose[0] # root position 
+
+        self.root_q = pose[1] # root orientation
+
+        self.root_v = self._robots_art_view.get_linear_velocities(indices = None, 
+                                        clone = False) # root lin. velocity
+        
+        self.root_omega = self._robots_art_view.get_angular_velocities(indices = None, 
+                                        clone = False) # root ang. velocity
+        
+        self.jnts_q = self._robots_art_view.get_joint_positions(indices = None, 
                                         joint_indices = None, 
-                                        clone = True)
+                                        clone = False) # joint positions 
+        
+        self.jnts_v = self._robots_art_view.get_joint_velocities(indices = None, 
+                                        joint_indices = None, 
+                                        clone = False) # joint velocities
+        
+        # self.velocities = self._robots_art_view.get_velocities(indices = None, 
+        #                                 clone = True) # [n_envs x 6]; 0:3 lin vel; 3:6 ang vel 
 
     def world_was_initialized(self):
 
         self._world_initialized = True
 
-    def set_robot_default_jnt_config(self, 
-                                hip_roll = None, 
-                                hip_pitch = None, 
-                                knee_pitch = None, 
-                                wheels = None):
+    def set_robot_default_jnt_config(self):
         
         if (self._world_initialized):
 
