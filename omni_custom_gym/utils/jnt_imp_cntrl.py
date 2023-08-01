@@ -793,12 +793,24 @@ class OmniJntImpCntrl:
 
             if (not (len(robot_indxs_shape) == 1 and \
                 robot_indxs.dtype == torch.int64 and \
-                robot_indxs.device.type == self._device and \
+                robot_indxs.device.type == self._device.type and \
                 bool(torch.min(robot_indxs) >= 0) and \
-                bool(torch.max(robot_indxs) < self.n_dofs))): # sanity checks 
+                bool(torch.max(robot_indxs) < self.num_robots))): # sanity checks 
 
                 check[0] = JntImpCntrl.IndxState.INVALID
-            
+
+                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                    ": mismatch in provided selector ->")
+                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                    ": robot_indxs_shape -> " + f"{len(robot_indxs_shape)}" + " VS" + " expected -> " + f"{1}")
+                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                    ": robot_indxs.dtype -> " + f"{robot_indxs.dtype}" + " VS" + " expected -> " + f"{torch.int64}")
+                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                    ": robot_indxs.device -> " + f"{robot_indxs.device.type}" + " VS" + " expected -> " + f"{self._device.type}")
+                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                    ": torch.min(robot_indxs) >= 0) -> " + f"{bool(torch.min(robot_indxs) >= 0)}" + " VS" + f" {True}")
+                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                    ": torch.max(robot_indxs) < self.n_dofs -> " + f"{torch.max(robot_indxs)}" + " VS" + f" {self.num_robots}")
             else:
 
                 check[0] = JntImpCntrl.IndxState.VALID
@@ -813,11 +825,24 @@ class OmniJntImpCntrl:
 
             if (not (len(jnt_indxs_shape) == 1 and \
                 jnt_indxs.dtype == torch.int64 and \
-                jnt_indxs.device.type == self._device and \
+                jnt_indxs.device.type == self._device.type and \
                 bool(torch.min(jnt_indxs) >= 0) and \
                 bool(torch.max(jnt_indxs) < self.n_dofs))): # sanity checks 
 
                 check[1] = JntImpCntrl.IndxState.INVALID
+
+                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                    ": mismatch in provided selector ->")
+                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                    ": jnt_indxs_shape -> " + f"{len(jnt_indxs_shape)}" + " VS" + " expected -> " + f"{1}")
+                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                    ": jnt_indxs.dtype -> " + f"{jnt_indxs.dtype}" + " VS" + " expected -> " + f"{torch.int64}")
+                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                    ": jnt_indxs.device -> " + f"{jnt_indxs.device.type}" + " VS" + " expected -> " + f"{self._device.type}")
+                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                    ": torch.min(jnt_indxs) >= 0) -> " + f"{bool(torch.min(jnt_indxs) >= 0)}" + " VS" + f" {True}")
+                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                    ": torch.max(jnt_indxs) < self.n_dofs -> " + f"{torch.max(jnt_indxs)}" + " VS" + f" {self.n_dofs}")
             
             else:
 
@@ -873,7 +898,7 @@ class OmniJntImpCntrl:
 
             if signal_shape[0] == self.num_robots and \
                 signal_shape[1] == self.n_dofs and \
-                signal.device.type == self._device:
+                signal.device.type == self._device.type:
                 
                 return True
             
@@ -886,7 +911,7 @@ class OmniJntImpCntrl:
                 print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
                     ": signal cols -> " + f"{signal_shape[1]}" + " VS" + " expected cols -> " + f"{self.n_dofs}")
                 print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
-                    ": signal device -> " + f"{signal.device.type}" + " VS" + " expected type -> " + f"{self._device}")
+                    ": signal device -> " + f"{signal.device.type}" + " VS" + " expected type -> " + f"{self._device.type}")
 
                 return False
             
@@ -896,7 +921,7 @@ class OmniJntImpCntrl:
 
             if signal_shape[0] == selector_shape[0] and \
                 signal_shape[1] == selector_shape[1] and \
-                signal.device.type == self._device:
+                signal.device.type == self._device.type:
 
                 return True
             
@@ -909,7 +934,7 @@ class OmniJntImpCntrl:
                 print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
                     ": signal cols -> " + f"{signal_shape[1]}" + " VS" + " selector cols -> " + f"{selector_shape[1]}")
                 print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
-                    ": signal device -> " + f"{signal.device.type}" + " VS" + " expected type -> " + f"{self._device}")
+                    ": signal device -> " + f"{signal.device.type}" + " VS" + " expected type -> " + f"{self._device.type}")
 
                 return False
         
