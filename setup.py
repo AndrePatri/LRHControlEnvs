@@ -20,9 +20,7 @@ INSTALL_REQUIRES = [
     "box2d-py",
     "tensorboard",
     "tensorboard-plugin-wit",
-    "protobuf",
     "termcolor",
-    "hydra-core>=1.1",
     "rospkg",
     ]
 
