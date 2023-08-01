@@ -72,7 +72,7 @@ class CustomTask(BaseTask):
         # values used for defining RL buffers
         self._num_observations = 4
         self._num_actions = 1
-        self._device = torch.device(device) # defaults to "cuda" ("cpu" also valid)
+        self.torch_device = torch.device(device) # defaults to "cuda" ("cpu" also valid)
 
         # a few class buffers to store RL-related states
         self.obs = torch.zeros((self.num_envs, self._num_observations))
@@ -161,8 +161,6 @@ class CustomTask(BaseTask):
         try:
 
             xacro_cmd = ["xacro"] + [xacro_path] + cmds + ["-o"] + [self._urdf_path]
-
-            print(subprocess.list2cmdline(xacro_cmd))
             xacro_gen = subprocess.check_call(xacro_cmd)
             
             # we also generate an updated SRDF (used by controllers)
@@ -329,7 +327,7 @@ class CustomTask(BaseTask):
 
             self._homer = OmniRobotHomer(articulation=self._robots_art_view, 
                                 srdf_path=self._srdf_path, 
-                                device=self._device)
+                                device=self.torch_device)
             
         else:
 
@@ -349,7 +347,7 @@ class CustomTask(BaseTask):
             self._jnt_imp_controller = OmniJntImpCntrl(articulation=self._robots_art_view,
                                                 default_pgain = default_jnt_pgain, 
                                                 default_vgain = default_jnt_vgain,
-                                                device= self._device)
+                                                device= self.torch_device)
 
             # we override internal default gains for the wheels, which are usually
             # velocity controlled
@@ -357,11 +355,12 @@ class CustomTask(BaseTask):
 
             wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
                                         default_wheel_pgain, 
-                                        device = self._device, 
+                                        device = self.torch_device, 
                                         dtype=torch.float32)
+            
             wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
                                         default_wheel_vgain, 
-                                        device = self._device, 
+                                        device = self.torch_device, 
                                         dtype=torch.float32)
 
             self._jnt_imp_controller.set_gains(pos_gains = wheels_pos_gains,
@@ -432,21 +431,31 @@ class CustomTask(BaseTask):
 
     def post_reset(self):
         
+        # post reset operations
+        
         pass
 
     def reset(self, env_ids=None):
         
+        # reset simulation 
+
         pass
 
     def pre_physics_step(self, actions) -> None:
         
+        # apply actions to simulated robot
+
         pass
 
     def get_observations(self):
+        
+        # retrieve data from the simulation
 
         pass
 
     def calculate_metrics(self) -> None:
+        
+        # compute any metric to be fed to the agent
 
         pass
 
