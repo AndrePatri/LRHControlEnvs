@@ -10,8 +10,11 @@ class OmniRobotHomer:
             articulation: ArticulationView, 
             srdf_path: str, 
             backend = "torch", 
-            device: torch.device = torch.device("cpu")):
+            device: torch.device = torch.device("cpu"), 
+            dtype = torch.float64):
 
+        self.torch_dtype = dtype 
+        
         self._info = "info"
         self._status = "status"
         self._warning = "warning" 
@@ -44,7 +47,7 @@ class OmniRobotHomer:
         self._homing = torch.full((self.num_robots, self.n_dofs), 
                         0.0, 
                         device = self._device, 
-                        dtype=torch.float32) # homing configuration
+                        dtype=self.torch_dtype) # homing configuration
         
         # open srdf and parse the homing field
         
@@ -93,7 +96,7 @@ class OmniRobotHomer:
                 self._homing[:, self.joint_idx_map[joint]] = torch.full((self.num_robots, 1), 
                                                                 self._homing_map[joint],
                                                                 device = self._device, 
-                                                                dtype=torch.float32).flatten()
+                                                                dtype=self.torch_dtype).flatten()
             else:
 
                 print(f"[{self.__class__.__name__}]" + f"[{self._warning}]" + f"[{self._assign2homing.__name__}]" \

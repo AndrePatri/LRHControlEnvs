@@ -15,8 +15,11 @@ class FirstOrderFilter:
             filter_BW: float = 0.1, 
             rows: int = 1, 
             cols: int = 1, 
-            device = "cuda"):
+            device = "cuda",
+            dtype = torch.double):
         
+        self.torch_dtype = dtype
+
         self.info = "info"
         self.status = "status"
         self.warning = "warning" 
@@ -35,14 +38,14 @@ class FirstOrderFilter:
         self._gain = 2 * math.pi * self._filter_BW
 
         self.yk = torch.zeros((self._rows, self._cols), device = self._device, 
-                                dtype=torch.float32)
+                                dtype=self.torch_dtype)
         self.ykm1 = torch.zeros((self._rows, self._cols), device = self._device, 
-                                dtype=torch.float32)
+                                dtype=self.torch_dtype)
         
         self.refk = torch.zeros((self._rows, self._cols), device = self._device, 
-                                dtype=torch.float32)
+                                dtype=self.torch_dtype)
         self.refkm1 = torch.zeros((self._rows, self._cols), device = self._device, 
-                                dtype=torch.float32)
+                                dtype=self.torch_dtype)
         
         self._kh2 = self._gain * self._dt / 2.0
         self._coeff_ref = self._kh2 * 1/ (1 + self._kh2)
@@ -55,22 +58,30 @@ class FirstOrderFilter:
 
             self.refk = refk
 
-        self.yk = torch.add(torch.mul(self.ykm1, self._coeff_km1), torch.mul(torch.add(self.refk, self.refkm1), self._coeff_ref))
+        self.yk = torch.add(torch.mul(self.ykm1, self._coeff_km1), 
+                            torch.mul(torch.add(self.refk, self.refkm1), 
+                                        self._coeff_ref))
 
         self.refkm1 = self.refk
         self.ykm1 = self.yk
     
     def reset(self):
 
-        self.yk = torch.zeros((self._rows, self._cols), device = self._device, 
-                                dtype=torch.float32)
-        self.ykm1 = torch.zeros((self._rows, self._cols), device = self._device, 
-                                dtype=torch.float32)
+        self.yk = torch.zeros((self._rows, self._cols), 
+                            device = self._device, 
+                            dtype=self.torch_dtype)
         
-        self.refk = torch.zeros((self._rows, self._cols), device = self._device, 
-                                dtype=torch.float32)
-        self.refkm1 = torch.zeros((self._rows, self._cols), device = self._device, 
-                                dtype=torch.float32)
+        self.ykm1 = torch.zeros((self._rows, self._cols), 
+                            device = self._device, 
+                            dtype=self.torch_dtype)
+        
+        self.refk = torch.zeros((self._rows, self._cols), 
+                            device = self._device, 
+                            dtype=self.torch_dtype)
+        
+        self.refkm1 = torch.zeros((self._rows, self._cols), 
+                            device = self._device, 
+                            dtype=self.torch_dtype)
     
     def get(self):
 
@@ -94,8 +105,11 @@ class JntImpCntrl:
                 backend = "torch", 
                 device = "cpu", 
                 filter_BW = 100.0, 
-                disable_filter = True):
+                disable_filter = True,
+                dtype = torch.double):
         
+        self.torch_dtype = dtype
+
         self.info = "info"
         self.status = "status"
         self.warning = "warning" 
@@ -126,11 +140,11 @@ class JntImpCntrl:
         self._backend = "torch"
 
         self.cntrl_action = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         self.pos_err = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         self.vel_err = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         
         # we assume diagonal gain matrices, so we can save on memory and only store the diagonal
         self._default_pgain = default_pgain
@@ -138,23 +152,23 @@ class JntImpCntrl:
         self._pos_gains =  torch.full((self.num_robots, self.n_dofs), 
                                     self._default_pgain, 
                                     device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         self._vel_gains = torch.full((self.num_robots, self.n_dofs), 
                                     self._default_vgain,
                                     device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         
         self._eff_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         self._pos_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         self._vel_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         
         self._pos = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         self._vel = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         
         self._filter_BW = filter_BW
         self._disable_filter = disable_filter
@@ -661,7 +675,7 @@ class JntImpCntrl:
 
         return torch.tensor(jnt_idxs, 
                             device=self._device, 
-                            dtype=torch.float32)
+                            dtype=self.torch_dtype)
     
 class OmniJntImpCntrl:
 
@@ -680,8 +694,11 @@ class OmniJntImpCntrl:
                 backend = "torch", 
                 device: torch.device = torch.device("cpu"), 
                 filter_BW = 50.0, # [Hz]
-                filter_dt = None): # [s]
+                filter_dt = None, 
+                dtype = torch.double): # [s]
         
+        self.torch_dtype = dtype
+
         self.info = "info"
         self.status = "status"
         self.warning = "warning" 
@@ -689,7 +706,9 @@ class OmniJntImpCntrl:
         
         if not articulation.initialized:
 
-            raise Exception(f"[{self.__class__.__name__}]" + f"[{self.exception}]" + ": the provided articulation is not initialized properly!!")
+            raise Exception(f"[{self.__class__.__name__}]" + \
+                            f"[{self.exception}]" + \
+                            ": the provided articulation is not initialized properly!!")
         
         self._articulation = articulation
 
@@ -718,18 +737,18 @@ class OmniJntImpCntrl:
         self._pos_gains =  torch.full((self.num_robots, self.n_dofs), 
                                     self._default_pgain, 
                                     device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         self._vel_gains = torch.full((self.num_robots, self.n_dofs), 
                                     self._default_vgain,
                                     device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         
         self._eff_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         self._pos_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         self._vel_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=torch.float32)
+                                    dtype=self.torch_dtype)
         
         self._initialize_gains()
 
@@ -745,17 +764,20 @@ class OmniJntImpCntrl:
                                     filter_BW=self._filter_BW, 
                                     rows=self.num_robots, 
                                     cols=self.n_dofs, 
-                                    device=self._device)
+                                    device=self._device, 
+                                    dtype=self.torch_dtype)
             self._vel_ref_filter = FirstOrderFilter(dt=self.filter_dt, 
                                     filter_BW=self._filter_BW, 
                                     rows=self.num_robots, 
                                     cols=self.n_dofs, 
-                                    device=self._device)
+                                    device=self._device, 
+                                    dtype=self.torch_dtype)
             self._eff_ref_filter = FirstOrderFilter(dt=self.filter_dt, 
                                     filter_BW=self._filter_BW, 
                                     rows=self.num_robots, 
                                     cols=self.n_dofs, 
-                                    device=self._device)
+                                    device=self._device, 
+                                    dtype=self.torch_dtype)
             
             self._pos_ref_filter.reset()
             self._vel_ref_filter.reset()
@@ -769,7 +791,7 @@ class OmniJntImpCntrl:
                     ": no filter dt provided -> reference filter will not be available")
 
     def _initialize_gains(self):
-
+        
         self._articulation.set_gains(kps = self._pos_gains, 
                                     kds = self._vel_gains)
 
@@ -799,17 +821,24 @@ class OmniJntImpCntrl:
 
                 check[0] = JntImpCntrl.IndxState.INVALID
 
-                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                print(f"[{self.__class__.__name__}]"  + \
+                    f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
                     ": mismatch in provided selector ->")
-                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                print(f"[{self.__class__.__name__}]"  + \
+                    f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
                     ": robot_indxs_shape -> " + f"{len(robot_indxs_shape)}" + " VS" + " expected -> " + f"{1}")
-                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                print(f"[{self.__class__.__name__}]"  + \
+                    f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
                     ": robot_indxs.dtype -> " + f"{robot_indxs.dtype}" + " VS" + " expected -> " + f"{torch.int64}")
-                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                print(f"[{self.__class__.__name__}]"  + \
+                    f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
                     ": robot_indxs.device -> " + f"{robot_indxs.device.type}" + " VS" + " expected -> " + f"{self._device.type}")
-                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
-                    ": torch.min(robot_indxs) >= 0) -> " + f"{bool(torch.min(robot_indxs) >= 0)}" + " VS" + f" {True}")
-                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                print(f"[{self.__class__.__name__}]"  + \
+                    f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
+                    ": torch.min(robot_indxs) >= 0) -> " + \
+                        f"{bool(torch.min(robot_indxs) >= 0)}" + " VS" + f" {True}")
+                print(f"[{self.__class__.__name__}]"  + \
+                    f"[{self.warning}]" + f"[{self._validate_selectors.__name__}]" + \
                     ": torch.max(robot_indxs) < self.n_dofs -> " + f"{torch.max(robot_indxs)}" + " VS" + f" {self.num_robots}")
             else:
 
@@ -904,14 +933,21 @@ class OmniJntImpCntrl:
             
             else:
                 
-                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
+                print(f"[{self.__class__.__name__}]"  + \
+                    f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
                     ": mismatch in provided signal ->")
-                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
-                    ": signal rows -> " + f"{signal_shape[0]}" + " VS" + " expected rows -> " + f"{self.num_robots}")
-                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
-                    ": signal cols -> " + f"{signal_shape[1]}" + " VS" + " expected cols -> " + f"{self.n_dofs}")
-                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
-                    ": signal device -> " + f"{signal.device.type}" + " VS" + " expected type -> " + f"{self._device.type}")
+                print(f"[{self.__class__.__name__}]"  + \
+                    f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
+                    ": signal rows -> " + f"{signal_shape[0]}" + " VS" + " expected rows -> " + \
+                        f"{self.num_robots}")
+                print(f"[{self.__class__.__name__}]"  + \
+                    f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
+                    ": signal cols -> " + f"{signal_shape[1]}" + " VS" + " expected cols -> " + \
+                        f"{self.n_dofs}")
+                print(f"[{self.__class__.__name__}]"  + \
+                    f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
+                    ": signal device -> " + f"{signal.device.type}" + " VS" + " expected type -> " + \
+                        f"{self._device.type}")
 
                 return False
             
@@ -927,14 +963,21 @@ class OmniJntImpCntrl:
             
             else:
                 
-                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
+                print(f"[{self.__class__.__name__}]"  + \
+                    f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
                     ": mismatch in provided signal and/or selector ->")
-                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
-                    ": signal rows -> " + f"{signal_shape[0]}" + " VS" + " selector rows -> " + f"{selector_shape[0]}")
-                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
-                    ": signal cols -> " + f"{signal_shape[1]}" + " VS" + " selector cols -> " + f"{selector_shape[1]}")
-                print(f"[{self.__class__.__name__}]"  + f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
-                    ": signal device -> " + f"{signal.device.type}" + " VS" + " expected type -> " + f"{self._device.type}")
+                print(f"[{self.__class__.__name__}]"  + \
+                    f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
+                    ": signal rows -> " + f"{signal_shape[0]}" + " VS" + " selector rows -> " + \
+                        f"{selector_shape[0]}")
+                print(f"[{self.__class__.__name__}]"  + \
+                    f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
+                    ": signal cols -> " + f"{signal_shape[1]}" + " VS" + " selector cols -> " + \
+                        f"{selector_shape[1]}")
+                print(f"[{self.__class__.__name__}]"  + \
+                    f"[{self.warning}]" + f"[{self._validate_signal.__name__}]" + \
+                    ": signal device -> " + f"{signal.device.type}" + " VS" + " expected type -> " + \
+                        f"{self._device.type}")
 
                 return False
         

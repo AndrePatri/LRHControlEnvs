@@ -37,8 +37,11 @@ class CustomTask(BaseTask):
                 cloning_offset: np.array = np.array([0.0, 0.0, 0.0]),
                 replicate_physics: bool = True,
                 offset=None, 
-                env_spacing = 5.0) -> None:
+                env_spacing = 5.0, 
+                dtype = torch.float64) -> None:
 
+        self.torch_dtype = dtype
+        
         self.info = "info"
         self.status = "status"
         self.warning = "warning"
@@ -46,6 +49,8 @@ class CustomTask(BaseTask):
         
         self._robot_name = robot_name # will be used to search for URDF and SRDF packages
 
+        self.torch_device = torch.device(device) # defaults to "cuda" ("cpu" also valid)
+        
         # cloning stuff
         self.num_envs = num_envs
         self._env_ns = "/World/envs"
@@ -65,14 +70,14 @@ class CustomTask(BaseTask):
             print(f"[{self.__class__.__name__}]" + f"[{self.warning}]" + ":  the provided cloning_offset is not of the correct shape. A null offset will be used instead.")
 
         self._cloning_offset = cloning_offset
-
-        self._position = np.array([0, 0, 0.8])
-        self._orientation = euler_angles_to_quat(np.array([0, 0, 0]), degrees = True)
-
+        
+        self.root_abs_offsets = torch.zeros((self.num_envs, 3), 
+                                device=self.torch_device) # reference clone positions
+        # on the ground plane
+        
         # values used for defining RL buffers
         self._num_observations = 4
         self._num_actions = 1
-        self.torch_device = torch.device(device) # defaults to "cuda" ("cpu" also valid)
 
         # a few class buffers to store RL-related states
         self.obs = torch.zeros((self.num_envs, self._num_observations))
@@ -219,7 +224,7 @@ class CustomTask(BaseTask):
         pose = self._robots_art_view.get_world_poses(indices = None, 
                                         clone = False) # tuple: (pos, quat)
         
-        self.root_p = pose[0] # root position 
+        self.root_p = pose[0]  
 
         self.root_q = pose[1] # root orientation
 
@@ -261,18 +266,6 @@ class CustomTask(BaseTask):
         # To be implemented
 
         return True
-
-    # def override_pd_controller_gains(self):
-        
-    #     # all gains set to 0 so that it's possible to 
-    #     # attach to the articulation a custom joint controller (e.g. jnt impedance), 
-    #     # on top of the default articulation pd controller
-
-    #     self.joint_kps_envs = torch.zeros((self.num_envs, self.robot_n_dofs))
-    #     self.joint_kds_envs = torch.zeros((self.num_envs, self.robot_n_dofs)) 
-
-    #     self._robots_art_view.set_gains(kps= self.joint_kps_envs, 
-    #                                     kds= self.joint_kds_envs)
         
     def apply_collision_filters(self, 
                                 physicscene_path: str, 
@@ -327,7 +320,8 @@ class CustomTask(BaseTask):
 
             self._homer = OmniRobotHomer(articulation=self._robots_art_view, 
                                 srdf_path=self._srdf_path, 
-                                device=self.torch_device)
+                                device=self.torch_device, 
+                                dtype=self.torch_dtype)
             
         else:
 
@@ -337,7 +331,7 @@ class CustomTask(BaseTask):
                             )
         
     def init_imp_control(self, 
-                default_jnt_pgain = 300.0, 
+                default_jnt_pgain = 3000.0, 
                 default_jnt_vgain = 30.0, 
                 default_wheel_pgain = 0.0, 
                 default_wheel_vgain = 10.0):
@@ -347,7 +341,8 @@ class CustomTask(BaseTask):
             self._jnt_imp_controller = OmniJntImpCntrl(articulation=self._robots_art_view,
                                                 default_pgain = default_jnt_pgain, 
                                                 default_vgain = default_jnt_vgain,
-                                                device= self.torch_device)
+                                                device= self.torch_device, 
+                                                dtype=self.torch_dtype)
 
             # we override internal default gains for the wheels, which are usually
             # velocity controlled
@@ -356,16 +351,17 @@ class CustomTask(BaseTask):
             wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
                                         default_wheel_pgain, 
                                         device = self.torch_device, 
-                                        dtype=torch.float32)
+                                        dtype=self.torch_dtype)
             
             wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
                                         default_wheel_vgain, 
                                         device = self.torch_device, 
-                                        dtype=torch.float32)
+                                        dtype=self.torch_dtype)
 
             self._jnt_imp_controller.set_gains(pos_gains = wheels_pos_gains,
                             vel_gains = wheels_vel_gains,
                             jnt_indxs=wheels_indxs)
+                            
 
             if self._homer is not None:
 
@@ -437,9 +433,14 @@ class CustomTask(BaseTask):
 
     def reset(self, env_ids=None):
         
-        # reset simulation 
+        self._get_robots_state() # updates robot states
 
-        pass
+        self._jnt_imp_controller.set_refs(pos_ref=self._homer.get_homing())
+        self._jnt_imp_controller.apply_refs()
+
+    def init_root_abs_offsets(self):
+
+        self.root_abs_offsets[:, 0:2]  = self.root_p[:, 0:2]
 
     def pre_physics_step(self, actions) -> None:
         
