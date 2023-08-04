@@ -28,6 +28,8 @@ from omni_custom_gym.utils.homing import OmniRobotHomer
 from abc import ABC, abstractmethod
 from typing import List
 
+import time 
+
 class CustomTask(BaseTask):
     def __init__(self, 
                 name: str,
@@ -221,26 +223,24 @@ class CustomTask(BaseTask):
     
     def _get_robots_state(self):
         
-        pose = self._robots_art_view.get_world_poses(indices = None, 
-                                        clone = False) # tuple: (pos, quat)
+        pose = self._robots_art_view.get_world_poses( 
+                                        clone = True) # tuple: (pos, quat)
         
         self.root_p = pose[0]  
 
         self.root_q = pose[1] # root orientation
 
-        self.root_v = self._robots_art_view.get_linear_velocities(indices = None, 
-                                        clone = False) # root lin. velocity
+        self.root_v = self._robots_art_view.get_linear_velocities(
+                                        clone = True) # root lin. velocity
         
-        self.root_omega = self._robots_art_view.get_angular_velocities(indices = None, 
-                                        clone = False) # root ang. velocity
+        self.root_omega = self._robots_art_view.get_angular_velocities(
+                                        clone = True) # root ang. velocity
         
-        self.jnts_q = self._robots_art_view.get_joint_positions(indices = None, 
-                                        joint_indices = None, 
-                                        clone = False) # joint positions 
+        self.jnts_q = self._robots_art_view.get_joint_positions(
+                                        clone = True) # joint positions 
         
-        self.jnts_v = self._robots_art_view.get_joint_velocities(indices = None, 
-                                        joint_indices = None, 
-                                        clone = False) # joint velocities
+        self.jnts_v = self._robots_art_view.get_joint_velocities( 
+                                        clone = True) # joint velocities
         
         # self.velocities = self._robots_art_view.get_velocities(indices = None, 
         #                                 clone = True) # [n_envs x 6]; 0:3 lin vel; 3:6 ang vel 
