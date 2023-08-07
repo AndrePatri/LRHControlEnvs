@@ -4,7 +4,6 @@ from typing import List
 from enum import Enum
 
 from omni.isaac.core.articulations.articulation_view import ArticulationView
-from omni.isaac.core.utils.types import ArticulationAction
 
 class FirstOrderFilter:
 
@@ -56,30 +55,30 @@ class FirstOrderFilter:
         
         if refk is not None:
 
-            self.refk = refk
+            self.refk[:, :] = refk
 
-        self.yk = torch.add(torch.mul(self.ykm1, self._coeff_km1), 
+        self.yk[:, :] = torch.add(torch.mul(self.ykm1, self._coeff_km1), 
                             torch.mul(torch.add(self.refk, self.refkm1), 
                                         self._coeff_ref))
 
-        self.refkm1 = self.refk
-        self.ykm1 = self.yk
+        self.refkm1[:, :] = self.refk
+        self.ykm1[:, :] = self.yk
     
     def reset(self):
 
-        self.yk = torch.zeros((self._rows, self._cols), 
+        self.yk[:, :] = torch.zeros((self._rows, self._cols), 
                             device = self._device, 
                             dtype=self.torch_dtype)
         
-        self.ykm1 = torch.zeros((self._rows, self._cols), 
+        self.ykm1[:, :] = torch.zeros((self._rows, self._cols), 
                             device = self._device, 
                             dtype=self.torch_dtype)
         
-        self.refk = torch.zeros((self._rows, self._cols), 
+        self.refk[:, :] = torch.zeros((self._rows, self._cols), 
                             device = self._device, 
                             dtype=self.torch_dtype)
         
-        self.refkm1 = torch.zeros((self._rows, self._cols), 
+        self.refkm1[:, :] = torch.zeros((self._rows, self._cols), 
                             device = self._device, 
                             dtype=self.torch_dtype)
     
@@ -996,7 +995,7 @@ class OmniJntImpCntrl:
 
                 else:
                     
-                    self._pos_ref = signal
+                    self._pos_ref[:, :] = signal
 
                 return True
 
@@ -1008,7 +1007,7 @@ class OmniJntImpCntrl:
 
                 else:
                     
-                    self._vel_ref = signal
+                    self._vel_ref[:, :] = signal
 
                 return True
 
@@ -1020,7 +1019,7 @@ class OmniJntImpCntrl:
 
                 else:
                     
-                    self._eff_ref = signal
+                    self._eff_ref[:, :] = signal
                 
                 return True
 
@@ -1032,7 +1031,7 @@ class OmniJntImpCntrl:
 
                 else:
                     
-                    self._pos_gains = signal
+                    self._pos_gains[:, :] = signal
 
                 return True
 
@@ -1044,7 +1043,7 @@ class OmniJntImpCntrl:
 
                 else:
                     
-                    self._vel_gains = signal
+                    self._vel_gains[:, :] = signal
 
                 return True
 
