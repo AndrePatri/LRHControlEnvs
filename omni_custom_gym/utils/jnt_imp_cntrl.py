@@ -320,11 +320,11 @@ class JntImpCntrl:
                 
                 if selector is not None:
 
-                    self._pos_ref[selector] = signal
+                    self._pos_ref[selector, :] = signal
 
                 else:
                     
-                    self._pos_ref = signal
+                    self._pos_ref[:, :] = signal
 
                 return True
 
@@ -332,11 +332,11 @@ class JntImpCntrl:
                 
                 if selector is not None:
 
-                    self._vel_ref[selector] = signal
+                    self._vel_ref[selector, :] = signal
 
                 else:
                     
-                    self._vel_ref = signal
+                    self._vel_ref[:, :] = signal
 
                 return True
 
@@ -344,11 +344,11 @@ class JntImpCntrl:
 
                 if selector is not None:
 
-                    self._eff_ref[selector] = signal
+                    self._eff_ref[selector, :] = signal
 
                 else:
                     
-                    self._eff_ref = signal
+                    self._eff_ref[:, :] = signal
                 
                 return True
 
@@ -356,11 +356,11 @@ class JntImpCntrl:
                 
                 if selector is not None:
 
-                    self._pos[selector] = signal
+                    self._pos[selector, :] = signal
 
                 else:
                     
-                    self._pos = signal
+                    self._pos[:, :] = signal
                 
                 return True
 
@@ -368,11 +368,11 @@ class JntImpCntrl:
                 
                 if selector is not None:
 
-                    self._vel[selector] = signal
+                    self._vel[selector, :] = signal
 
                 else:
                     
-                    self._vel = signal
+                    self._vel[:, :] = signal
 
                 return True
 
@@ -380,11 +380,11 @@ class JntImpCntrl:
                 
                 if selector is not None:
                     
-                    self._pos_gains[selector] = signal
+                    self._pos_gains[selector, :] = signal
 
                 else:
                     
-                    self._pos_gains = signal
+                    self._pos_gains[:, :] = signal
 
                 return True
 
@@ -392,11 +392,11 @@ class JntImpCntrl:
                 
                 if selector is not None:
 
-                    self._vel_gains[selector] = signal
+                    self._vel_gains[selector, :] = signal
 
                 else:
                     
-                    self._vel_gains = signal
+                    self._vel_gains[:, :] = signal
 
                 return True
 

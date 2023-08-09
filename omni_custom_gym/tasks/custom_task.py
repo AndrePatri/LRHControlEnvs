@@ -221,8 +221,8 @@ class CustomTask(BaseTask):
 
         return success
     
-    def _get_robots_state(self):
-        
+    def _init_robots_state(self):
+
         pose = self._robots_art_view.get_world_poses( 
                                         clone = True) # tuple: (pos, quat)
         
@@ -240,6 +240,30 @@ class CustomTask(BaseTask):
                                         clone = True) # joint positions 
         
         self.jnts_v = self._robots_art_view.get_joint_velocities( 
+                                        clone = True) # joint velocities
+        
+        # self.velocities = self._robots_art_view.get_velocities(indices = None, 
+        #                                 clone = True) # [n_envs x 6]; 0:3 lin vel; 3:6 ang vel 
+
+    def _get_robots_state(self):
+        
+        pose = self._robots_art_view.get_world_poses( 
+                                        clone = True) # tuple: (pos, quat)
+        
+        self.root_p[:, :] = pose[0]  
+
+        self.root_q[:, :] = pose[1] # root orientation
+
+        self.root_v[:, :] = self._robots_art_view.get_linear_velocities(
+                                        clone = True) # root lin. velocity
+        
+        self.root_omega[:, :] = self._robots_art_view.get_angular_velocities(
+                                        clone = True) # root ang. velocity
+        
+        self.jnts_q[:, :] = self._robots_art_view.get_joint_positions(
+                                        clone = True) # joint positions 
+        
+        self.jnts_v[:, :] = self._robots_art_view.get_joint_velocities( 
                                         clone = True) # joint velocities
         
         # self.velocities = self._robots_art_view.get_velocities(indices = None, 
