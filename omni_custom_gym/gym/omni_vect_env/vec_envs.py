@@ -182,6 +182,16 @@ class RobotVecEnv(gym.Env):
         if "gpu_max_num_partitions" in sim_params:
                 self._physics_context.set_gpu_max_num_partitions(sim_params["gpu_max_num_partitions"])
 
+        # overwriting defaults
+        # self._physics_context.set_gpu_max_rigid_contact_count(2 * self._physics_context.get_gpu_max_rigid_contact_count())
+        # self._physics_context.set_gpu_max_rigid_patch_count(2 * self._physics_context.get_gpu_max_rigid_patch_count())
+        # self._physics_context.set_gpu_found_lost_pairs_capacity(2 * self._physics_context.get_gpu_found_lost_pairs_capacity())
+        # self._physics_context.set_gpu_found_lost_aggregate_pairs_capacity(20 * self._physics_context.get_gpu_found_lost_aggregate_pairs_capacity())
+        # self._physics_context.set_gpu_total_aggregate_pairs_capacity(20 * self._physics_context.get_gpu_total_aggregate_pairs_capacity())
+        # self._physics_context.set_gpu_heap_capacity(2 * self._physics_context.get_gpu_heap_capacity())
+        # self._physics_context.set_gpu_temp_buffer_capacity(20 * self._physics_context.get_gpu_heap_capacity())
+        # self._physics_context.set_gpu_max_num_partitions(20 * self._physics_context.get_gpu_temp_buffer_capacity())
+
         # GPU buffers
         self._gpu_max_rigid_contact_count = self._physics_context.get_gpu_max_rigid_contact_count()
         self._gpu_max_rigid_patch_count = self._physics_context.get_gpu_max_rigid_patch_count()
