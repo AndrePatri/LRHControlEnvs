@@ -35,7 +35,7 @@ setup(
     author="AndPatr",
     version="0.0.1-py" + python_version,
     description="",
-    keywords=["gym", "stepping", "rl"],
+    keywords=["gym", "omniverse", "RL"],
     include_package_data=True,
     python_requires=">=3.7, <3.8",
     install_requires=INSTALL_REQUIRES,
