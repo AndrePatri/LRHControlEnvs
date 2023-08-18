@@ -27,3 +27,5 @@ External dependencies to be installed separately:
 
 Other dependencies included in the environment thorough Anaconda which can optionally be installed directly from source for development purposes: 
 - [ControlClusterUtils](https://github.com/AndrePatri/ControlClusterUtils): utilities to create CPU-based control cluster to be interfaced with GPU-based simulators using shared memory for minimum latency.
+
+Optionally, the package is also available thorugh Anaconda at [omni_custom_gym](https://anaconda.org/andrepatri/omni_custom_gym).
