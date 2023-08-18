@@ -7,8 +7,13 @@ from __future__ import division
 from setuptools import setup, find_packages
 
 import os
+import sys
 
 root_dir = os.path.dirname(os.path.realpath(__file__))
+
+# Modify the version name based on Python version
+python_version = ".".join(map(str, sys.version_info[:2]))  # Get major.minor Python version
+package_name = 'omni_custom_gym'
 
 # Minimum dependencies required prior to installation
 INSTALL_REQUIRES = [
@@ -26,11 +31,11 @@ INSTALL_REQUIRES = [
 
 # Installation operation
 setup(
-    name="omni_custom_gym",
+    name=package_name,
     author="AndPatr",
-    version="1.0.0",
+    version="0.0.1-py" + python_version,
     description="",
-    keywords=["omni_custom_gym", "stepping", "rl"],
+    keywords=["gym", "stepping", "rl"],
     include_package_data=True,
     python_requires=">=3.7, <3.8",
     install_requires=INSTALL_REQUIRES,

@@ -2,7 +2,7 @@
 
 Some custom implementations of Tasks and Gyms for [Omniverse Isaac Sim](https://docs.omniverse.nvidia.com/app_isaacsim/app_isaacsim.html), photo-realistic GPU accelerated simulatorfrom NVIDIA, based on [Gymnasium](https://gymnasium.farama.org/), a maintained fork of OpenAI’s [Gym ](https://github.com/openai/gym) library (no longer maintained). 
 The aim of the package is to provide a standardized interfaces to loading floating-base robots and their configuration from URDF and SRDF and cloning them in Isaac Sim for RL applications. 
-If you're also interested in bridging CPU-based controllers with parallel simulations (potentially running on GPU) please have a look at [ControlClusterUtils](https://github.com/AndPatr/ControlClusterUtils).
+If you're also interested in bridging CPU-based controllers with parallel simulations (potentially running on GPU) please have a look at [ControlClusterUtils](https://github.com/AndrePatri/ControlClusterUtils).
 
 The preferred way of using OmniCustomGym package is to employ the provided [mamba](https://mamba.readthedocs.io/en/latest/user_guide/mamba.html) environment. 
 
@@ -21,11 +21,9 @@ Installation instructions:
 
 - To be able to run any script with dependencies on Omniverse packages, it's necessary to first source ```${HOME}/.local/share/ov/pkg/isaac_sim-*/setup_conda_env.sh```.
 
-- You can now test a simple simulation with Kyon by running ```python kyonrlstepping/tests/spawn_kyon_isaac_sim.py``` or ```python kyonrlstepping/tests/test_kyon_cloning.py```.
-
 External dependencies to be installed separately: 
 
 - [Omniverse Isaac Sim](https://docs.omniverse.nvidia.com/app_isaacsim/app_isaacsim.html), photo-realistic GPU accelerated simulatorfrom NVIDIA.
 
 Other dependencies included in the environment thorough Anaconda which can optionally be installed directly from source for development purposes: 
-- [ControlClusterUtils](https://github.com/AndPatr/ControlClusterUtils): utilities to create a CPU-based controllers cluster to be interfaced with GPU-based simulators 
+- [ControlClusterUtils](https://github.com/AndrePatri/ControlClusterUtils): utilities to create CPU-based control cluster to be interfaced with GPU-based simulators using shared memory for minimum latency.

@@ -1,7 +1,7 @@
 package:
   name: omni_custom_gym
-  version: 0.0.1
-
+  version: '1.0_py{{ py }}'
+  
 source:
   path: .
 
@@ -15,6 +15,6 @@ build:
     - python3 -m pip install -v .
 
 about:
-  home: https://github.com/AndPatr/ControlClusterUtils
+  home: https://github.com/AndrePatri/OmniCustomGym
   license: MIT
-  summary: Some custom implementations of Tasks and Gyms for for Omniverse Isaac Sim based on Gymnasium. Easy URDF and SRDF import/cloning and simulation configuration exploiting Omniverse API 
+  summary: Some custom implementations of Tasks and Gyms for Omniverse Isaac Sim based on Gymnasium. Easy URDF and SRDF import/cloning and simulation configuration exploiting Omniverse API 
