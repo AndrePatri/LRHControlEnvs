@@ -126,13 +126,16 @@ class CustomTask(BaseTask):
 
         cmds = self._xrdf_cmds()
         if cmds is None:
+            
+            xacro_cmd = ["xacro"] + [xacro_path] + ["-o"] + [self._srdf_path]
 
-            cmds = []
+        else:
+
+            xacro_cmd = ["xacro"] + [xacro_path] + cmds + ["-o"] + [self._srdf_path]
 
         import subprocess
         try:
             
-            xacro_cmd = ["xacro"] + [xacro_path] + cmds + ["-o"] + [self._srdf_path]
             xacro_gen = subprocess.check_call(xacro_cmd)
 
         except:
@@ -154,13 +157,16 @@ class CustomTask(BaseTask):
         
         cmds = self._xrdf_cmds()
         if cmds is None:
+            
+            xacro_cmd = ["xacro"] + [xacro_path] + ["-o"] + [self._urdf_path]
 
-            cmds = []
+        else:
+
+            xacro_cmd = ["xacro"] + [xacro_path] + cmds + ["-o"] + [self._urdf_path]
 
         import subprocess
         try:
 
-            xacro_cmd = ["xacro"] + [xacro_path] + cmds + ["-o"] + [self._urdf_path]
             xacro_gen = subprocess.check_call(xacro_cmd)
             
             # we also generate an updated SRDF (used by controllers)
@@ -348,8 +354,8 @@ class CustomTask(BaseTask):
                             )
         
     def init_imp_control(self, 
-                default_jnt_pgain = 3000.0, 
-                default_jnt_vgain = 30.0, 
+                default_jnt_pgain = 300.0, 
+                default_jnt_vgain = 20.0, 
                 default_wheel_pgain = 0.0, 
                 default_wheel_vgain = 10.0):
 
@@ -365,21 +371,22 @@ class CustomTask(BaseTask):
             # velocity controlled
             wheels_indxs = self._jnt_imp_controller.get_jnt_idxs_matching(name_pattern="wheel")
 
-            wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                        default_wheel_pgain, 
-                                        device = self.torch_device, 
-                                        dtype=self.torch_dtype)
-            
-            wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                        default_wheel_vgain, 
-                                        device = self.torch_device, 
-                                        dtype=self.torch_dtype)
+            if wheels_indxs.numel() != 0:
 
-            self._jnt_imp_controller.set_gains(pos_gains = wheels_pos_gains,
-                            vel_gains = wheels_vel_gains,
-                            jnt_indxs=wheels_indxs)
+                wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                            default_wheel_pgain, 
+                                            device = self.torch_device, 
+                                            dtype=self.torch_dtype)
+                
+                wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                            default_wheel_vgain, 
+                                            device = self.torch_device, 
+                                            dtype=self.torch_dtype)
+
+                self._jnt_imp_controller.set_gains(pos_gains = wheels_pos_gains,
+                                vel_gains = wheels_vel_gains,
+                                jnt_indxs=wheels_indxs)
                             
-
             if self._homer is not None:
 
                 self._jnt_imp_controller.set_refs(pos_ref=self._homer.get_homing())
