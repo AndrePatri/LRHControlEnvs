@@ -4,6 +4,8 @@ import torch
 
 import xml.etree.ElementTree as ET
 
+from omni_custom_gym.utils.defs import Journal
+
 class OmniRobotHomer:
 
     def __init__(self, 
@@ -15,10 +17,7 @@ class OmniRobotHomer:
 
         self.torch_dtype = dtype 
         
-        self._info = "info"
-        self._status = "status"
-        self._warning = "warning" 
-        self._exception = "exception"
+        self.journal = Journal()
 
         if not articulation.initialized:
 
@@ -40,7 +39,7 @@ class OmniRobotHomer:
 
         if (backend != "torch"):
 
-            print(f"[{self.__class__.__name__}]"  + f"[{self.info}]" + ": forcing torch backend. Other backends are not yet supported.")
+            print(f"[{self.__class__.__name__}]"  + f"[{self.journal.info}]" + ": forcing torch backend. Other backends are not yet supported.")
         
         self._backend = "torch"
 
@@ -73,7 +72,7 @@ class OmniRobotHomer:
 
         except ET.ParseError as e:
         
-            print(f"[{self.__class__.__name__}]" + f"[{self._exception}]" + ": could not read SRDF properly!!")
+            print(f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" + ": could not read SRDF properly!!")
 
         # Find all the 'joint' elements within 'group_state' with the name attribute and their values
         joints = self._srdf_root.findall(".//group_state[@name='home']/joint")
@@ -99,7 +98,7 @@ class OmniRobotHomer:
                                                                 dtype=self.torch_dtype).flatten()
             else:
 
-                print(f"[{self.__class__.__name__}]" + f"[{self._warning}]" + f"[{self._assign2homing.__name__}]" \
+                print(f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" + f"[{self._assign2homing.__name__}]" \
                       + ": joint " + f"{joint}" + " is not present in the articulation. It will be ignored.")
                 
     def get_homing(self):

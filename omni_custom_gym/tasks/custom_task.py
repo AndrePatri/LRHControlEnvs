@@ -10,27 +10,23 @@ import gymnasium as gym
 from gym import spaces
 import numpy as np
 import torch
-import math
 
 from omni.isaac.urdf import _urdf
 from omni.isaac.core.utils.prims import move_prim
 from omni.isaac.cloner import GridCloner
 import omni.isaac.core.utils.prims as prim_utils
-from omni.isaac.urdf._urdf import UrdfJointTargetType
-
-from omni.isaac.core.utils.types import ArticulationActions
 
 from omni.isaac.core.scenes.scene import Scene
 
 from omni_custom_gym.utils.jnt_imp_cntrl import OmniJntImpCntrl
 from omni_custom_gym.utils.homing import OmniRobotHomer
+from omni_custom_gym.utils.defs import Journal
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import List
 
-import time 
-
 class CustomTask(BaseTask):
+
     def __init__(self, 
                 name: str,
                 robot_name = "MyRobot", 
@@ -44,10 +40,7 @@ class CustomTask(BaseTask):
 
         self.torch_dtype = dtype
         
-        self.info = "info"
-        self.status = "status"
-        self.warning = "warning"
-        self.exception = "exception"
+        self.journal = Journal()
         
         self._robot_name = robot_name # will be used to search for URDF and SRDF packages
 
@@ -69,7 +62,7 @@ class CustomTask(BaseTask):
         # task-specific parameters
         if len(cloning_offset) != 3:
             cloning_offset = np.array([0.0, 0.0, 0.0])
-            print(f"[{self.__class__.__name__}]" + f"[{self.warning}]" + ":  the provided cloning_offset is not of the correct shape. A null offset will be used instead.")
+            print(f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" + ":  the provided cloning_offset is not of the correct shape. A null offset will be used instead.")
 
         self._cloning_offset = cloning_offset
         
@@ -145,7 +138,7 @@ class CustomTask(BaseTask):
         except:
 
             raise Exception(f"[{self.__class__.__name__}]" 
-                            + f"[{self.exception}]" + 
+                            + f"[{self.journal.exception}]" + 
                             ": failed to generate " + self._robot_name + "\'S SRDF!!!")
         
     def _generate_urdf(self):
@@ -175,25 +168,25 @@ class CustomTask(BaseTask):
         except:
 
             raise Exception(f"[{self.__class__.__name__}]" + 
-                            f"[{self.exception}]" + 
+                            f"[{self.journal.exception}]" + 
                             ": failed to generate " + self._robot_name+ "\'s URDF!!!")
 
     def _generate_description(self):
         
         self._descr_dump_path = "/tmp/" + f"{self.__class__.__name__}"
-        print(f"[{self.__class__.__name__}]" + f"[{self.status}]" + ": generating URDF...")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": generating URDF...")
         self._generate_urdf()
-        print(f"[{self.__class__.__name__}]" + f"[{self.status}]" + ": done")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.status}]" + ": generating SRDF...")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": generating SRDF...")
         # we also generate SRDF files, which are useful for control
         self._generate_srdf()
-        print(f"[{self.__class__.__name__}]" + f"[{self.status}]" + ": done")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
 
     def _import_urdf(self, 
                     import_config: omni.isaac.urdf._urdf.ImportConfig = _urdf.ImportConfig()):
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.status}]" + ": importing robot URDF")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": importing robot URDF")
 
         self._urdf_import_config = import_config
         # we overwrite some settings which are bound to be fixed
@@ -217,7 +210,7 @@ class CustomTask(BaseTask):
         move_prim(robot_prim_path_default, self._robot_base_prim_path)# we move the prim
         # from the default one of the URDF importer to the prescribed one
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.status}]" + ": done")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
 
         return success
     
@@ -281,7 +274,7 @@ class CustomTask(BaseTask):
             
         else:
 
-            raise Exception(f"[{self.__class__.__name__}]" + f"[{self.exception}]" + \
+            raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
                         "Before calling _set_robot_default_jnt_config(), you need to reset the World" + \
                         " at least once and call _world_was_initialized()")
 
@@ -321,7 +314,7 @@ class CustomTask(BaseTask):
 
         else:
 
-            raise Exception(f"[{self.__class__.__name__}]" + f"[{self.exception}]" + \
+            raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
                             "Before calling _print_envs_info(), you need to reset the World at least once!")
 
     def fill_robot_info_from_world(self):
@@ -335,7 +328,7 @@ class CustomTask(BaseTask):
         
         else:
 
-            raise Exception(f"[{self.__class__.__name__}]" + f"[{self.exception}]" + \
+            raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
                         "Before calling _get_robot_info_from_world(), you need to reset the World at least once!")
 
     def init_homing_manager(self):
@@ -349,7 +342,7 @@ class CustomTask(BaseTask):
             
         else:
 
-            raise Exception(f"[{self.__class__.__name__}]" + f"[{self.exception}]" + ": you should reset the World at least once and call the " + \
+            raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + ": you should reset the World at least once and call the " + \
                             "world_was_initialized() method before initializing the " + \
                             "homing manager."
                             )
@@ -393,11 +386,11 @@ class CustomTask(BaseTask):
             
             else:
                 
-                print(f"[{self.__class__.__name__}]" + f"[{self.warning}]" +  f"[{self.init_imp_control.__name__}]" +\
+                print(f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" +  f"[{self.init_imp_control.__name__}]" +\
                     ": cannot set imp. controller reference to homing. Did you call the \"init_homing_manager\" method ?")
         else:
 
-            raise Exception(f"[{self.__class__.__name__}]" + f"[{self.exception}]" + ": you should reset the World at least once and call the " + \
+            raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + ": you should reset the World at least once and call the " + \
                             "world_was_initialized() method before initializing the " + \
                             "joint impedance controller."
                             )
@@ -413,16 +406,16 @@ class CustomTask(BaseTask):
         for i in range(0, self.num_envs):
             pos_offsets[i, :] = self._cloning_offset
         
-        print(f"[{self.__class__.__name__}]" + f"[{self.status}]" + ": cloning environments")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": cloning environments")
         envs_positions = self._cloner.clone(
             source_prim_path=self._template_env_ns,
             prim_paths=self._envs_prim_paths,
             replicate_physics=self._replicate_physics,
             position_offsets = pos_offsets
         ) # robot is now at the default env prim --> we can clone the environment
-        print(f"[{self.__class__.__name__}]" + f"[{self.status}]" + ": done")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.status}]" + ": finishing scene setup...")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": finishing scene setup...")
         self._robots_art_view = ArticulationView(self._env_ns + "/env*"+ "/" + self._robot_prim_name, 
                                 reset_xform_properties=False)
 
@@ -439,7 +432,7 @@ class CustomTask(BaseTask):
         
         # set default camera viewport position and target
         self.set_initial_camera_params()
-        print(f"[{self.__class__.__name__}]" + f"[{self.status}]" + ": done")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
 
     def set_initial_camera_params(self, 
                                 camera_position=[10, 10, 3], 

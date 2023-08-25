@@ -15,6 +15,7 @@ import torch
 from abc import ABC, abstractmethod
 from typing import Union, Tuple, Dict
 import numpy as np
+from omni_custom_gym.utils.defs import Journal
 
 class RobotVecEnv(gym.Env):
     """ This class provides a base interface for connecting RL policies with task implementations.
@@ -39,16 +40,13 @@ class RobotVecEnv(gym.Env):
             enable_viewport (bool): Whether to enable rendering in headless mode.
         """
 
-        self.status = "status"
-        self.info = "info"
-        self.warning = "warning"
-        self.exception = "exception"
+        self.journal = Journal()
 
         experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.kyonrlstepping.kit'
         # experience = ""
         if headless:
 
-            print(f"[{self.__class__.__name__}]" + f"[{self.info}]" + ": will run in headless mode")
+            print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": will run in headless mode")
             
             if enable_livestream:
                 experience = ""
@@ -63,7 +61,7 @@ class RobotVecEnv(gym.Env):
                                             "physics_gpu": sim_device}, 
                                             experience=experience)
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.info}]" + ": using IsaacSim experience file @ " + experience)
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using IsaacSim experience file @ " + experience)
 
         carb.settings.get_settings().set("/persistent/omnihydra/useSceneGraphInstancing", True)
         self._render = not headless or enable_livestream or enable_viewport
@@ -71,7 +69,7 @@ class RobotVecEnv(gym.Env):
 
         if enable_livestream:
 
-            print(f"[{self.__class__.__name__}]" + f"[{self.info}]" + ": livestream enabled")
+            print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": livestream enabled")
 
             from omni.isaac.core.utils.extensions import enable_extension
 
@@ -107,12 +105,12 @@ class RobotVecEnv(gym.Env):
         if sim_params and "use_gpu_pipeline" in sim_params:
             if sim_params["use_gpu_pipeline"]:
                 device = torch.device("cuda") # 
-        print(f"[{self.__class__.__name__}]" + f"[{self.info}]" + ": using device: " + str(device))
-        print(f"[{self.__class__.__name__}]" + f"[{self.info}]" + ": using backend: " + backend)
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using device: " + str(device))
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using backend: " + backend)
 
         if (sim_params is None):
             
-            print(f"[{self.__class__.__name__}]" + f"[{self.info}]" + ": no sim params provided -> defaults will be used")
+            print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": no sim params provided -> defaults will be used")
             sim_params = {}
 
         # defaults for integration and rendering dt
@@ -120,14 +118,14 @@ class RobotVecEnv(gym.Env):
     
             sim_params["integration_dt"] = 1.0/60.0
 
-            print(f"[{self.__class__.__name__}]" + f"[{self.info}]" + ": using default integration_dt of " + 
+            print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using default integration_dt of " + 
                 sim_params["integration_dt"] + " s.")
             
         if not("rendering_dt" in sim_params):
 
             sim_params["rendering_dt"] = 1.0/60.0
 
-            print(f"[{self.__class__.__name__}]" + f"[{self.info}]" + ": using default rendering_dt of " + 
+            print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using default rendering_dt of " + 
                 sim_params["rendering_dt"] + " s.")
 
         self._world = World(
@@ -142,9 +140,9 @@ class RobotVecEnv(gym.Env):
 
         self._sim_params = sim_params
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.status}]" + ": creating task " + task.name + "\n")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": creating task " + task.name + "\n")
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.info}]" + "[world]:")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + "[world]:")
         print("use_gpu_pipeline: " + str(sim_params["use_gpu_pipeline"]))
         print("device: " + str(device))
         print("backend: " + str(backend))
@@ -204,7 +202,7 @@ class RobotVecEnv(gym.Env):
         self._gpu_temp_buffer_capacity = self._physics_context.get_gpu_temp_buffer_capacity()
         # self._gpu_max_num_partitions = physics_context.get_gpu_max_num_partitions() # BROKEN->method does not exist
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.info}]" + "[physics context]:")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + "[physics context]:")
         print("gpu_max_rigid_contact_count: " + str(self._gpu_max_rigid_contact_count))
         print("gpu_max_rigid_patch_count: " + str(self._gpu_max_rigid_patch_count))
         print("gpu_found_lost_pairs_capacity: " + str(self._gpu_found_lost_pairs_capacity))
@@ -241,7 +239,7 @@ class RobotVecEnv(gym.Env):
         if sim_params and "enable_viewport" in sim_params:
             self._render = sim_params["enable_viewport"]
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.info}]" + "[render]: " + str(self._render))
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + "[render]: " + str(self._render))
 
         if init_sim:
 
