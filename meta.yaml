@@ -1,6 +1,6 @@
 package:
   name: omni_custom_gym
-  version: '1.0_py{{ py }}'
+  version: '1.0.0_py{{ py }}'
   
 source:
   path: .
@@ -9,10 +9,6 @@ requirements:
   build:
     - python 3.7
     - setuptools
-
-build:
-  script:
-    - python3 -m pip install -v .
 
 about:
   home: https://github.com/AndrePatri/OmniCustomGym
