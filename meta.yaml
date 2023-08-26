@@ -1,16 +1,23 @@
 package:
-  name: omni_custom_gym
-  version: '1.0.0_py{{ py }}'
-  
+  name: omni_custom_gym 
+  version: 0.1.0  
+
 source:
-  path: .
+  path: ./dist     # Path to the directory containing your built distribution artifacts
 
 requirements:
   build:
-    - python 3.7
+    - python=3.7
     - setuptools
+  run:
+    - python=3.7
 
 about:
   home: https://github.com/AndrePatri/OmniCustomGym
   license: MIT
   summary: Some custom implementations of Tasks and Gyms for Omniverse Isaac Sim based on Gymnasium. Easy URDF and SRDF import/cloning and simulation configuration exploiting Omniverse API 
+
+extra:
+  recipe-maintainers:  
+    - AndrePatri
+
