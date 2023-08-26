@@ -33,7 +33,7 @@ INSTALL_REQUIRES = [
 setup(
     name=package_name,
     author="AndPatr",
-    version="1.0.0_py" + python_version,
+    version="0.0.1",
     description="",
     keywords=["gym", "omniverse", "RL"],
     include_package_data=True,
