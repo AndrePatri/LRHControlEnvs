@@ -42,7 +42,7 @@ class RobotVecEnv(gym.Env):
 
         self.journal = Journal()
 
-        experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.kyonrlstepping.kit'
+        experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnicustomgym.kit'
         # experience = ""
         if headless:
 
@@ -51,10 +51,10 @@ class RobotVecEnv(gym.Env):
             if enable_livestream:
                 experience = ""
             elif enable_viewport:
-                experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.kyonrlstepping.headless.render.kit'
+                experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnicustomgym.headless.render.kit'
                 # experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.gym.headless.render.kit'
             else:
-                experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.kyonrlstepping.headless.kit'
+                experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnicustomgym.headless.kit'
                 # experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.gym.headless.kit'
 
         self._simulation_app = SimulationApp({"headless": headless,
