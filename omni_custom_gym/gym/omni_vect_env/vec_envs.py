@@ -262,7 +262,8 @@ class RobotVecEnv(gym.Env):
 
             self.task._init_robots_state()
             
-            self.task.init_imp_control() # initialized the impedance controller
+            self.task.init_imp_control(default_jnt_pgain = self.task.default_jnt_stiffness, 
+                            default_jnt_vgain = self.task.default_jnt_damping) # initialized the impedance controller
 
             self.task.print_envs_info() # debug prints
 

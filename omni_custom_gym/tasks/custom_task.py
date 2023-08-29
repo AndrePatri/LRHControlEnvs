@@ -36,6 +36,8 @@ class CustomTask(BaseTask):
                 replicate_physics: bool = True,
                 offset=None, 
                 env_spacing = 5.0, 
+                default_jnt_stiffness = 300.0,
+                default_jnt_damping = 20.0,
                 dtype = torch.float64) -> None:
 
         self.torch_dtype = dtype
@@ -45,6 +47,10 @@ class CustomTask(BaseTask):
         self._robot_name = robot_name # will be used to search for URDF and SRDF packages
 
         self.torch_device = torch.device(device) # defaults to "cuda" ("cpu" also valid)
+        
+        self.default_jnt_stiffness = default_jnt_stiffness
+
+        self.default_jnt_damping = default_jnt_damping
         
         # cloning stuff
         self.num_envs = num_envs
