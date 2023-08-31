@@ -3,21 +3,22 @@ package:
   version: 0.1.0  
 
 source:
-  path: ./dist     # Path to the directory containing your built distribution artifacts
+  path: .     # Path to the directory containing your built distribution artifacts
 
 requirements:
   build:
     - python=3.7
-    - setuptools
+    - flit
   run:
     - python=3.7
 
 about:
-  home: https://github.com/AndrePatri/OmniCustomGym
+  home: https://github.com/AndrePatri/ControlClusterUtils
   license: MIT
   summary: Some custom implementations of Tasks and Gyms for Omniverse Isaac Sim based on Gymnasium. Easy URDF and SRDF import/cloning and simulation configuration exploiting Omniverse API 
 
 extra:
   recipe-maintainers:  
     - AndrePatri
+
 
