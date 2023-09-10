@@ -255,16 +255,15 @@ class RobotVecEnv(gym.Env):
 
             self.task.init_homing_manager() 
 
-            self.task.set_robot_default_jnt_config()
-            # self.task.set_robot_root_default_config()
-
-            # self.task.set_robot_imp_gains()
-
             self.task._init_robots_state()
+
+            self.task.set_robot_default_jnt_config()
+            self.task.set_robot_root_default_config()
             
             self.task.init_imp_control(default_jnt_pgain = self.task.default_jnt_stiffness, 
                             default_jnt_vgain = self.task.default_jnt_damping) # initialized the impedance controller
 
+            # self.task.init_contact_sensors(self._world)
             self.task.print_envs_info() # debug prints
 
     def render(self, mode="human") -> None:

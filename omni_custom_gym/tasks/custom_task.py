@@ -1,5 +1,6 @@
 from omni.isaac.core.tasks.base_task import BaseTask
 from omni.isaac.core.articulations import ArticulationView
+from omni.isaac.core.prims import GeometryPrimView
 from omni.isaac.core.utils.viewports import set_camera_view
 
 from omni.isaac.core.utils.rotations import euler_angles_to_quat 
@@ -15,6 +16,8 @@ from omni.isaac.urdf import _urdf
 from omni.isaac.core.utils.prims import move_prim
 from omni.isaac.cloner import GridCloner
 import omni.isaac.core.utils.prims as prim_utils
+
+from omni.isaac.sensor import ContactSensor
 
 from omni.isaac.core.scenes.scene import Scene
 
@@ -101,6 +104,8 @@ class CustomTask(BaseTask):
 
         self._ground_plane_prim_path = "/World/ground_plane"
 
+        self.contact_sensors = []
+
         # trigger __init__ of parent class
         BaseTask.__init__(self,
                         name=name, 
@@ -118,7 +123,7 @@ class CustomTask(BaseTask):
                    vals: List[bool]) -> List[str]:
 
         pass
-    
+
     def _generate_srdf(self):
         
         # we generate the URDF where the Kyon description package is located
@@ -250,6 +255,16 @@ class CustomTask(BaseTask):
         # self.velocities = self._robots_art_view.get_velocities(indices = None, 
         #                                 clone = True) # [n_envs x 6]; 0:3 lin vel; 3:6 ang vel 
 
+        self.root_p_default = torch.clone(pose[0])
+
+        self.root_q_default = torch.clone(pose[1])
+
+    def synch_default_root_states(self):
+
+        self.root_q_default[:, :] = self.root_q
+
+        self.root_p_default[:, :] = self.root_p
+
     def _get_robots_state(self):
         
         pose = self._robots_art_view.get_world_poses( 
@@ -280,9 +295,17 @@ class CustomTask(BaseTask):
 
     def set_robot_default_jnt_config(self):
         
-        if (self._world_initialized):
+        # we use the homing of the robot
 
-            self._robots_art_view.set_joints_default_state(positions= self._homer.get_homing())
+        if (self._world_initialized):
+            
+            homing = self._homer.get_homing()
+
+            self._robots_art_view.set_joints_default_state(positions= homing, 
+                                                velocities = torch.zeros((homing.shape[0], homing.shape[1]), \
+                                                                    dtype=self.torch_dtype, device=self.torch_device), 
+                                                efforts = torch.zeros((homing.shape[0], homing.shape[1]), \
+                                                                    dtype=self.torch_dtype, device=self.torch_device))
             
         else:
 
@@ -292,7 +315,18 @@ class CustomTask(BaseTask):
 
     def set_robot_root_default_config(self):
         
-        # To be implemented
+        if (self._world_initialized):
+
+            self._robots_art_view.set_default_state(positions = self.root_p_default, 
+                                    orientations = self.root_q_default)
+            
+        else:
+
+            raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
+                        "Before calling set_robot_root_default_config(), you need to reset the World" + \
+                        " at least once and call _world_was_initialized()")
+        
+        
 
         return True
         
@@ -362,7 +396,7 @@ class CustomTask(BaseTask):
     def init_imp_control(self, 
                 default_jnt_pgain = 300.0, 
                 default_jnt_vgain = 20.0, 
-                default_wheel_pgain = 0.0, 
+                default_wheel_pgain = 0.0, # by default wheels are supposed to be controlled in velocity mode
                 default_wheel_vgain = 10.0):
 
         if self.world_was_initialized:
@@ -377,7 +411,7 @@ class CustomTask(BaseTask):
             # velocity controlled
             wheels_indxs = self._jnt_imp_controller.get_jnt_idxs_matching(name_pattern="wheel")
 
-            if wheels_indxs.numel() != 0:
+            if wheels_indxs.numel() != 0: # the robot has wheels
 
                 wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
                                             default_wheel_pgain, 
@@ -407,7 +441,28 @@ class CustomTask(BaseTask):
                             "world_was_initialized() method before initializing the " + \
                             "joint impedance controller."
                             )
-        
+    
+    def init_contact_sensors(self, 
+                    world: omni.isaac.core.world.world.World):
+          
+        prim_path = self._env_ns + f"/env_{0}" + "/" + self._robot_prim_name + "/wheel_1" + "/contact_sensor"
+        prim_utils.define_prim(prim_path)
+
+        for i in range(len(self._envs_prim_paths)):
+            
+            self.contact_sensors.append(
+                        world.scene.add(
+                            ContactSensor(
+                                prim_path=prim_path,
+                                name=f"{self._robot_prim_name}_{i}".format(i),
+                                min_threshold=0,
+                                max_threshold=10000000,
+                                radius=0.1
+                            )
+                        ))
+
+            self.contact_sensors[i].add_raw_contact_data_to_frame()
+
     def set_up_scene(self, 
                     scene: Scene) -> None:
 
@@ -433,6 +488,16 @@ class CustomTask(BaseTask):
                                 reset_xform_properties=False)
 
         self._robots_articulations = scene.add(self._robots_art_view)
+
+        self._robots_geom_view = GeometryPrimView(
+                            prim_paths_expr = self._env_ns + f"/env*" + "/" + self._robot_prim_name + "/wheel_1", 
+                            name=self._robot_name + "geom_views", 
+                            collisions = torch.tensor([False] * self.num_envs), 
+                            track_contact_forces = False, 
+                            prepare_contact_sensors = False) # geometry view (useful to enable contact reporting)
+        # self._robots_geom_view.apply_collision_apis()
+
+        # self._robots_geometries = scene.add(self._robots_geom_view)
 
         scene.add_default_ground_plane(z_position=0, 
                             name="ground_plane", 
@@ -461,8 +526,12 @@ class CustomTask(BaseTask):
         
         pass
 
-    def reset(self, env_ids=None):
+    def reset(self, 
+            env_ids=None):
         
+        self.set_robot_default_jnt_config()
+        # self.set_robot_root_default_config()
+
         self._get_robots_state() # updates robot states
 
         self._jnt_imp_controller.set_refs(pos_ref=self._homer.get_homing())
