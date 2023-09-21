@@ -446,7 +446,7 @@ class CustomTask(BaseTask):
                     world: omni.isaac.core.world.world.World):
           
         prim_path = self._env_ns + f"/env_{0}" + "/" + self._robot_prim_name + "/wheel_1" + "/contact_sensor"
-        prim_utils.define_prim(prim_path)
+        # prim_utils.define_prim(prim_path)
 
         for i in range(len(self._envs_prim_paths)):
             
@@ -454,12 +454,14 @@ class CustomTask(BaseTask):
                         world.scene.add(
                             ContactSensor(
                                 prim_path=prim_path,
-                                name=f"{self._robot_prim_name}_{i}".format(i),
+                                name=f"{self._robot_prim_name}_contact_sensor{i}".format(i),
                                 min_threshold=0,
                                 max_threshold=10000000,
-                                radius=0.1
+                                radius=0.1, 
+                                translation=np.zeros((1, 3))
                             )
-                        ))
+                        )
+                    )
 
             self.contact_sensors[i].add_raw_contact_data_to_frame()
 
@@ -489,13 +491,14 @@ class CustomTask(BaseTask):
 
         self._robots_articulations = scene.add(self._robots_art_view)
 
-        self._robots_geom_view = GeometryPrimView(
-                            prim_paths_expr = self._env_ns + f"/env*" + "/" + self._robot_prim_name + "/wheel_1", 
-                            name=self._robot_name + "geom_views", 
-                            collisions = torch.tensor([False] * self.num_envs), 
-                            track_contact_forces = False, 
-                            prepare_contact_sensors = False) # geometry view (useful to enable contact reporting)
-        # self._robots_geom_view.apply_collision_apis()
+        # self._robots_geom_view = GeometryPrimView(
+        #                     prim_paths_expr = self._env_ns + f"/env*" + "/" + self._robot_prim_name + "/wheel_1", 
+        #                     # name=self._robot_name + "geom_views", 
+        #                     # # collisions = torch.tensor([None] * self.num_envs), 
+        #                     # track_contact_forces = False, 
+        #                     prepare_contact_sensors = False
+        #                     ) # geometry view (useful to enable contact reporting)
+        # self._robots_geom_view.apply_collision_apis() # random data with GPU pipeline!!!
 
         # self._robots_geometries = scene.add(self._robots_geom_view)
 
