@@ -19,12 +19,14 @@ import omni.isaac.core.utils.prims as prim_utils
 
 from omni.isaac.sensor import ContactSensor
 
+from omni.isaac.core.utils.stage import get_current_stage
+
 from omni.isaac.core.scenes.scene import Scene
 
 from omni_custom_gym.utils.jnt_imp_cntrl import OmniJntImpCntrl
 from omni_custom_gym.utils.homing import OmniRobotHomer
 from omni_custom_gym.utils.defs import Journal
-
+from omni_custom_gym.utils.terrains import RlTerrains
 from abc import abstractmethod
 from typing import List
 
@@ -39,6 +41,7 @@ class CustomTask(BaseTask):
                 replicate_physics: bool = True,
                 offset=None, 
                 env_spacing = 5.0, 
+                use_flat_ground = True,
                 default_jnt_stiffness = 300.0,
                 default_jnt_damping = 20.0,
                 dtype = torch.float64) -> None:
@@ -55,6 +58,8 @@ class CustomTask(BaseTask):
 
         self.default_jnt_damping = default_jnt_damping
         
+        self.use_flat_ground = use_flat_ground
+
         # cloning stuff
         self.num_envs = num_envs
         self._env_ns = "/World/envs"
@@ -102,7 +107,7 @@ class CustomTask(BaseTask):
         self.robot_n_dofs = -1
         self.robot_dof_names = []
 
-        self._ground_plane_prim_path = "/World/ground_plane"
+        self._ground_plane_prim_path = "/World/terrain"
 
         self.contact_sensors = []
 
@@ -117,16 +122,42 @@ class CustomTask(BaseTask):
 
         self.xrdf_cmd_vals = [] # by default empty, needs to be overriden by
         # child class
-    
-    @abstractmethod
-    def _xrdf_cmds(self, 
-                   vals: List[bool]) -> List[str]:
 
+    @abstractmethod
+    def _xrdf_cmds(self) -> List[str]:
+
+        # this has to be implemented by the user depending on the arguments
+        # the xacro description of the robot takes. The output is a list 
+        # of xacro commands.
+        # Example implementation: 
+
+        # def _xrdf_cmds():
+
+        #   cmds = []
+        
+        #   xrdf_cmd_vals = [True, True, True, False, False, True]
+
+        #   legs = "true" if xrdf_cmd_vals[0] else "false"
+        #   big_wheel = "true" if xrdf_cmd_vals[1] else "false"
+        #   upper_body ="true" if xrdf_cmd_vals[2] else "false"
+        #   velodyne = "true" if xrdf_cmd_vals[3] else "false"
+        #   realsense = "true" if xrdf_cmd_vals[4] else "false"
+        #   floating_joint = "true" if xrdf_cmd_vals[5] else "false" # horizon needs a floating joint
+
+        #   cmds.append("legs:=" + legs)
+        #   cmds.append("big_wheel:=" + big_wheel)
+        #   cmds.append("upper_body:=" + upper_body)
+        #   cmds.append("velodyne:=" + velodyne)
+        #   cmds.append("realsense:=" + realsense)
+        #   cmds.append("floating_joint:=" + floating_joint)
+
+        #   return cmds
+    
         pass
 
     def _generate_srdf(self):
         
-        # we generate the URDF where the Kyon description package is located
+        # we generate the URDF where the description package is located
         import rospkg
         rospackage = rospkg.RosPack()
         descr_path = rospackage.get_path(self._robot_name + "_srdf")
@@ -157,7 +188,7 @@ class CustomTask(BaseTask):
         
     def _generate_urdf(self):
 
-        # we generate the URDF where the Kyon description package is located
+        # we generate the URDF where the description package is located
         import rospkg
         rospackage = rospkg.RosPack()
         descr_path = rospackage.get_path(self._robot_name + "_urdf")
@@ -502,13 +533,23 @@ class CustomTask(BaseTask):
 
         # self._robots_geometries = scene.add(self._robots_geom_view)
 
-        scene.add_default_ground_plane(z_position=0, 
-                            name="ground_plane", 
-                            prim_path= self._ground_plane_prim_path, 
-                            static_friction=0.5, 
-                            dynamic_friction=0.5, 
-                            restitution=0.8)
-        
+        if self.use_flat_ground:
+
+            scene.add_default_ground_plane(z_position=0, 
+                        name="terrain", 
+                        prim_path= self._ground_plane_prim_path, 
+                        static_friction=0.5, 
+                        dynamic_friction=0.5, 
+                        restitution=0.8)
+        else:
+            
+            self.terrains = RlTerrains(get_current_stage())
+
+            self.terrains.get_obstacles_terrain(terrain_size=40, 
+                                        num_obs=100, 
+                                        max_height=0.4, 
+                                        min_size=0.5,
+                                        max_size=5.0)
         # delete_prim(self._ground_plane_prim_path + "/SphereLight") # we remove the default spherical light
         
         # set default camera viewport position and target
