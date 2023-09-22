@@ -4,6 +4,8 @@ Some custom implementations of Tasks and Gyms for [Omniverse Isaac Sim](https://
 The aim of the package is to provide a standardized interfaces to loading floating-base robots and their configuration from URDF and SRDF and cloning them in Isaac Sim for RL applications. 
 If you're also interested in bridging CPU-based controllers with parallel simulations (potentially running on GPU) please have a look at [ControlClusterUtils](https://github.com/AndrePatri/ControlClusterUtils).
 
+For usage examples, please have a look [here](https://github.com/AndrePatri/AliengoExample/tree/main).
+
 The preferred way of using OmniCustomGym package is to employ the provided [mamba](https://mamba.readthedocs.io/en/latest/user_guide/mamba.html) environment. 
 
 Installation instructions:
