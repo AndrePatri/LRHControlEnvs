@@ -1,6 +1,6 @@
 # OmniCustomGym
 
-Some custom implementations of Tasks and Gyms for Robotics, based on[Omniverse Isaac Sim](https://docs.omniverse.nvidia.com/app_isaacsim/app_isaacsim.html), a photo-realistic GPU accelerated simulator from NVIDIA, and on [Gymnasium](https://gymnasium.farama.org/), a maintained fork of OpenAI’s [Gym ](https://github.com/openai/gym) library (which is no longer maintained). 
+Some custom implementations of Tasks and Gyms for Robotics, based on [Omniverse Isaac Sim](https://docs.omniverse.nvidia.com/app_isaacsim/app_isaacsim.html), a photo-realistic GPU accelerated simulator from NVIDIA, and on [Gymnasium](https://gymnasium.farama.org/), a maintained fork of OpenAI’s [Gym ](https://github.com/openai/gym) library (which is no longer maintained). 
 The aim of the package is to provide standardized interfaces for loading floating-base robots and their configuration from URDF and SRDF and cloning them in Isaac Sim for RL applications. 
 If you're also interested in bridging CPU-based controllers with parallel simulations (potentially running on GPU) please have a look at [ControlClusterUtils](https://github.com/AndrePatri/ControlClusterUtils).
 
