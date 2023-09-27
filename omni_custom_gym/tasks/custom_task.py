@@ -28,13 +28,13 @@ from omni_custom_gym.utils.homing import OmniRobotHomer
 from omni_custom_gym.utils.defs import Journal
 from omni_custom_gym.utils.terrains import RlTerrains
 from abc import abstractmethod
-from typing import List
+from typing import List, Dict
 
 class CustomTask(BaseTask):
 
     def __init__(self, 
                 name: str,
-                robot_name = "MyRobot", 
+                robot_names = List[str], 
                 num_envs = 1,
                 device = "cuda", 
                 cloning_offset: np.array = np.array([0.0, 0.0, 0.0]),
@@ -50,17 +50,41 @@ class CustomTask(BaseTask):
         
         self.journal = Journal()
         
-        self._robot_name = robot_name # will be used to search for URDF and SRDF packages
+        self._robot_names = robot_names # will be used to search for URDF and SRDF packages
+        self._urdf_paths = {}
+        self._srdf_paths = {}
+        self._robots_art_views = {}
+        self._robots_articulations = {}
+        self.robot_bodynames =  {}
+        self.robot_n_links =  {}
+        self.robot_n_dofs =  {}
+        self.robot_dof_names =  {}
+
+        self.root_p = {}
+        self.root_q = {}
+        self.root_v = {}
+        self.root_omega = {}
+        self.jnts_q = {} 
+        self.jnts_v = {}
+        self.root_p_default = {} 
+        self.root_q_default = {}
+        
+        self.root_abs_offsets = {}
+ 
+        self._jnt_imp_controllers = {}
+
+        self._homers = {} 
+        
+        self.contact_sensors = {}
 
         self.torch_device = torch.device(device) # defaults to "cuda" ("cpu" also valid)
         
         self.default_jnt_stiffness = default_jnt_stiffness
-
         self.default_jnt_damping = default_jnt_damping
         
         self.use_flat_ground = use_flat_ground
-
-        # cloning stuff
+        
+        # environment cloing stuff
         self.num_envs = num_envs
         self._env_ns = "/World/envs"
         self._env_spacing = env_spacing # [m]
@@ -72,8 +96,6 @@ class CustomTask(BaseTask):
         prim_utils.define_prim(self._template_env_ns)
         self._envs_prim_paths = self._cloner.generate_paths(self._env_ns + "/env", 
                                                 self.num_envs)
-
-        # task-specific parameters
         if len(cloning_offset) != 3:
             cloning_offset = np.array([0.0, 0.0, 0.0])
             print(f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" + ":  the provided cloning_offset is not of the correct shape. A null offset will be used instead.")
@@ -102,11 +124,6 @@ class CustomTask(BaseTask):
 
         self._world_initialized = False
 
-        self.robot_bodynames = []
-        self.robot_n_links = -1
-        self.robot_n_dofs = -1
-        self.robot_dof_names = []
-
         self._ground_plane_prim_path = "/World/terrain"
 
         self.contact_sensors = []
@@ -115,16 +132,12 @@ class CustomTask(BaseTask):
         BaseTask.__init__(self,
                         name=name, 
                         offset=offset)
-        
-        self._jnt_imp_controller = None 
-
-        self._homer = None 
 
         self.xrdf_cmd_vals = [] # by default empty, needs to be overriden by
         # child class
 
     @abstractmethod
-    def _xrdf_cmds(self) -> List[str]:
+    def _xrdf_cmds(self) -> Dict[List[str]]:
 
         # this has to be implemented by the user depending on the arguments
         # the xacro description of the robot takes. The output is a list 
@@ -133,8 +146,8 @@ class CustomTask(BaseTask):
 
         # def _xrdf_cmds():
 
-        #   cmds = []
-        
+        #   cmds = {}
+        #   cmds{self.robot_names[0]} = []
         #   xrdf_cmd_vals = [True, True, True, False, False, True]
 
         #   legs = "true" if xrdf_cmd_vals[0] else "false"
@@ -155,25 +168,26 @@ class CustomTask(BaseTask):
     
         pass
 
-    def _generate_srdf(self):
+    def _generate_srdf(self, 
+                robot_name: str):
         
         # we generate the URDF where the description package is located
         import rospkg
         rospackage = rospkg.RosPack()
-        descr_path = rospackage.get_path(self._robot_name + "_srdf")
+        descr_path = rospackage.get_path(robot_name + "_srdf")
         srdf_path = descr_path + "/srdf"
-        xacro_name = self._robot_name
+        xacro_name = robot_name
         xacro_path = srdf_path + "/" + xacro_name + ".srdf.xacro"
-        self._srdf_path = self._descr_dump_path + "/" + xacro_name + ".srdf"
+        self._srdf_paths[robot_name] = self._descr_dump_path + "/" + xacro_name + ".srdf"
 
-        cmds = self._xrdf_cmds()
+        cmds = self._xrdf_cmds()[robot_name]
         if cmds is None:
             
-            xacro_cmd = ["xacro"] + [xacro_path] + ["-o"] + [self._srdf_path]
+            xacro_cmd = ["xacro"] + [xacro_path] + ["-o"] + self._srdf_paths[robot_name]
 
         else:
 
-            xacro_cmd = ["xacro"] + [xacro_path] + cmds + ["-o"] + [self._srdf_path]
+            xacro_cmd = ["xacro"] + [xacro_path] + cmds + ["-o"] + self._srdf_paths[robot_name]
 
         import subprocess
         try:
@@ -184,27 +198,28 @@ class CustomTask(BaseTask):
 
             raise Exception(f"[{self.__class__.__name__}]" 
                             + f"[{self.journal.exception}]" + 
-                            ": failed to generate " + self._robot_name + "\'S SRDF!!!")
+                            ": failed to generate " + robot_name + "\'S SRDF!!!")
         
-    def _generate_urdf(self):
+    def _generate_urdf(self, 
+                robot_name: str):
 
         # we generate the URDF where the description package is located
         import rospkg
         rospackage = rospkg.RosPack()
-        descr_path = rospackage.get_path(self._robot_name + "_urdf")
+        descr_path = rospackage.get_path(robot_name + "_urdf")
         urdf_path = descr_path + "/urdf"
-        xacro_name = self._robot_name
+        xacro_name = robot_name
         xacro_path = urdf_path + "/" + xacro_name + ".urdf.xacro"
-        self._urdf_path = self._descr_dump_path + "/" + xacro_name + ".urdf"
+        self._urdf_paths[robot_name] = self._descr_dump_path + "/" + xacro_name + ".urdf"
         
-        cmds = self._xrdf_cmds()
+        cmds = self._xrdf_cmds()[robot_name]
         if cmds is None:
             
-            xacro_cmd = ["xacro"] + [xacro_path] + ["-o"] + [self._urdf_path]
+            xacro_cmd = ["xacro"] + [xacro_path] + ["-o"] + self._urdf_paths[robot_name]
 
         else:
 
-            xacro_cmd = ["xacro"] + [xacro_path] + cmds + ["-o"] + [self._urdf_path]
+            xacro_cmd = ["xacro"] + [xacro_path] + cmds + ["-o"] +self._urdf_paths[robot_name]
 
         import subprocess
         try:
@@ -217,46 +232,52 @@ class CustomTask(BaseTask):
 
             raise Exception(f"[{self.__class__.__name__}]" + 
                             f"[{self.journal.exception}]" + 
-                            ": failed to generate " + self._robot_name+ "\'s URDF!!!")
+                            ": failed to generate " + robot_name + "\'s URDF!!!")
 
-    def _generate_description(self):
+    def _generate_rob_descriptions(self, 
+                    robot_name: str):
         
         self._descr_dump_path = "/tmp/" + f"{self.__class__.__name__}"
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": generating URDF...")
-        self._generate_urdf()
+
+        self._generate_urdf(robot_name=robot_name)
+
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
 
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": generating SRDF...")
+
         # we also generate SRDF files, which are useful for control
-        self._generate_srdf()
+        self._generate_srdf(robot_name=robot_name)
+        
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
 
     def _import_urdf(self, 
-                    import_config: omni.isaac.urdf._urdf.ImportConfig = _urdf.ImportConfig()):
+                robot_name: str,
+                import_config: omni.isaac.urdf._urdf.ImportConfig = _urdf.ImportConfig()):
 
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": importing robot URDF")
 
-        self._urdf_import_config = import_config
         # we overwrite some settings which are bound to be fixed
-        self._urdf_import_config.merge_fixed_joints = True # makes sim more stable
+        import_config.merge_fixed_joints = True # makes sim more stable
         # in case of fixed joints with light objects
-        self._urdf_import_config.import_inertia_tensor = True
-        self._urdf_import_config.fix_base = False
-        self._urdf_import_config.self_collision = False
+        import_config.import_inertia_tensor = True
+        import_config.fix_base = False
+        import_config.self_collision = False
 
-        self._urdf_interface = _urdf.acquire_urdf_interface()
-
-        self._robot_prim_name = self._robot_name
+        _urdf.acquire_urdf_interface()
         
         # import URDF
         success, robot_prim_path_default = omni.kit.commands.execute(
             "URDFParseAndImportFile",
-            urdf_path=self._urdf_path,
+            urdf_path=self._urdf_paths[robot_name],
             import_config=import_config, 
         )
-        self._robot_base_prim_path = self._template_env_ns + "/" + self._robot_prim_name
-        move_prim(robot_prim_path_default, self._robot_base_prim_path)# we move the prim
-        # from the default one of the URDF importer to the prescribed one
+
+        robot_base_prim_path = self._template_env_ns + "/" + robot_name
+
+        # moving def prim
+        move_prim(robot_prim_path_default, # from
+                robot_base_prim_path) # to
 
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
 
@@ -264,92 +285,105 @@ class CustomTask(BaseTask):
     
     def _init_robots_state(self):
 
-        pose = self._robots_art_view.get_world_poses( 
-                                        clone = True) # tuple: (pos, quat)
-        
-        self.root_p = pose[0]  
+        for i in range(0, len(self._robot_names)):
 
-        self.root_q = pose[1] # root orientation
+            robot_name = self._robot_names[i]
 
-        self.root_v = self._robots_art_view.get_linear_velocities(
-                                        clone = True) # root lin. velocity
+            pose = self._robots_art_views[robot_name].get_world_poses( 
+                                clone = True) # tuple: (pos, quat)
         
-        self.root_omega = self._robots_art_view.get_angular_velocities(
-                                        clone = True) # root ang. velocity
-        
-        self.jnts_q = self._robots_art_view.get_joint_positions(
-                                        clone = True) # joint positions 
-        
-        self.jnts_v = self._robots_art_view.get_joint_velocities( 
-                                        clone = True) # joint velocities
-        
-        # self.velocities = self._robots_art_view.get_velocities(indices = None, 
-        #                                 clone = True) # [n_envs x 6]; 0:3 lin vel; 3:6 ang vel 
+            self.root_p[robot_name] = pose[0]  
 
-        self.root_p_default = torch.clone(pose[0])
+            self.root_q[robot_name] = pose[1] # root orientation
 
-        self.root_q_default = torch.clone(pose[1])
+            self.root_v[robot_name] = self._robots_art_view.get_linear_velocities(
+                                            clone = True) # root lin. velocity
+            
+            self.root_omega[robot_name] = self._robots_art_view.get_angular_velocities(
+                                            clone = True) # root ang. velocity
+            
+            self.jnts_q[robot_name] = self._robots_art_view.get_joint_positions(
+                                            clone = True) # joint positions 
+            
+            self.jnts_v[robot_name] = self._robots_art_view.get_joint_velocities( 
+                                            clone = True) # joint velocities
+            
+            self.root_p_default[robot_name] = torch.clone(pose[0])
+
+            self.root_q_default[robot_name] = torch.clone(pose[1])
 
     def synch_default_root_states(self):
 
-        self.root_q_default[:, :] = self.root_q
+        for i in range(0, len(self._robot_names)):
 
-        self.root_p_default[:, :] = self.root_p
+            robot_name = self._robot_names[i]
+
+            self.root_p_default[robot_name][:, :] = self.root_p
+
+            self.root_q_default[robot_name][:, :] = self.root_q
 
     def _get_robots_state(self):
         
-        pose = self._robots_art_view.get_world_poses( 
-                                        clone = True) # tuple: (pos, quat)
-        
-        self.root_p[:, :] = pose[0]  
+        for i in range(0, len(self._robot_names)):
 
-        self.root_q[:, :] = pose[1] # root orientation
+            robot_name = self._robot_names[i]
 
-        self.root_v[:, :] = self._robots_art_view.get_linear_velocities(
-                                        clone = True) # root lin. velocity
-        
-        self.root_omega[:, :] = self._robots_art_view.get_angular_velocities(
-                                        clone = True) # root ang. velocity
-        
-        self.jnts_q[:, :] = self._robots_art_view.get_joint_positions(
-                                        clone = True) # joint positions 
-        
-        self.jnts_v[:, :] = self._robots_art_view.get_joint_velocities( 
-                                        clone = True) # joint velocities
-        
-        # self.velocities = self._robots_art_view.get_velocities(indices = None, 
-        #                                 clone = True) # [n_envs x 6]; 0:3 lin vel; 3:6 ang vel 
+            pose = self._robots_art_views[robot_name].get_world_poses( 
+                                            clone = True) # tuple: (pos, quat)
+            
+            self.root_p[robot_name][:, :] = pose[0]  
 
+            self.root_q[robot_name][:, :] = pose[1] # root orientation
+
+            self.root_v[robot_name][:, :] = self._robots_art_view.get_linear_velocities(
+                                            clone = True) # root lin. velocity
+            
+            self.root_omega[robot_name][:, :] = self._robots_art_view.get_angular_velocities(
+                                            clone = True) # root ang. velocity
+            
+            self.jnts_q[robot_name][:, :] = self._robots_art_view.get_joint_positions(
+                                            clone = True) # joint positions 
+            
+            self.jnts_v[robot_name][:, :] = self._robots_art_view.get_joint_velocities( 
+                                            clone = True) # joint velocities
+            
     def world_was_initialized(self):
 
         self._world_initialized = True
 
-    def set_robot_default_jnt_config(self):
+    def set_robots_default_jnt_config(self):
         
-        # we use the homing of the robot
-
+        # we use the homing of the robots
         if (self._world_initialized):
-            
-            homing = self._homer.get_homing()
 
-            self._robots_art_view.set_joints_default_state(positions= homing, 
-                                                velocities = torch.zeros((homing.shape[0], homing.shape[1]), \
-                                                                    dtype=self.torch_dtype, device=self.torch_device), 
-                                                efforts = torch.zeros((homing.shape[0], homing.shape[1]), \
-                                                                    dtype=self.torch_dtype, device=self.torch_device))
+            for i in range(0, len(self._robot_names)):
+
+                robot_name = self._robot_names[i]
+
+                homing = self._homers[robot_name].get_homing()
+
+                self._robots_art_views[robot_name].set_joints_default_state(positions= homing, 
+                                velocities = torch.zeros((homing.shape[0], homing.shape[1]), \
+                                                    dtype=self.torch_dtype, device=self.torch_device), 
+                                efforts = torch.zeros((homing.shape[0], homing.shape[1]), \
+                                                    dtype=self.torch_dtype, device=self.torch_device))
             
         else:
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
-                        "Before calling _set_robot_default_jnt_config(), you need to reset the World" + \
+                        "Before calling _set_robots_default_jnt_config(), you need to reset the World" + \
                         " at least once and call _world_was_initialized()")
 
     def set_robot_root_default_config(self):
         
         if (self._world_initialized):
 
-            self._robots_art_view.set_default_state(positions = self.root_p_default, 
-                                    orientations = self.root_q_default)
+            for i in range(0, len(self._robot_names)):
+
+                robot_name = self._robot_names[i]
+
+                self._robots_art_views[robot_name].set_default_state(positions = self.root_p_default[robot_name], 
+                            orientations = self.root_q_default[robot_name])
             
         else:
 
@@ -374,20 +408,25 @@ class CustomTask(BaseTask):
     def print_envs_info(self):
         
         if (self._world_initialized):
-
+            
             print("TASK INFO:")
-            print("Envs bodies: " + str(self._robots_art_view.body_names))
-            print("n. prims: " + str(self._robots_art_view.count))
-            print("prims names: " + str(self._robots_art_view.prim_paths))
-            print("n. bodies: " + str(self._robots_art_view.num_bodies))
-            print("n. dofs: " + str(self._robots_art_view.num_dof))
-            print("dof names: " + str(self._robots_art_view.dof_names))
-            # print("dof limits: " + str(self._robots_art_view.get_dof_limits()))
-            # print("effort modes: " + str(self._robots_art_view.get_effort_modes()))
-            # print("dof gains: " + str(self._robots_art_view.get_gains()))
-            # print("dof max efforts: " + str(self._robots_art_view.get_max_efforts()))
-            # print("dof gains: " + str(self._robots_art_view.get_gains()))
-            # print("physics handle valid: " + str(self._robots_art_view.is_physics_handle_valid()))
+
+            for i in range(0, len(self._robot_names)):
+
+                robot_name = self._robot_names[i]
+                print(f"[{robot_name}]")
+                print("bodies: " + str(self._robots_art_view.body_names))
+                print("n. prims: " + str(self._robots_art_view.count))
+                print("prims names: " + str(self._robots_art_view.prim_paths))
+                print("n. bodies: " + str(self._robots_art_view.num_bodies))
+                print("n. dofs: " + str(self._robots_art_view.num_dof))
+                print("dof names: " + str(self._robots_art_view.dof_names))
+                # print("dof limits: " + str(self._robots_art_view.get_dof_limits()))
+                # print("effort modes: " + str(self._robots_art_view.get_effort_modes()))
+                # print("dof gains: " + str(self._robots_art_view.get_gains()))
+                # print("dof max efforts: " + str(self._robots_art_view.get_max_efforts()))
+                # print("dof gains: " + str(self._robots_art_view.get_gains()))
+                # print("physics handle valid: " + str(self._robots_art_view.is_physics_handle_valid()))
 
         else:
 
@@ -397,26 +436,34 @@ class CustomTask(BaseTask):
     def fill_robot_info_from_world(self):
 
         if (self._world_initialized):
+            
+            for i in range(0, len(self._robot_names)):
 
-            self.robot_bodynames = self._robots_art_view.body_names
-            self.robot_n_links = self._robots_art_view.num_bodies
-            self.robot_n_dofs = self._robots_art_view.num_dof
-            self.robot_dof_names = self._robots_art_view.dof_names
+                robot_name = self._robot_names[i]
+
+                self.robot_bodynames[robot_name] = self._robots_art_views[robot_name].body_names
+                self.robot_n_links[robot_name] = self._robots_art_views[robot_name].num_bodies
+                self.robot_n_dofs[robot_name] = self._robots_art_views[robot_name].num_dof
+                self.robot_dof_names[robot_name] = self._robots_art_views[robot_name].dof_names
         
         else:
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
                         "Before calling _get_robot_info_from_world(), you need to reset the World at least once!")
 
-    def init_homing_manager(self):
-
+    def init_homing_managers(self):
+        
         if self.world_was_initialized:
 
-            self._homer = OmniRobotHomer(articulation=self._robots_art_view, 
-                                srdf_path=self._srdf_path, 
-                                device=self.torch_device, 
-                                dtype=self.torch_dtype)
-            
+            for i in range(0, len(self._robot_names)):
+
+                robot_name = self._robot_names[i]
+
+                self._homers[robot_name] = OmniRobotHomer(articulation=self._robots_art_views[robot_name], 
+                                    srdf_path=self._srdf_paths[robot_name], 
+                                    device=self.torch_device, 
+                                    dtype=self.torch_dtype)
+                    
         else:
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + ": you should reset the World at least once and call the " + \
@@ -431,41 +478,48 @@ class CustomTask(BaseTask):
                 default_wheel_vgain = 10.0):
 
         if self.world_was_initialized:
+            
+            for i in range(0, len(self._robot_names)):
 
-            self._jnt_imp_controller = OmniJntImpCntrl(articulation=self._robots_art_view,
+                robot_name = self._robot_names[i]
+                
+                self._jnt_imp_controllers[robot_name] = OmniJntImpCntrl(articulation=self._robots_art_views[robot_name],
                                                 default_pgain = default_jnt_pgain, 
                                                 default_vgain = default_jnt_vgain,
                                                 device= self.torch_device, 
                                                 dtype=self.torch_dtype)
 
-            # we override internal default gains for the wheels, which are usually
-            # velocity controlled
-            wheels_indxs = self._jnt_imp_controller.get_jnt_idxs_matching(name_pattern="wheel")
+                # we override internal default gains for the wheels, which are usually
+                # velocity controlled
+                wheels_indxs = self._jnt_imp_controllers[robot_name].get_jnt_idxs_matching(name_pattern="wheel")
 
-            if wheels_indxs.numel() != 0: # the robot has wheels
+                if wheels_indxs.numel() != 0: # the robot has wheels
 
-                wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                            default_wheel_pgain, 
-                                            device = self.torch_device, 
-                                            dtype=self.torch_dtype)
-                
-                wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                            default_wheel_vgain, 
-                                            device = self.torch_device, 
-                                            dtype=self.torch_dtype)
+                    wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                                default_wheel_pgain, 
+                                                device = self.torch_device, 
+                                                dtype=self.torch_dtype)
+                    
+                    wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                                default_wheel_vgain, 
+                                                device = self.torch_device, 
+                                                dtype=self.torch_dtype)
 
-                self._jnt_imp_controller.set_gains(pos_gains = wheels_pos_gains,
-                                vel_gains = wheels_vel_gains,
-                                jnt_indxs=wheels_indxs)
+                    self._jnt_imp_controllers[robot_name].set_gains(pos_gains = wheels_pos_gains,
+                                                vel_gains = wheels_vel_gains,
+                                                jnt_indxs=wheels_indxs)
                             
-            if self._homer is not None:
+                try:
 
-                self._jnt_imp_controller.set_refs(pos_ref=self._homer.get_homing())
-            
-            else:
+                    self._jnt_imp_controllers[robot_name].set_refs(pos_ref=self._homers[robot_name].get_homing())
                 
-                print(f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" +  f"[{self.init_imp_control.__name__}]" +\
-                    ": cannot set imp. controller reference to homing. Did you call the \"init_homing_manager\" method ?")
+                except Exception:
+                    
+                    print(f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" +  f"[{self.init_imp_control.__name__}]" +\
+                    ": cannot set imp. controller reference to homing. Did you call the \"init_homing_managers\" method ?")
+
+                    pass                
+                
         else:
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + ": you should reset the World at least once and call the " + \
@@ -476,62 +530,82 @@ class CustomTask(BaseTask):
     def init_contact_sensors(self, 
                     world: omni.isaac.core.world.world.World):
           
-        prim_path = self._env_ns + f"/env_{0}" + "/" + self._robot_prim_name + "/wheel_1" + "/contact_sensor"
-        # prim_utils.define_prim(prim_path)
-
+        
         for i in range(len(self._envs_prim_paths)):
-            
-            self.contact_sensors.append(
-                        world.scene.add(
-                            ContactSensor(
-                                prim_path=prim_path,
-                                name=f"{self._robot_prim_name}_contact_sensor{i}".format(i),
-                                min_threshold=0,
-                                max_threshold=10000000,
-                                radius=0.1, 
-                                translation=np.zeros((1, 3))
+                        
+            for j in range(0, len(self._robot_names)):
+                
+                robot_name = self._robot_names[j]
+                
+                prim_path = self._env_ns + f"/env_{0}" + "/" + robot_name + "/wheel_1" + "/contact_sensor"
+                # prim_utils.define_prim(prim_path)
+
+                self.contact_sensors[robot_name] = []
+
+                self.contact_sensors[robot_name].append(
+                            world.scene.add(
+                                ContactSensor(
+                                    prim_path=prim_path,
+                                    name=f"{robot_name}_contact_sensor{i}".format(i),
+                                    min_threshold=0,
+                                    max_threshold=10000000,
+                                    radius=0.1, 
+                                    translation=np.zeros((1, 3))
+                                )
                             )
                         )
-                    )
 
-            self.contact_sensors[i].add_raw_contact_data_to_frame()
+                self.contact_sensors[robot_name][i].add_raw_contact_data_to_frame()
 
     def set_up_scene(self, 
                     scene: Scene) -> None:
 
-        self._generate_description()
+        for i in range(len(self._robot_names)):
+            
+            robot_name = self._robot_names[i]
 
-        self._import_urdf()
+            self._generate_rob_descriptions(robot_name)
+
+            self._import_urdf(robot_name)
         
         pos_offsets = np.zeros((self.num_envs, 3))
         for i in range(0, self.num_envs):
             pos_offsets[i, :] = self._cloning_offset
         
-        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": cloning environments")
-        envs_positions = self._cloner.clone(
+        print(f"[{self.__class__.__name__}]" + \
+            f"[{self.journal.status}]" + \
+            ": cloning environments...")
+        
+        self._cloner.clone(
             source_prim_path=self._template_env_ns,
             prim_paths=self._envs_prim_paths,
             replicate_physics=self._replicate_physics,
             position_offsets = pos_offsets
-        ) # robot is now at the default env prim --> we can clone the environment
+        ) # we can clone the environment in which all the robos are
+
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
 
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": finishing scene setup...")
-        self._robots_art_view = ArticulationView(self._env_ns + "/env*"+ "/" + self._robot_prim_name, 
-                                reset_xform_properties=False)
+        
+        for i in range(len(self._robot_names)):
+            
+            robot_name = self._robot_names[i]
 
-        self._robots_articulations = scene.add(self._robots_art_view)
+            self._robots_art_views[robot_name] = ArticulationView(self._env_ns + "/env*"+ "/" + robot_name, 
+                        reset_xform_properties=False)
 
-        # self._robots_geom_view = GeometryPrimView(
-        #                     prim_paths_expr = self._env_ns + f"/env*" + "/" + self._robot_prim_name + "/wheel_1", 
-        #                     # name=self._robot_name + "geom_views", 
-        #                     # # collisions = torch.tensor([None] * self.num_envs), 
-        #                     # track_contact_forces = False, 
-        #                     prepare_contact_sensors = False
-        #                     ) # geometry view (useful to enable contact reporting)
-        # self._robots_geom_view.apply_collision_apis() # random data with GPU pipeline!!!
+            self._robots_articulations[robot_name] = scene.add(self._robots_art_views[robot_name])
 
-        # self._robots_geometries = scene.add(self._robots_geom_view)
+            # self._robots_geom_view = GeometryPrimView(
+            #                     prim_paths_expr = self._env_ns + f"/env*" + "/" + self._robot_prim_name + "/wheel_1", 
+            #                     # name=self._robot_name + "geom_views", 
+            #                     # # collisions = torch.tensor([None] * self.num_envs), 
+            #                     # track_contact_forces = False, 
+            #                     prepare_contact_sensors = False
+            #                     ) # geometry view (useful to enable contact reporting)
+            # self._robots_geom_view.apply_collision_apis() # random data with GPU pipeline!!!
+
+            # self._robots_geometries = scene.add(self._robots_geom_view)
 
         if self.use_flat_ground:
 
@@ -573,17 +647,25 @@ class CustomTask(BaseTask):
     def reset(self, 
             env_ids=None):
         
-        self.set_robot_default_jnt_config()
+        self.set_robots_default_jnt_config()
         # self.set_robot_root_default_config()
 
         self._get_robots_state() # updates robot states
 
-        self._jnt_imp_controller.set_refs(pos_ref=self._homer.get_homing())
-        self._jnt_imp_controller.apply_refs()
+        for i in range(len(self._robot_names)):
+            
+            robot_name = self._robot_names[i]
+
+            self._jnt_imp_controllers[robot_name].set_refs(pos_ref=self._homers[robot_name].get_homing())
+            self._jnt_imp_controllers[robot_name].apply_refs()
 
     def init_root_abs_offsets(self):
 
-        self.root_abs_offsets[:, 0:2]  = self.root_p[:, 0:2]
+        for i in range(len(self._robot_names)):
+            
+            robot_name = self._robot_names[i]
+
+            self.root_abs_offsets[robot_name][:, 0:2]  = self.root_p[robot_name][:, 0:2]
 
     def pre_physics_step(self, actions) -> None:
         
