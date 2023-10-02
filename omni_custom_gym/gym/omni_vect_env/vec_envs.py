@@ -253,12 +253,12 @@ class RobotVecEnv(gym.Env):
             self.task.fill_robot_info_from_world() # populates robot info fields
             # in task
 
-            self.task.init_homing_manager() 
+            self.task.init_homing_managers() 
 
             self.task._init_robots_state()
 
-            self.task.set_robot_default_jnt_config()
-            self.task.set_robot_root_default_config()
+            self.task.set_robots_default_jnt_config()
+            self.task.set_robots_root_default_config()
             
             self.task.init_imp_control(default_jnt_pgain = self.task.default_jnt_stiffness, 
                             default_jnt_vgain = self.task.default_jnt_damping) # initialized the impedance controller
