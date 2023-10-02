@@ -49,6 +49,10 @@ class CustomTask(BaseTask):
 
         self.torch_dtype = dtype
         
+        self.num_envs = num_envs
+
+        self.torch_device = torch.device(device) # defaults to "cuda" ("cpu" also valid)
+
         self.journal = Journal()
         
         self.robot_names = robot_names # these are (potentially) custom names to 
@@ -86,6 +90,8 @@ class CustomTask(BaseTask):
         self.root_q_default = {}
         
         self.root_abs_offsets = {}
+
+        self.distr_offset = {} # decribed how robots within each env are distributed
  
         self.jnt_imp_controllers = {}
 
@@ -93,15 +99,17 @@ class CustomTask(BaseTask):
         
         self.contact_sensors = {}
 
-        self.torch_device = torch.device(device) # defaults to "cuda" ("cpu" also valid)
-        
         self.default_jnt_stiffness = default_jnt_stiffness
         self.default_jnt_damping = default_jnt_damping
         
         self.use_flat_ground = use_flat_ground
         
+        self.spawning_radius = 1.5 # [m] -> default distance between roots of robots in a single 
+        # environment 
+        self.calc_robot_distrib() # computes the offsets of robots withing each env.
+
         # environment cloing stuff
-        self.num_envs = num_envs
+        
         self._env_ns = "/World/envs"
         self._env_spacing = env_spacing # [m]
         self._template_env_ns = self._env_ns + "/env_0"
@@ -117,7 +125,6 @@ class CustomTask(BaseTask):
             print(f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" + ":  the provided cloning_offset is not of the correct shape. A null offset will be used instead.")
 
         self._cloning_offset = cloning_offset
-        
         
         # values used for defining RL buffers
         self._num_observations = 4
@@ -344,7 +351,7 @@ class CustomTask(BaseTask):
             self.jnts_v[robot_name] = self._robots_art_views[robot_name].get_joint_velocities( 
                                             clone = True) # joint velocities
             
-            self.root_p_default[robot_name] = torch.clone(pose[0])
+            self.root_p_default[robot_name] = torch.clone(pose[0]) + self.distr_offset[robot_name]
 
             self.root_q_default[robot_name] = torch.clone(pose[1])
 
@@ -352,9 +359,7 @@ class CustomTask(BaseTask):
                                 device=self.torch_device) # reference clone positions
             # on the ground plane (init to 0)
 
-            for i in range(len(self.robot_names)):
-
-                self.init_root_abs_offsets(self.robot_names[i])
+            self.init_root_abs_offsets(robot_name)
             
     def synch_default_root_states(self):
 
@@ -365,6 +370,30 @@ class CustomTask(BaseTask):
             self.root_p_default[robot_name][:, :] = self.root_p
 
             self.root_q_default[robot_name][:, :] = self.root_q
+
+    def calc_robot_distrib(self):
+
+        import math
+
+        # we distribute robots in a single env. along the 
+        # circumference of a circle of given radius
+
+        n_robots = len(self.robot_names)
+        offset_baseangle = 2 * math.pi / n_robots
+
+        for i in range(n_robots):
+
+            offset_angle = offset_baseangle * (i + 1) 
+
+            robot_offset_wrt_center = torch.tensor([self.spawning_radius * math.cos(offset_angle), 
+                                            self.spawning_radius * math.sin(offset_angle), 0], 
+                    device=self.torch_device, 
+                    dtype=self.torch_dtype)
+            
+            # list with n references to the original tensor
+            tensor_list = [robot_offset_wrt_center] * self.num_envs
+
+            self.distr_offset[self.robot_names[i]] = torch.stack(tensor_list, dim=0)
 
     def _get_robots_state(self):
         
@@ -434,7 +463,6 @@ class CustomTask(BaseTask):
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
                         "Before calling set_robots_root_default_config(), you need to reset the World" + \
                         " at least once and call _world_was_initialized()")
-        
         
 
         return True
@@ -637,8 +665,9 @@ class CustomTask(BaseTask):
             
             robot_name = self.robot_names[i]
 
-            self._robots_art_views[robot_name] = ArticulationView(self._env_ns + "/env*"+ "/" + robot_name, 
-                        reset_xform_properties=False)
+            self._robots_art_views[robot_name] = ArticulationView(name = robot_name,
+                                                        prim_paths_expr = self._env_ns + "/env*"+ "/" + robot_name, 
+                                                        reset_xform_properties=False)
 
             self._robots_articulations[robot_name] = scene.add(self._robots_art_views[robot_name])
 
@@ -694,14 +723,15 @@ class CustomTask(BaseTask):
             env_ids=None):
         
         self.set_robots_default_jnt_config()
-        # self.set_robots_root_default_config()
+        self.set_robots_root_default_config()
 
         self._get_robots_state() # updates robot states
-
+        
         for i in range(len(self.robot_names)):
             
             robot_name = self.robot_names[i]
 
+            self._robots_art_views[robot_name].post_reset()
             self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self._homers[robot_name].get_homing())
             self.jnt_imp_controllers[robot_name].apply_refs()
 

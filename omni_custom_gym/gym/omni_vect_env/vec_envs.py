@@ -257,11 +257,13 @@ class RobotVecEnv(gym.Env):
 
             self.task._init_robots_state()
 
-            self.task.set_robots_default_jnt_config()
-            self.task.set_robots_root_default_config()
+            # self.task.set_robots_default_jnt_config()
+            # self.task.set_robots_root_default_config()
             
             self.task.init_imp_control(default_jnt_pgain = self.task.default_jnt_stiffness, 
                             default_jnt_vgain = self.task.default_jnt_damping) # initialized the impedance controller
+
+            self.task.reset()
 
             # self.task.init_contact_sensors(self._world)
             self.task.print_envs_info() # debug prints
@@ -325,7 +327,8 @@ class RobotVecEnv(gym.Env):
     
     @abstractmethod
     def reset(self):
-        """ Resets the task and updates observations. """
+        """ Usually resets the task and updates observations +
+        # other custom operations. """
 
         pass
 
