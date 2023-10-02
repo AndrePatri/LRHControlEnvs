@@ -96,7 +96,7 @@ class CustomTask(BaseTask):
  
         self.jnt_imp_controllers = {}
 
-        self._homers = {} 
+        self.homers = {} 
         
         self.contact_sensors = {}
 
@@ -368,9 +368,9 @@ class CustomTask(BaseTask):
 
             robot_name = self.robot_names[i]
 
-            self.root_p_default[robot_name][:, :] = self.root_p
+            self.root_p_default[robot_name][:, :] = self.root_p[robot_name]
 
-            self.root_q_default[robot_name][:, :] = self.root_q
+            self.root_q_default[robot_name][:, :] = self.root_q[robot_name]
 
     def calc_robot_distrib(self):
 
@@ -434,7 +434,7 @@ class CustomTask(BaseTask):
 
                 robot_name = self.robot_names[i]
 
-                homing = self._homers[robot_name].get_homing()
+                homing = self.homers[robot_name].get_homing()
 
                 self._robots_art_views[robot_name].set_joints_default_state(positions= homing, 
                                 velocities = torch.zeros((homing.shape[0], homing.shape[1]), \
@@ -532,7 +532,7 @@ class CustomTask(BaseTask):
 
                 robot_name = self.robot_names[i]
 
-                self._homers[robot_name] = OmniRobotHomer(articulation=self._robots_art_views[robot_name], 
+                self.homers[robot_name] = OmniRobotHomer(articulation=self._robots_art_views[robot_name], 
                                     srdf_path=self._srdf_paths[robot_name], 
                                     device=self.torch_device, 
                                     dtype=self.torch_dtype)
@@ -584,7 +584,7 @@ class CustomTask(BaseTask):
                             
                 try:
 
-                    self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self._homers[robot_name].get_homing())
+                    self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing())
                 
                 except Exception:
                     
@@ -737,7 +737,7 @@ class CustomTask(BaseTask):
 
             self._robots_art_views[robot_name].post_reset()
 
-            self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self._homers[robot_name].get_homing())
+            self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing())
             self.jnt_imp_controllers[robot_name].apply_refs()
 
     @abstractmethod
