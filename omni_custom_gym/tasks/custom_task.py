@@ -42,6 +42,7 @@ class CustomTask(BaseTask):
                 replicate_physics: bool = True,
                 offset=None, 
                 env_spacing = 5.0, 
+                spawning_radius = 1.0,
                 use_flat_ground = True,
                 default_jnt_stiffness = 300.0,
                 default_jnt_damping = 20.0,
@@ -104,7 +105,7 @@ class CustomTask(BaseTask):
         
         self.use_flat_ground = use_flat_ground
         
-        self.spawning_radius = 1.5 # [m] -> default distance between roots of robots in a single 
+        self.spawning_radius = spawning_radius # [m] -> default distance between roots of robots in a single 
         # environment 
         self.calc_robot_distrib() # computes the offsets of robots withing each env.
 
@@ -731,7 +732,11 @@ class CustomTask(BaseTask):
             
             robot_name = self.robot_names[i]
 
+            self._robots_art_views[robot_name].set_velocities(torch.zeros((self.num_envs, 
+                                                        6), device=self.torch_device))
+
             self._robots_art_views[robot_name].post_reset()
+
             self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self._homers[robot_name].get_homing())
             self.jnt_imp_controllers[robot_name].apply_refs()
 
