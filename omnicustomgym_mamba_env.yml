@@ -1,4 +1,4 @@
-name: kyonrlstepping
+name: omnicustomgym
 channels: 
   - defaults
   - pytorch
