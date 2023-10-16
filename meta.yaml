@@ -1,5 +1,5 @@
 package:
-  name: omni_custom_gym 
+  name: omni_robo_gym 
   version: 0.1.0  
 
 source:
@@ -13,7 +13,7 @@ requirements:
     - python=3.7
 
 about:
-  home: https://github.com/AndrePatri/ControlClusterUtils
+  home: https://github.com/AndrePatri/CoClusterBridge
   license: MIT
   summary: Some custom implementations of Tasks and Gyms for Omniverse Isaac Sim based on Gymnasium. Easy URDF and SRDF import/cloning and simulation configuration exploiting Omniverse API 
 

@@ -1,19 +1,19 @@
 # Copyright (C) 2023  Andrea Patrizi (AndrePatri, andreapatrizi1b6e6@gmail.com)
 # 
-# This file is part of OmniCustomGym and distributed under the General Public License version 2 license.
+# This file is part of OmniRoboGym and distributed under the General Public License version 2 license.
 # 
-# OmniCustomGym is free software: you can redistribute it and/or modify
+# OmniRoboGym is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 2 of the License, or
 # (at your option) any later version.
 # 
-# OmniCustomGym is distributed in the hope that it will be useful,
+# OmniRoboGym is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 # 
 # You should have received a copy of the GNU General Public License
-# along with OmniCustomGym.  If not, see <http://www.gnu.org/licenses/>.
+# along with OmniRoboGym.  If not, see <http://www.gnu.org/licenses/>.
 # 
 from omni.isaac.core.tasks.base_task import BaseTask
 from omni.isaac.core.articulations import ArticulationView
@@ -40,10 +40,10 @@ from omni.isaac.core.utils.stage import get_current_stage
 
 from omni.isaac.core.scenes.scene import Scene
 
-from omni_custom_gym.utils.jnt_imp_cntrl import OmniJntImpCntrl
-from omni_custom_gym.utils.homing import OmniRobotHomer
-from omni_custom_gym.utils.defs import Journal
-from omni_custom_gym.utils.terrains import RlTerrains
+from omni_robo_gym.utils.jnt_imp_cntrl import OmniJntImpCntrl
+from omni_robo_gym.utils.homing import OmniRobotHomer
+from omni_robo_gym.utils.defs import Journal
+from omni_robo_gym.utils.terrains import RlTerrains
 from abc import abstractmethod
 from typing import List, Dict
 

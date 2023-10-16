@@ -1,19 +1,19 @@
 # Copyright (C) 2023  Andrea Patrizi (AndrePatri, andreapatrizi1b6e6@gmail.com)
 # 
-# This file is part of OmniCustomGym and distributed under the General Public License version 2 license.
+# This file is part of OmniRoboGym and distributed under the General Public License version 2 license.
 # 
-# OmniCustomGym is free software: you can redistribute it and/or modify
+# OmniRoboGym is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 2 of the License, or
 # (at your option) any later version.
 # 
-# OmniCustomGym is distributed in the hope that it will be useful,
+# OmniRoboGym is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 # 
 # You should have received a copy of the GNU General Public License
-# along with OmniCustomGym.  If not, see <http://www.gnu.org/licenses/>.
+# along with OmniRoboGym.  If not, see <http://www.gnu.org/licenses/>.
 # 
 from omni.isaac.kit import SimulationApp
 import os
@@ -23,7 +23,7 @@ import torch
 from abc import ABC, abstractmethod
 from typing import Union, Tuple, Dict
 import numpy as np
-from omni_custom_gym.utils.defs import Journal
+from omni_robo_gym.utils.defs import Journal
 
 class RobotVecEnv(gym.Env):
     """ This class provides a base interface for connecting RL policies with task implementations.
@@ -50,7 +50,7 @@ class RobotVecEnv(gym.Env):
 
         self.journal = Journal()
 
-        experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnicustomgym.kit'
+        experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnirobogym.kit'
         # experience = ""
         if headless:
 
@@ -59,10 +59,10 @@ class RobotVecEnv(gym.Env):
             if enable_livestream:
                 experience = ""
             elif enable_viewport:
-                experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnicustomgym.headless.render.kit'
+                experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.OmniRoboGym.headless.render.kit'
                 # experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.gym.headless.render.kit'
             else:
-                experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnicustomgym.headless.kit'
+                experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.OmniRoboGym.headless.kit'
                 # experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.gym.headless.kit'
 
         self._simulation_app = SimulationApp({"headless": headless,

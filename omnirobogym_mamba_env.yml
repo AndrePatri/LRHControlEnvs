@@ -1,4 +1,4 @@
-name: omnicustomgym
+name: omni_robo_gym
 channels: 
   - defaults
   - pytorch
