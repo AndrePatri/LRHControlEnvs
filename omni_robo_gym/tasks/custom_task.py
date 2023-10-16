@@ -56,6 +56,8 @@ class CustomTask(BaseTask):
                 num_envs = 1,
                 device = "cuda", 
                 cloning_offset: np.array = np.array([0.0, 0.0, 0.0]),
+                fix_base: List[bool] = None,
+                self_collide: List[bool] = None,
                 replicate_physics: bool = True,
                 offset=None, 
                 env_spacing = 5.0, 
@@ -81,14 +83,47 @@ class CustomTask(BaseTask):
             self.robot_pkg_names = self.robot_names # if not provided, robot_names are the same as robot_pkg_names
         
         else:
-
+            
+            # check dimension consistency
             if len(robot_names) != len(robot_pkg_names):
 
                 exception = "The provided robot names list must match the length " + \
                     "of the provided robot package names"
                 
                 raise Exception(exception)
+        
+        if fix_base is None:
+
+            self._fix_base = [False] * len(self.robot_names)
+        
+        else:
+
+            # check dimension consistency
+            if len(fix_base) != len(robot_pkg_names):
+
+                exception = "The provided fix_base list of boolean must match the length " + \
+                    "of the provided robot package names"
+                
+                raise Exception(exception)
             
+            self._fix_base = fix_base 
+        
+        if self_collide is None:
+
+            self._self_collide = [False] * len(self.robot_names)
+        
+        else:
+
+            # check dimension consistency
+            if len(self_collide) != len(robot_pkg_names):
+
+                exception = "The provided self_collide list of boolean must match the length " + \
+                    "of the provided robot package names"
+                
+                raise Exception(exception)
+            
+            self._self_collide = self_collide 
+        
         self._urdf_paths = {}
         self._srdf_paths = {}
         self._robots_art_views = {}
@@ -309,7 +344,9 @@ class CustomTask(BaseTask):
 
     def _import_urdf(self, 
                 robot_name: str,
-                import_config: omni.isaac.urdf._urdf.ImportConfig = _urdf.ImportConfig()):
+                import_config: omni.isaac.urdf._urdf.ImportConfig = _urdf.ImportConfig(), 
+                fix_base = False, 
+                self_collide = False):
 
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": importing robot URDF")
 
@@ -317,8 +354,8 @@ class CustomTask(BaseTask):
         import_config.merge_fixed_joints = True # makes sim more stable
         # in case of fixed joints with light objects
         import_config.import_inertia_tensor = True
-        import_config.fix_base = False
-        import_config.self_collision = False
+        import_config.fix_base = fix_base
+        import_config.self_collision = self_collide
 
         _urdf.acquire_urdf_interface()
         
@@ -655,10 +692,15 @@ class CustomTask(BaseTask):
             robot_name = self.robot_names[i]
             robot_pkg_name = self.robot_pkg_names[i]
 
+            fix_base = self._fix_base[i]
+            self_collide = self._self_collide[i]
+
             self._generate_rob_descriptions(robot_name=robot_name, 
                                     robot_pkg_name=robot_pkg_name)
 
-            self._import_urdf(robot_name)
+            self._import_urdf(robot_name, 
+                            fix_base=fix_base, 
+                            self_collide=self_collide)
         
         pos_offsets = np.zeros((self.num_envs, 3))
         for i in range(0, self.num_envs):
