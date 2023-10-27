@@ -1,4 +1,4 @@
-name: omni_robo_gym
+name: omni_robo_gym_isaac2023.1.0
 channels: 
   - defaults
   - pytorch
@@ -7,9 +7,9 @@ channels:
   - omnia
   - AndrePatri
 dependencies: 
-  - python=3.7
+  - python=3.10
   - pip
-  - pytorch==1.12.0
+  - pytorch
   - torchvision 
   - torchaudio 
   - cuda-toolkit=11.7
