@@ -16,7 +16,7 @@ pushd "${ROOT_DIR}/"
     mamba remove -y -n "${ENV_NAME}" --all
 
     # create the env from YAML
-    mamba env create -f ./omni_robo_gym.yml
+    mamba env create -f ./omnirobogym_mamba_env.yml
 
     # activate env
     # mamba activate "${ENV_NAME}"
