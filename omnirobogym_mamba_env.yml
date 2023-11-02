@@ -26,7 +26,7 @@ dependencies:
   - rospkg=1.5.0
   - empy 
   - python-devtools
- # - perf_sleep
+  - perf_sleep
   - pyqt
   - pyqtgraph
   - pip:

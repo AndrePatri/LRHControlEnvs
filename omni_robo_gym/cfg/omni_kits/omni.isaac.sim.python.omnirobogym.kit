@@ -16,13 +16,13 @@ keywords = ["experience", "app", "usd"]
 
 "omni.stats" = {}
 
-# "omni.kit.telemetry" = {}
+"omni.kit.telemetry" = {}
 
 "omni.kit.menu.utils" = {}
 "omni.kit.menu.file" = {}
 "omni.kit.menu.edit" = {}
 "omni.kit.menu.create" = {}
-# "omni.kit.menu.common" = {} # Isaac Sim: disable this and replace with our own
+"omni.kit.menu.common" = {}
 "omni.kit.menu.stage" = {}
 
 "omni.kit.window.file" = {}
@@ -38,7 +38,7 @@ keywords = ["experience", "app", "usd"]
 # PhysX
 "omni.physx.bundle" = {}
 "omni.physx.tensors" = {}
-# "omni.physx.flatcache" = {}
+# "omni.physx.fabric" = {}
 # "omni.physx.zerogravity" = {}
 
 # "omni.kit.search.service" = {}
@@ -193,7 +193,7 @@ keywords = ["experience", "app", "usd"]
 # "omni.kit.widget.timeline" = { }
 # "omni.anim.curve_editor" = { }
 # "omni.anim.window.timeline" = { }
-# "omni.anim.shared" = {}
+# "omni.anim.shared.core" = {}
 # "omni.anim.timeline" = { }
 # "omni.anim.graph.bundle" = {}
 # "omni.anim.graph.core" = {}
@@ -202,6 +202,8 @@ keywords = ["experience", "app", "usd"]
 # "omni.anim.retarget.core" = {}
 # "omni.anim.retarget.ui" = {}
 #"omni.anim.camera_tool" = {}
+# Needed to properly load navigation mesh
+"omni.anim.navigation.schema" = {}
 
 # OmniGraph
 "omni.graph.bundle.action" = {}
@@ -288,6 +290,13 @@ keywords = ["experience", "app", "usd"]
 
 "omni.warp" = {}
 
+# needed for omni.kit.viewport.ready.viewport_ready
+"omni.activity.profiler" = {}
+"omni.activity.pump" = {}
+
+"omni.kit.widget.cache_indicator" = {}
+
+
 [settings]
 renderer.active = "rtx"
 exts."omni.kit.viewport.menubar.camera".expand = true # Expand the extra-camera settings by default
@@ -328,7 +337,7 @@ logSysStdOutput = false
 [settings.app.settings]
 persistent = false
 dev_build = false
-flatCacheStageFrameHistoryCount = 3 # needed for omni.syntheticdata
+fabricDefaultStageFrameHistoryCount = 3 # needed for omni.syntheticdata TODO105 Still True?
 
 [settings.app.window]
 title = "Isaac Sim Python"
@@ -364,13 +373,41 @@ featuredExts = []
 renderer.multiGpu.enabled = true
 renderer.multiGpu.autoEnable = true
 'rtx-transient'.resourcemanager.enableTextureStreaming = true
-app.asyncRendering = false
-app.asyncRenderingLowLatency = false
-app.hydra.aperture.conform = 4 # Don't modify camera prim, stretch the image so it fits
+# app.hydra.aperture.conform = 4 # in 105.1 pixels are square by default
 app.hydraEngine.waitIdle = true
+rtx.newDenoiser.enabled = true
 
 # Enable Iray and pxr by setting this to "rtx,iray,pxr"
 renderer.enabled = "rtx"
+
+physics.autoPopupSimulationOutputWindow=false
+
+### async rendering settings
+omni.replicator.asyncRendering = false
+app.asyncRendering = false
+app.asyncRenderingLowLatency = false
+
+### Render thread settings
+app.runLoops.main.rateLimitEnabled = false
+app.runLoops.main.rateLimitFrequency = 120
+app.runLoops.main.rateLimitUsePrecisionSleep = true
+app.runLoops.main.syncToPresent = false
+app.runLoops.present.rateLimitFrequency = 120
+app.runLoops.present.rateLimitUsePrecisionSleep = true
+app.runLoops.rendering_0.rateLimitFrequency = 120
+app.runLoops.rendering_0.rateLimitUsePrecisionSleep = true
+app.runLoops.rendering_0.syncToPresent = false
+app.runLoops.rendering_1.rateLimitFrequency = 120
+app.runLoops.rendering_1.rateLimitUsePrecisionSleep = true
+app.runLoops.rendering_1.syncToPresent = false
+app.runLoopsGlobal.syncToPresent = false
+app.vsync = false
+exts.omni.kit.renderer.core.present.enabled = false
+exts.omni.kit.renderer.core.present.presentAfterRendering = false
+persistent.app.viewport.defaults.tickRate = 120
+rtx-transient.dlssg.enabled = false
+
+privacy.externalBuild = true
 
 # Basic Kit App
 ################################
@@ -426,8 +463,9 @@ enable_thumbnail_generation_images = false # temp fix to avoid leaking python pr
 ###############################
 [settings.exts."omni.kit.registry.nucleus"]
 registries = [
-    { name = "kit/public", url = "https://d1aiacozzchaiq.cloudfront.net/exts/kit/public/104.0/"},
-    { name = "kit/community", url = "https://dw290v42wisod.cloudfront.net/exts/kit/community" }
+	{ name = "kit/default", url = "https://ovextensionsprod.blob.core.windows.net/exts/kit/prod/shared" },
+	{ name = "kit/sdk", url = "https://ovextensionsprod.blob.core.windows.net/exts/kit/prod/sdk/${kit_version_short}/${kit_git_hash}" },
+	{ name = "kit/community", url = "https://dw290v42wisod.cloudfront.net/exts/kit/community" },
 ]
 
 [settings.app.extensions]
@@ -454,7 +492,7 @@ changeWindowRegion = true
 
 # Register extension folder from this repo in kit
 [settings.app.exts]
-folders.'++' = ["${app}/../exts", "${app}/../extscache"]
+folders = ["${app}/../exts", "${app}/../extscache", "${app}/../extsPhysics"]
 
 [settings.crashreporter.data]
 experience = "Isaac Sim Python"
@@ -492,7 +530,7 @@ app.stage.materialStrength = "weakerThanDescendants"
 
 app.transform.gizmoUseSRT = true
 app.viewport.grid.scale = 1.0
-app.viewport.pickingMode = "models"
+app.viewport.pickingMode = "kind:model.ALL"
 app.viewport.camMoveVelocity = 0.05 # 5 m/s
 app.viewport.gizmo.scale = 0.01 # scaled to meters
 app.viewport.previewOnPeek = false
@@ -511,6 +549,11 @@ physics.updateToUsd = true
 physics.updateVelocitiesToUsd = true
 physics.useFastCache = false
 physics.visualizationDisplayJoints = false
+physics.visualizationSimulationOutput = false
+omni.replicator.captureOnPlay = true
+exts."omni.anim.navigation.core".navMesh.viewNavMesh = false
+
+renderer.startupMessageDisplayed = true # hides the IOMMU popup window
 
 # Make Detail panel visible by default
 app.omniverse.content_browser.options_menu.show_details = true
@@ -524,38 +567,37 @@ enabled=true # Enable this for DLSS
 ###############################
 [dependencies]
 "omni.isaac.core_archive" = {}
+"omni.pip.compute" = {}
+"omni.pip.cloud" = {}
 "omni.isaac.ml_archive" = {}
-"omni.isaac.urdf" = {}
-#"omni.isaac.mjcf" = {}
+"omni.importer.urdf" = {}
+"omni.isaac.mjcf" = {}
 "omni.isaac.utils" = {}
-#"omni.isaac.range_sensor" = {}
+"omni.isaac.range_sensor" = {}
 "omni.isaac.dynamic_control" = {}
 "omni.isaac.kit" = {}
 "omni.isaac.core" = {}
-#"omni.isaac.core_nodes" = {}
+"omni.isaac.core_nodes" = {}
 "omni.isaac.cloner" = {}
-# "omni.isaac.cortex" = {}
-# "omni.isaac.dofbot" = {}
-"omni.isaac.synthetic_utils" = {}
-#"omni.isaac.surface_gripper" = {}
+"omni.isaac.cortex" = {}
+"omni.isaac.cortex.sample_behaviors" = {}
+"omni.isaac.dofbot" = {}
+"omni.isaac.surface_gripper" = {}
 "omni.kit.property.isaac" = {}
 "omni.isaac.scene_blox" = {}
 "omni.isaac.sensor" = {}
-"omni.isaac.isaac_sensor" = {}
 "omni.isaac.debug_draw" = {}
 "omni.isaac.gym" = {}
 
-# "omni.isaac.franka" = {}
-#"omni.isaac.manipulators" = {}
-#"omni.isaac.quadruped" = {}
-#"omni.isaac.wheeled_robots" = {}
-# "omni.isaac.motion_planning" = {}
-# "omni.isaac.ocs2" = {}
-# "omni.isaac.lula" = {}
-#"omni.isaac.motion_generation" = {}
-#"omni.isaac.universal_robots" = {}
-#"omni.isaac.occupancy_map" = {}
-#"omni.replicator.isaac" = {}
+"omni.isaac.franka" = {}
+"omni.isaac.manipulators" = {}
+"omni.isaac.quadruped" = {}
+"omni.isaac.wheeled_robots" = {}
+"omni.isaac.lula" = {}
+"omni.isaac.motion_generation" = {}
+"omni.isaac.universal_robots" = {}
+"omni.isaac.occupancy_map" = {}
+"omni.replicator.isaac" = {}
 "omni.kit.loop-isaac" = {}
 
 #linux only extensions
@@ -565,7 +607,10 @@ enabled=true # Enable this for DLSS
 # Non Isaac Sim Extensions
 ######################
 [dependencies]
-#"omni.syntheticdata" = {}
-#"semantics.schema.editor" = {}
-#"omni.replicator.core" = {}
-#"omni.replicator.composer" = {}
+"omni.syntheticdata" = {}
+"semantics.schema.editor" = {}
+"omni.replicator.core" = {}
+"omni.replicator.replicator_yaml" = {}
+"omni.replicator.composer" = {}
+"omni.importer.mjcf" = {}
+"omni.importer.urdf" = {}

@@ -29,7 +29,7 @@ from gym import spaces
 import numpy as np
 import torch
 
-from omni.isaac.urdf import _urdf
+from omni.importer.urdf import _urdf
 from omni.isaac.core.utils.prims import move_prim
 from omni.isaac.cloner import GridCloner
 import omni.isaac.core.utils.prims as prim_utils
@@ -344,7 +344,7 @@ class CustomTask(BaseTask):
 
     def _import_urdf(self, 
                 robot_name: str,
-                import_config: omni.isaac.urdf._urdf.ImportConfig = _urdf.ImportConfig(), 
+                import_config: omni.importer.urdf._urdf.ImportConfig = _urdf.ImportConfig(), 
                 fix_base = False, 
                 self_collide = False):
 
