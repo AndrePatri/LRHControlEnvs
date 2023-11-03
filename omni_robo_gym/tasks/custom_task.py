@@ -53,11 +53,13 @@ class CustomTask(BaseTask):
                 name: str,
                 robot_names: List[str],
                 robot_pkg_names: List[str] = None, 
+                contact_prims: Dict[str, List] = None,
                 num_envs = 1,
                 device = "cuda", 
                 cloning_offset: np.array = np.array([0.0, 0.0, 0.0]),
                 fix_base: List[bool] = None,
                 self_collide: List[bool] = None,
+                merge_fixed: List[bool] = None,
                 replicate_physics: bool = True,
                 offset=None, 
                 env_spacing = 5.0, 
@@ -124,6 +126,22 @@ class CustomTask(BaseTask):
             
             self._self_collide = self_collide 
         
+        if merge_fixed is None:
+
+            self._merge_fixed = [False] * len(self.robot_names)
+        
+        else:
+
+            # check dimension consistency
+            if len(merge_fixed) != len(robot_pkg_names):
+
+                exception = "The provided merge_fixed list of boolean must match the length " + \
+                    "of the provided robot package names"
+                
+                raise Exception(exception)
+            
+            self._merge_fixed = merge_fixed 
+
         self._urdf_paths = {}
         self._srdf_paths = {}
         self._robots_art_views = {}
@@ -150,7 +168,10 @@ class CustomTask(BaseTask):
 
         self.homers = {} 
         
-        self.contact_sensors = {}
+        self.contact_sensors = {} 
+        # key: robot_name. value: List[List[contact_sensors * n_sensors] * n_env]
+        self.contact_prims = contact_prims # for each robot, contact sensors is a list
+        # ordered as the provided contact_prims (for that robot)
 
         self.default_jnt_stiffness = default_jnt_stiffness
         self.default_jnt_damping = default_jnt_damping
@@ -198,8 +219,6 @@ class CustomTask(BaseTask):
         self._world_initialized = False
 
         self._ground_plane_prim_path = "/World/terrain"
-
-        self.contact_sensors = []
 
         # trigger __init__ of parent class
         BaseTask.__init__(self,
@@ -327,14 +346,16 @@ class CustomTask(BaseTask):
                     robot_pkg_name: str):
         
         self._descr_dump_path = "/tmp/" + f"{self.__class__.__name__}"
-        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": generating URDF...")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": generating URDF for robot "+ 
+              f"{robot_name}, of type {robot_pkg_name}...")
 
         self._generate_urdf(robot_name=robot_name, 
                         robot_pkg_name=robot_pkg_name)
 
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": generating SRDF...")
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": generating SRDF for robot "+ 
+              f"{robot_name}, of type {robot_pkg_name}...")
 
         # we also generate SRDF files, which are useful for control
         self._generate_srdf(robot_name=robot_name, 
@@ -346,12 +367,13 @@ class CustomTask(BaseTask):
                 robot_name: str,
                 import_config: omni.importer.urdf._urdf.ImportConfig = _urdf.ImportConfig(), 
                 fix_base = False, 
-                self_collide = False):
+                self_collide = False, 
+                merge_fixed = True):
 
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": importing robot URDF")
 
         # we overwrite some settings which are bound to be fixed
-        import_config.merge_fixed_joints = True # makes sim more stable
+        import_config.merge_fixed_joints = merge_fixed # makes sim more stable
         # in case of fixed joints with light objects
         import_config.import_inertia_tensor = True
         import_config.fix_base = fix_base
@@ -657,32 +679,41 @@ class CustomTask(BaseTask):
     def init_contact_sensors(self, 
                     world: omni.isaac.core.world.world.World):
           
-        
-        for i in range(len(self._envs_prim_paths)):
-                        
-            for j in range(0, len(self.robot_names)):
-                
-                robot_name = self.robot_names[j]
-                
-                prim_path = self._env_ns + f"/env_{0}" + "/" + robot_name + "/wheel_1" + "/contact_sensor"
-                # prim_utils.define_prim(prim_path)
+        for robot in range(0, len(self.robot_names)): # for each robot
+            
+            robot_name = self.robot_names[robot]
 
-                self.contact_sensors[robot_name] = []
+            self.contact_sensors[robot_name] = [None] * len(self._envs_prim_paths) # defaults to an empty list
+            
+            contact_link_names = self.contact_prims[robot_name]
 
-                self.contact_sensors[robot_name].append(
-                            world.scene.add(
+            for env in range(len(self._envs_prim_paths)): # for each environment
+                
+                self.contact_sensors[robot_name][env] = [] # defaults to an empty sensor list
+                
+                for contact in range(0, len(contact_link_names)): # for each contact
+                    
+                    prim_path = self._env_ns + f"/env_{env}" + \
+                    "/" + robot_name + \
+                        "/" + contact_link_names[contact] + \
+                            "/contact_sensor" # contact sesnsor prim path
+
+                    print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": creating contact sensor at " + 
+                            f"{prim_path}...")
+                    
+                    self.contact_sensors[robot_name][env].append(world.scene.add(
                                 ContactSensor(
                                     prim_path=prim_path,
-                                    name=f"{robot_name}_contact_sensor{i}".format(i),
+                                    name=f"{robot_name}{env}_{contact_link_names[contact]}_contact_sensor",
                                     min_threshold=0,
                                     max_threshold=10000000,
                                     radius=0.1, 
                                     translation=np.zeros((1, 3))
                                 )
-                            )
-                        )
+                            ))
 
-                self.contact_sensors[robot_name][i].add_raw_contact_data_to_frame()
+                    self.contact_sensors[robot_name][env][contact].add_raw_contact_data_to_frame()
+                                         
 
     def set_up_scene(self, 
                     scene: Scene) -> None:
@@ -694,13 +725,15 @@ class CustomTask(BaseTask):
 
             fix_base = self._fix_base[i]
             self_collide = self._self_collide[i]
+            merge_fixed = self._merge_fixed[i]
 
             self._generate_rob_descriptions(robot_name=robot_name, 
                                     robot_pkg_name=robot_pkg_name)
 
             self._import_urdf(robot_name, 
                             fix_base=fix_base, 
-                            self_collide=self_collide)
+                            self_collide=self_collide, 
+                            merge_fixed=merge_fixed)
         
         pos_offsets = np.zeros((self.num_envs, 3))
         for i in range(0, self.num_envs):
