@@ -271,7 +271,7 @@ class RobotVecEnv(gym.Env):
             self.task.init_imp_control(default_jnt_pgain = self.task.default_jnt_stiffness, 
                             default_jnt_vgain = self.task.default_jnt_damping) # initialized the impedance controller
 
-            self.task.init_contact_sensors(self._world) # init. contact sensors (if any)
+            # self.task.init_contact_sensors(self._world) # init. contact sensors (if any)
             # for all environments 
 
             self.task.reset()
