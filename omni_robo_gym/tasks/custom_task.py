@@ -735,10 +735,6 @@ class CustomTask(BaseTask):
                             self_collide=self_collide, 
                             merge_fixed=merge_fixed)
         
-        pos_offsets = np.zeros((self.num_envs, 3))
-        for i in range(0, self.num_envs):
-            pos_offsets[i, :] = self._cloning_offset
-        
         print(f"[{self.__class__.__name__}]" + \
             f"[{self.journal.status}]" + \
             ": cloning environments...")
@@ -747,7 +743,7 @@ class CustomTask(BaseTask):
             source_prim_path=self._template_env_ns,
             prim_paths=self._envs_prim_paths,
             replicate_physics=self._replicate_physics,
-            position_offsets = pos_offsets
+            position_offsets = self._cloning_offset
         ) # we can clone the environment in which all the robos are
 
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
