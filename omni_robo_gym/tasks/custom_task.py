@@ -56,7 +56,7 @@ class CustomTask(BaseTask):
                 contact_prims: Dict[str, List] = None,
                 num_envs = 1,
                 device = "cuda", 
-                cloning_offset: np.array = np.array([0.0, 0.0, 0.0]),
+                cloning_offset: np.array = None,
                 fix_base: List[bool] = None,
                 self_collide: List[bool] = None,
                 merge_fixed: List[bool] = None,
@@ -194,12 +194,24 @@ class CustomTask(BaseTask):
         prim_utils.define_prim(self._template_env_ns)
         self._envs_prim_paths = self._cloner.generate_paths(self._env_ns + "/env", 
                                                 self.num_envs)
-        if len(cloning_offset) != 3:
-            cloning_offset = np.array([0.0, 0.0, 0.0])
-            print(f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" + ":  the provided cloning_offset is not of the correct shape. A null offset will be used instead.")
-
-        self._cloning_offset = cloning_offset
         
+        self._cloning_offset = cloning_offset
+            
+        if self._cloning_offset is None:
+            
+            self._cloning_offset = np.array([[0, 0, 0]] * self.num_envs)
+        
+        # if len(self._cloning_offset[:, 0]) != self.num_envs or \
+        #     len(self._cloning_offset[0, :] != 3):
+        
+        #     warn = f"[{self.__class__.__name__}]" + \
+        #                     f"[{self.journal.warning}]" + \
+        #                     ": provided cloning offsets are not of the right shape." + \
+        #                     " Resetting them to zero..."
+        #     print(warn)
+
+        #     self._cloning_offset = np.array([[0, 0, 0]] * self.num_envs)
+
         # values used for defining RL buffers
         self._num_observations = 4
         self._num_actions = 1
