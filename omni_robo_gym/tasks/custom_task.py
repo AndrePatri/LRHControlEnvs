@@ -57,6 +57,7 @@ class CustomTask(BaseTask):
                 robot_pkg_names: List[str] = None, 
                 contact_prims: Dict[str, List] = None,
                 contact_offsets: Dict[str, Dict[str, np.ndarray]] = None,
+                sensor_radius: Dict[str, Dict[str, np.ndarray]] = None,
                 num_envs = 1,
                 device = "cuda", 
                 cloning_offset: np.array = None,
@@ -176,6 +177,7 @@ class CustomTask(BaseTask):
         self.contact_prims = contact_prims # for each robot, contact sensors is a list
         # ordered as the provided contact_prims (for that robot)
         self.contact_offsets = contact_offsets
+        self.sensor_radius = sensor_radius
 
         self.default_jnt_stiffness = default_jnt_stiffness
         self.default_jnt_damping = default_jnt_damping
@@ -740,12 +742,11 @@ class CustomTask(BaseTask):
                                     name=f"{robot_name}{env}_{contact_link_names[contact]}_contact_sensor",
                                     min_threshold=0,
                                     max_threshold=10000000,
-                                    radius=0.1, 
+                                    radius=self.sensor_radius[robot_name][contact_link_names[contact]], 
                                     translation=self.contact_offsets[robot_name][contact_link_names[contact]]
                                 )
                             ))
 
-                    print(self.contact_offsets[robot_name][contact_link_names[contact]])
                     self.contact_sensors[robot_name][env][contact].add_raw_contact_data_to_frame()
     
     def set_world(self,
