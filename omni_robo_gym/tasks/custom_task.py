@@ -20,6 +20,8 @@ from omni.isaac.core.articulations import ArticulationView
 from omni.isaac.core.prims import GeometryPrimView
 from omni.isaac.core.utils.viewports import set_camera_view
 
+from omni.isaac.core.world import World
+
 from omni.isaac.core.utils.rotations import euler_angles_to_quat 
 
 import omni.kit
@@ -54,6 +56,7 @@ class CustomTask(BaseTask):
                 robot_names: List[str],
                 robot_pkg_names: List[str] = None, 
                 contact_prims: Dict[str, List] = None,
+                contact_offsets: Dict[str, Dict[str, np.ndarray]] = None,
                 num_envs = 1,
                 device = "cuda", 
                 cloning_offset: np.array = None,
@@ -172,6 +175,7 @@ class CustomTask(BaseTask):
         # key: robot_name. value: List[List[contact_sensors * n_sensors] * n_env]
         self.contact_prims = contact_prims # for each robot, contact sensors is a list
         # ordered as the provided contact_prims (for that robot)
+        self.contact_offsets = contact_offsets
 
         self.default_jnt_stiffness = default_jnt_stiffness
         self.default_jnt_damping = default_jnt_damping
@@ -232,6 +236,8 @@ class CustomTask(BaseTask):
 
         self._ground_plane_prim_path = "/World/terrain"
 
+        self._world = None
+        
         # trigger __init__ of parent class
         BaseTask.__init__(self,
                         name=name, 
@@ -705,31 +711,52 @@ class CustomTask(BaseTask):
                 
                 for contact in range(0, len(contact_link_names)): # for each contact
                     
-                    prim_path = self._env_ns + f"/env_{env}" + \
+                    contact_link_prim_path = self._env_ns + f"/env_{env}" + \
                     "/" + robot_name + \
-                        "/" + contact_link_names[contact] + \
+                        "/" + contact_link_names[contact]
+                    
+                    # print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": applying collision API to " + 
+                    #         f"{contact_link_prim_path}...")
+                    
+                    # robots_geom_view = GeometryPrimView(
+                    #             prim_paths_expr = contact_link_prim_path, 
+                    #             # name=self._robot_name + "geom_views", 
+                    #             # # collisions = torch.tensor([None] * self.num_envs), 
+                    #             # track_contact_forces = False, 
+                    #             prepare_contact_sensors = False
+                    #             ) # geometry view (useful to enable contact reporting)
+                    # robots_geom_view.apply_collision_apis() # random data with GPU pipeline!!!
+                    # world.scene.add(robots_geom_view)
+                            
+                    sensor_prim_path = contact_link_prim_path + \
                             "/contact_sensor" # contact sesnsor prim path
 
                     print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": creating contact sensor at " + 
-                            f"{prim_path}...")
-                    
+                            f"{sensor_prim_path}...")
+                                        
                     self.contact_sensors[robot_name][env].append(world.scene.add(
                                 ContactSensor(
-                                    prim_path=prim_path,
+                                    prim_path=sensor_prim_path,
                                     name=f"{robot_name}{env}_{contact_link_names[contact]}_contact_sensor",
                                     min_threshold=0,
                                     max_threshold=10000000,
                                     radius=0.1, 
-                                    translation=np.zeros((1, 3))
+                                    translation=self.contact_offsets[robot_name][contact_link_names[contact]]
                                 )
                             ))
 
+                    print(self.contact_offsets[robot_name][contact_link_names[contact]])
                     self.contact_sensors[robot_name][env][contact].add_raw_contact_data_to_frame()
-                                         
-
+    
+    def set_world(self,
+                world: World):
+        
+        self._world = world
+        
     def set_up_scene(self, 
                     scene: Scene) -> None:
 
+        # this is called automatically
         for i in range(len(self.robot_names)):
             
             robot_name = self.robot_names[i]
@@ -772,17 +799,6 @@ class CustomTask(BaseTask):
 
             self._robots_articulations[robot_name] = scene.add(self._robots_art_views[robot_name])
 
-            # self._robots_geom_view = GeometryPrimView(
-            #                     prim_paths_expr = self._env_ns + f"/env*" + "/" + self._robot_prim_name + "/wheel_1", 
-            #                     # name=self._robot_name + "geom_views", 
-            #                     # # collisions = torch.tensor([None] * self.num_envs), 
-            #                     # track_contact_forces = False, 
-            #                     prepare_contact_sensors = False
-            #                     ) # geometry view (useful to enable contact reporting)
-            # self._robots_geom_view.apply_collision_apis() # random data with GPU pipeline!!!
-
-            # self._robots_geometries = scene.add(self._robots_geom_view)
-
         if self.use_flat_ground:
 
             scene.add_default_ground_plane(z_position=0, 
@@ -804,8 +820,13 @@ class CustomTask(BaseTask):
         
         # set default camera viewport position and target
         self.set_initial_camera_params()
-        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
 
+        # init contact sensors
+
+        self.init_contact_sensors(self._world)
+                                
+        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
+        
     def set_initial_camera_params(self, 
                                 camera_position=[10, 10, 3], 
                                 camera_target=[0, 0, 0]):

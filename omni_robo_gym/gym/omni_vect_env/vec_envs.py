@@ -234,6 +234,7 @@ class RobotVecEnv(gym.Env):
 
         self._world.add_task(task)
         self.task = task
+        self.task.set_world(self._world)
 
         # filter collisions between envs
         self.task.apply_collision_filters(self._physics_scene_path, 
@@ -250,6 +251,9 @@ class RobotVecEnv(gym.Env):
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + "[render]: " + str(self._render))
 
         if init_sim:
+                        
+            # self.task.init_contact_sensors(self._world) # init. contact sensors (if any)
+            # for all environments 
 
             self._world.reset() # after the first reset we get get all quantities 
             # from the scene 
@@ -270,9 +274,6 @@ class RobotVecEnv(gym.Env):
             
             self.task.init_imp_control(default_jnt_pgain = self.task.default_jnt_stiffness, 
                             default_jnt_vgain = self.task.default_jnt_damping) # initialized the impedance controller
-
-            # self.task.init_contact_sensors(self._world) # init. contact sensors (if any)
-            # for all environments 
 
             self.task.reset()
 
