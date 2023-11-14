@@ -29,3 +29,6 @@ def check_server(server: str, path: str) -> bool:
 
 #### 2.0 Grid Cloner bug
 See `docs/grid_cloner_bugfix.py` for more details
+
+#### 3.0 Contact sensor bug
+When cloning environments, it's not possible to create contact sensors on the cloned environments because of a failed collision_API enabled flag option. Removing the check seems to recolve the problem without any major or noticeable issues.

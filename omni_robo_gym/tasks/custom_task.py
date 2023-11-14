@@ -18,11 +18,10 @@
 from omni.isaac.core.tasks.base_task import BaseTask
 from omni.isaac.core.articulations import ArticulationView
 from omni.isaac.core.prims import GeometryPrimView
+
 from omni.isaac.core.utils.viewports import set_camera_view
 
 from omni.isaac.core.world import World
-
-from omni.isaac.core.utils.rotations import euler_angles_to_quat 
 
 import omni.kit
 
@@ -44,6 +43,7 @@ from omni.isaac.core.scenes.scene import Scene
 
 from omni_robo_gym.utils.jnt_imp_cntrl import OmniJntImpCntrl
 from omni_robo_gym.utils.homing import OmniRobotHomer
+from omni_robo_gym.utils.contact_sensor import OmniContactSensors
 from omni_robo_gym.utils.defs import Journal
 from omni_robo_gym.utils.terrains import RlTerrains
 from abc import abstractmethod
@@ -57,7 +57,7 @@ class CustomTask(BaseTask):
                 robot_pkg_names: List[str] = None, 
                 contact_prims: Dict[str, List] = None,
                 contact_offsets: Dict[str, Dict[str, np.ndarray]] = None,
-                sensor_radius: Dict[str, Dict[str, np.ndarray]] = None,
+                sensor_radii: Dict[str, Dict[str, np.ndarray]] = None,
                 num_envs = 1,
                 device = "cuda", 
                 cloning_offset: np.array = None,
@@ -83,6 +83,8 @@ class CustomTask(BaseTask):
         
         self.robot_names = robot_names # these are (potentially) custom names to 
         self.robot_pkg_names = robot_pkg_names # will be used to search for URDF and SRDF packages
+
+        self.scene_setup_completed = False
 
         if self.robot_pkg_names is None:
             
@@ -150,6 +152,7 @@ class CustomTask(BaseTask):
         self._srdf_paths = {}
         self._robots_art_views = {}
         self._robots_articulations = {}
+        self._robots_geom_prim_views = {}
         self.robot_bodynames =  {}
         self.robot_n_links =  {}
         self.robot_n_dofs =  {}
@@ -171,14 +174,7 @@ class CustomTask(BaseTask):
         self.jnt_imp_controllers = {}
 
         self.homers = {} 
-        
-        self.contact_sensors = {} 
-        # key: robot_name. value: List[List[contact_sensors * n_sensors] * n_env]
-        self.contact_prims = contact_prims # for each robot, contact sensors is a list
-        # ordered as the provided contact_prims (for that robot)
-        self.contact_offsets = contact_offsets
-        self.sensor_radius = sensor_radius
-
+    
         self.default_jnt_stiffness = default_jnt_stiffness
         self.default_jnt_damping = default_jnt_damping
         
@@ -187,8 +183,6 @@ class CustomTask(BaseTask):
         self.spawning_radius = spawning_radius # [m] -> default distance between roots of robots in a single 
         # environment 
         self.calc_robot_distrib() # computes the offsets of robots withing each env.
-
-        # environment cloing stuff
         
         self._env_ns = "/World/envs"
         self._env_spacing = env_spacing # [m]
@@ -207,16 +201,16 @@ class CustomTask(BaseTask):
             
             self._cloning_offset = np.array([[0, 0, 0]] * self.num_envs)
         
-        # if len(self._cloning_offset[:, 0]) != self.num_envs or \
-        #     len(self._cloning_offset[0, :] != 3):
+        if len(self._cloning_offset[:, 0]) != self.num_envs or \
+            len(self._cloning_offset[0, :] != 3):
         
-        #     warn = f"[{self.__class__.__name__}]" + \
-        #                     f"[{self.journal.warning}]" + \
-        #                     ": provided cloning offsets are not of the right shape." + \
-        #                     " Resetting them to zero..."
-        #     print(warn)
+            warn = f"[{self.__class__.__name__}]" + \
+                            f"[{self.journal.warning}]" + \
+                            ": provided cloning offsets are not of the right shape." + \
+                            " Resetting them to zero..."
+            print(warn)
 
-        #     self._cloning_offset = np.array([[0, 0, 0]] * self.num_envs)
+            self._cloning_offset = np.array([[0, 0, 0]] * self.num_envs)
 
         # values used for defining RL buffers
         self._num_observations = 4
@@ -240,6 +234,19 @@ class CustomTask(BaseTask):
 
         self._world = None
         
+        self.omni_contact_sensors = {}
+        self.contact_prims = contact_prims
+        for robot_name in contact_prims:
+            
+            self.omni_contact_sensors[robot_name] = OmniContactSensors(
+                                name = robot_name, 
+                                n_envs = self.num_envs, 
+                                contact_prims = contact_prims, 
+                                contact_offsets = contact_offsets, 
+                                sensor_radii = sensor_radii,
+                                device = self.torch_device, 
+                                dtype = self.torch_dtype)
+
         # trigger __init__ of parent class
         BaseTask.__init__(self,
                         name=name, 
@@ -418,6 +425,35 @@ class CustomTask(BaseTask):
 
         return success
     
+    def init_base_contact_sensors(self):
+
+        for robot_name in self.contact_prims:
+            
+            # creates base contact sensor (which is then cloned)
+            self.omni_contact_sensors[robot_name].create_base_contact_sensor(
+                                                    self._world, 
+                                                    self._env_ns
+                                                )
+
+    def finalize_contact_sensors(self):
+
+        if self._world_initialized:
+
+            for robot_name in self.contact_prims:
+                
+                # creates base contact sensor (which is then cloned)
+                self.omni_contact_sensors[robot_name].finish_sensor_setup(
+                                                        self._world, 
+                                                        self._env_ns
+                                                    )
+
+        else:
+
+            exception = f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
+                "Before calling finalize_contact_sensors(), you need to reset the World at least once!"
+
+            raise Exception()
+
     def init_root_abs_offsets(self, 
                     robot_name: str):
             
@@ -618,7 +654,7 @@ class CustomTask(BaseTask):
         else:
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
-                        "Before calling _get_robot_info_from_world(), you need to reset the World at least once!")
+                        "Before calling fill_robot_info_from_world(), you need to reset the World at least once!")
 
     def init_homing_managers(self):
         
@@ -696,59 +732,6 @@ class CustomTask(BaseTask):
                             "joint impedance controller."
                             )
     
-    def init_contact_sensors(self, 
-                    world: omni.isaac.core.world.world.World):
-          
-        for robot in range(0, len(self.robot_names)): # for each robot
-            
-            robot_name = self.robot_names[robot]
-
-            self.contact_sensors[robot_name] = [None] * len(self._envs_prim_paths) # defaults to an empty list
-            
-            contact_link_names = self.contact_prims[robot_name]
-
-            for env in range(len(self._envs_prim_paths)): # for each environment
-                
-                self.contact_sensors[robot_name][env] = [] # defaults to an empty sensor list
-                
-                for contact in range(0, len(contact_link_names)): # for each contact
-                    
-                    contact_link_prim_path = self._env_ns + f"/env_{env}" + \
-                    "/" + robot_name + \
-                        "/" + contact_link_names[contact]
-                    
-                    # print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": applying collision API to " + 
-                    #         f"{contact_link_prim_path}...")
-                    
-                    # robots_geom_view = GeometryPrimView(
-                    #             prim_paths_expr = contact_link_prim_path, 
-                    #             # name=self._robot_name + "geom_views", 
-                    #             # # collisions = torch.tensor([None] * self.num_envs), 
-                    #             # track_contact_forces = False, 
-                    #             prepare_contact_sensors = False
-                    #             ) # geometry view (useful to enable contact reporting)
-                    # robots_geom_view.apply_collision_apis() # random data with GPU pipeline!!!
-                    # world.scene.add(robots_geom_view)
-                            
-                    sensor_prim_path = contact_link_prim_path + \
-                            "/contact_sensor" # contact sesnsor prim path
-
-                    print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": creating contact sensor at " + 
-                            f"{sensor_prim_path}...")
-                                        
-                    self.contact_sensors[robot_name][env].append(world.scene.add(
-                                ContactSensor(
-                                    prim_path=sensor_prim_path,
-                                    name=f"{robot_name}{env}_{contact_link_names[contact]}_contact_sensor",
-                                    min_threshold=0,
-                                    max_threshold=10000000,
-                                    radius=self.sensor_radius[robot_name][contact_link_names[contact]], 
-                                    translation=self.contact_offsets[robot_name][contact_link_names[contact]]
-                                )
-                            ))
-
-                    self.contact_sensors[robot_name][env][contact].add_raw_contact_data_to_frame()
-    
     def set_world(self,
                 world: World):
         
@@ -794,11 +777,18 @@ class CustomTask(BaseTask):
             
             robot_name = self.robot_names[i]
 
-            self._robots_art_views[robot_name] = ArticulationView(name = robot_name,
+            self._robots_art_views[robot_name] = ArticulationView(name = robot_name + "ArtView",
                                                         prim_paths_expr = self._env_ns + "/env*"+ "/" + robot_name, 
                                                         reset_xform_properties=False)
 
             self._robots_articulations[robot_name] = scene.add(self._robots_art_views[robot_name])
+
+            # self._robots_geom_prim_views[robot_name] = GeometryPrimView(name = robot_name + "GeomView",
+            #                                                 prim_paths_expr = self._env_ns + "/env*"+ "/" + robot_name,
+            #                                                 # prepare_contact_sensors = True
+            #                                             )
+
+            # self._robots_geom_prim_views[robot_name].apply_collision_apis() # to be able to apply contact sensors
 
         if self.use_flat_ground:
 
@@ -823,9 +813,10 @@ class CustomTask(BaseTask):
         self.set_initial_camera_params()
 
         # init contact sensors
+        self.init_base_contact_sensors()
+        
+        self.scene_setup_completed = True
 
-        self.init_contact_sensors(self._world)
-                                
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
         
     def set_initial_camera_params(self, 
