@@ -10,6 +10,8 @@ from typing import List, Dict
 from omni.isaac.core.world import World
 from omni.isaac.core.prims import RigidPrimView, RigidContactView
 
+from control_cluster_bridge.utilities.shared_mem import SharedMemSrvr, SharedMemClient, SharedStringArray
+
 class OmniContactSensors:
 
     def __init__(self, 
@@ -61,8 +63,8 @@ class OmniContactSensors:
         self.contact_sensors = [[None] * self.n_sensors] * n_envs # outer: environment, 
         # inner: contact sensor, ordered as in contact_prims
 
-        # self.contact_geom_prim_views = [None] * self.n_sensors
-        self.contact_views = [None] * self.n_sensors
+        self.contact_geom_prim_views = [None] * self.n_sensors
+        # self.contact_views = [None] * self.n_sensors
     
     def _parse_contact_dicts(self, 
                             name: str,
@@ -142,53 +144,70 @@ class OmniContactSensors:
         robot_name = self.name
         contact_link_names = self.contact_prims
 
-        # for sensor_idx in range(0, self.n_sensors): 
+        for sensor_idx in range(0, self.n_sensors): 
             
-        #     # we create views of the contact links for all envs, with collision API  
+            # we create views of the contact links for all envs
         
-        #     self.contact_views[sensor_idx] = RigidContactView(prim_paths_expr=envs_namespace + "/*/" + robot_name + \
-        #                                                 "/" + contact_link_names[sensor_idx],
-        #                                         name="RigidContactView" + contact_link_names[sensor_idx], 
-        #                                         reset_xform_properties=False, 
-        #                                         track_contact_forces=True, 
-        #                                         prepare_contact_sensors=True)
+            self.contact_geom_prim_views[sensor_idx] = RigidPrimView(prim_paths_expr=envs_namespace + "/env_*/" + robot_name + \
+                                                        "/" + contact_link_names[sensor_idx],
+                                                name="RigidPrimView" + contact_link_names[sensor_idx], 
+                                                contact_filter_prim_paths_expr= ["/World/terrain/GroundPlane/CollisionPlane"],
+                                                prepare_contact_sensors=True, 
+                                                track_contact_forces = True,
+                                                disable_stablization = False, 
+                                                reset_xform_properties=False,
+                                                max_contact_count = 1
+                                                )
+        
+            world.scene.add(self.contact_geom_prim_views[sensor_idx])   
+        
+        # for env_idx in range(0, self.n_envs):
+        # # env_idx = 0 # create contact sensors for base env only 
 
-        #     # and add them to the scene
-        
-        #     world.scene.add(self.contact_views[sensor_idx])   
-        
-        for env_idx in range(0, self.n_envs):
-        # env_idx = 0 # create contact sensors for base env only 
-
-            for sensor_idx in range(0, self.n_sensors):
+        #     for sensor_idx in range(0, self.n_sensors):
                 
-                contact_link_prim_path = envs_namespace + f"/env_{env_idx}" + \
-                    "/" + robot_name + \
-                        "/" + contact_link_names[sensor_idx]
+        #         contact_link_prim_path = envs_namespace + f"/env_{env_idx}" + \
+        #             "/" + robot_name + \
+        #                 "/" + contact_link_names[sensor_idx]
 
-                sensor_prim_path = contact_link_prim_path + \
-                            "/contact_sensor" # contact sensor prim path
+        #         sensor_prim_path = contact_link_prim_path + \
+        #                     "/contact_sensor" # contact sensor prim path
 
-                print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": creating contact sensor at " + 
-                            f"{sensor_prim_path}...")
+        #         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": creating contact sensor at " + 
+        #                     f"{sensor_prim_path}...")
 
-                contact_sensor = ContactSensor(
-                            prim_path=sensor_prim_path,
-                            name=f"{robot_name}{env_idx}_{contact_link_names[sensor_idx]}_contact_sensor",
-                            min_threshold=0,
-                            max_threshold=10000000,
-                            radius=self.sensor_radii[contact_link_names[sensor_idx]], 
-                            translation=self.contact_offsets[contact_link_names[sensor_idx]], 
-                            position=None
-                            )
+        #         contact_sensor = ContactSensor(
+        #                     prim_path=sensor_prim_path,
+        #                     name=f"{robot_name}{env_idx}_{contact_link_names[sensor_idx]}_contact_sensor",
+        #                     min_threshold=0,
+        #                     max_threshold=10000000,
+        #                     radius=self.sensor_radii[contact_link_names[sensor_idx]], 
+        #                     translation=self.contact_offsets[contact_link_names[sensor_idx]], 
+        #                     position=None
+        #                     )
 
-                self.contact_sensors[env_idx][sensor_idx] = world.scene.add(contact_sensor)
-                self.contact_sensors[env_idx][sensor_idx].add_raw_contact_data_to_frame()
+        #         self.contact_sensors[env_idx][sensor_idx] = world.scene.add(contact_sensor)
+        #         self.contact_sensors[env_idx][sensor_idx].add_raw_contact_data_to_frame()
 
-                print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": contact sensor at " + 
-                            f"{sensor_prim_path} created.")
-    def update(self):
+        #         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": contact sensor at " + 
+        #                     f"{sensor_prim_path} created.")
+
+    def get(self, 
+        dt: float, 
+        contact_link: str,
+        clone = False):
         
-        # fill contact tensors
+        index = -1
+        try:
         
-        a = 1
+            index = self.contact_prims.index(contact_link)
+    
+        except:
+            
+            exception = f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
+                f"could not find contact link {contact_link} in contact list {' '.join(self.contact_prims)}." 
+        
+            raise Exception(exception)
+
+        return self.contact_geom_prim_views[index].get_net_contact_forces(clone = clone, 
+                                        dt = sim_params["integration_dt"]).view()
