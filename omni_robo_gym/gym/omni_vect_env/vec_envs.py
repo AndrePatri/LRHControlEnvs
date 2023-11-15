@@ -57,12 +57,17 @@ class RobotVecEnv(gym.Env):
             print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": will run in headless mode")
             
             if enable_livestream:
+                 
                 experience = ""
+            
             elif enable_viewport:
-                experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.OmniRoboGym.headless.render.kit'
-                # experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.gym.headless.render.kit'
+                 
+                raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
+                            ": using viewport is not supported yet.")
+                
             else:
-                experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.OmniRoboGym.headless.kit'
+                 
+                experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnirobogym.headless.kit'
                 # experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.gym.headless.kit'
 
         self._simulation_app = SimulationApp({"headless": headless,

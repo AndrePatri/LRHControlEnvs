@@ -17,7 +17,6 @@
 # 
 from omni.isaac.core.tasks.base_task import BaseTask
 from omni.isaac.core.articulations import ArticulationView
-from omni.isaac.core.prims import GeometryPrimView
 
 from omni.isaac.core.utils.viewports import set_camera_view
 
@@ -201,16 +200,16 @@ class CustomTask(BaseTask):
             
             self._cloning_offset = np.array([[0, 0, 0]] * self.num_envs)
         
-        if len(self._cloning_offset[:, 0]) != self.num_envs or \
-            len(self._cloning_offset[0, :] != 3):
+        # if len(self._cloning_offset[:, 0]) != self.num_envs or \
+        #     len(self._cloning_offset[0, :] != 3):
         
-            warn = f"[{self.__class__.__name__}]" + \
-                            f"[{self.journal.warning}]" + \
-                            ": provided cloning offsets are not of the right shape." + \
-                            " Resetting them to zero..."
-            print(warn)
+        #     warn = f"[{self.__class__.__name__}]" + \
+        #                     f"[{self.journal.warning}]" + \
+        #                     ": provided cloning offsets are not of the right shape." + \
+        #                     " Resetting them to zero..."
+        #     print(warn)
 
-            self._cloning_offset = np.array([[0, 0, 0]] * self.num_envs)
+        #     self._cloning_offset = np.array([[0, 0, 0]] * self.num_envs)
 
         # values used for defining RL buffers
         self._num_observations = 4
@@ -417,7 +416,7 @@ class CustomTask(BaseTask):
 
         robot_base_prim_path = self._template_env_ns + "/" + robot_name
 
-        # moving def prim
+        # moving default prim to base prim path for cloning
         move_prim(robot_prim_path_default, # from
                 robot_base_prim_path) # to
 
@@ -425,35 +424,16 @@ class CustomTask(BaseTask):
 
         return success
     
-    def init_base_contact_sensors(self):
+    def init_contact_sensors(self):
 
         for robot_name in self.contact_prims:
             
             # creates base contact sensor (which is then cloned)
-            self.omni_contact_sensors[robot_name].create_base_contact_sensor(
+            self.omni_contact_sensors[robot_name].create_contact_sensors(
                                                     self._world, 
                                                     self._env_ns
                                                 )
-
-    def finalize_contact_sensors(self):
-
-        if self._world_initialized:
-
-            for robot_name in self.contact_prims:
-                
-                # creates base contact sensor (which is then cloned)
-                self.omni_contact_sensors[robot_name].finish_sensor_setup(
-                                                        self._world, 
-                                                        self._env_ns
-                                                    )
-
-        else:
-
-            exception = f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
-                "Before calling finalize_contact_sensors(), you need to reset the World at least once!"
-
-            raise Exception()
-
+                              
     def init_root_abs_offsets(self, 
                     robot_name: str):
             
@@ -758,6 +738,10 @@ class CustomTask(BaseTask):
                             self_collide=self_collide, 
                             merge_fixed=merge_fixed)
         
+        # init contact sensors
+        self.init_contact_sensors() # IMPORTANT: this has to be called
+        # before calling the clone() method!!! 
+            
         print(f"[{self.__class__.__name__}]" + \
             f"[{self.journal.status}]" + \
             ": cloning environments...")
@@ -811,9 +795,6 @@ class CustomTask(BaseTask):
         
         # set default camera viewport position and target
         self.set_initial_camera_params()
-
-        # init contact sensors
-        self.init_base_contact_sensors()
         
         self.scene_setup_completed = True
 
