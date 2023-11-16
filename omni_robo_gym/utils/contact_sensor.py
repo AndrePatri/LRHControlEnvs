@@ -26,6 +26,8 @@ class OmniContactSensors:
         # contact sensors abstraction for a single robot
         # over multiple environments
 
+        self.filter_path = "/World/terrain/GroundPlane/CollisionPlane"
+
         self.n_envs = n_envs
 
         self.device = device
@@ -151,12 +153,12 @@ class OmniContactSensors:
             self.contact_geom_prim_views[sensor_idx] = RigidPrimView(prim_paths_expr=envs_namespace + "/env_*/" + robot_name + \
                                                         "/" + contact_link_names[sensor_idx],
                                                 name="RigidPrimView" + contact_link_names[sensor_idx], 
-                                                contact_filter_prim_paths_expr= ["/World/terrain/GroundPlane/CollisionPlane"],
+                                                contact_filter_prim_paths_expr= [self.filter_path],
                                                 prepare_contact_sensors=True, 
                                                 track_contact_forces = True,
                                                 disable_stablization = False, 
                                                 reset_xform_properties=False,
-                                                max_contact_count = 1
+                                                max_contact_count = self.n_envs
                                                 )
         
             world.scene.add(self.contact_geom_prim_views[sensor_idx])   
@@ -210,4 +212,4 @@ class OmniContactSensors:
             raise Exception(exception)
 
         return self.contact_geom_prim_views[index].get_net_contact_forces(clone = clone, 
-                                        dt = sim_params["integration_dt"]).view()
+                                        dt = dt).view(self.n_envs, 3)
