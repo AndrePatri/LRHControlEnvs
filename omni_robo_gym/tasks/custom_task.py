@@ -45,6 +45,8 @@ from omni_robo_gym.utils.homing import OmniRobotHomer
 from omni_robo_gym.utils.contact_sensor import OmniContactSensors
 from omni_robo_gym.utils.defs import Journal
 from omni_robo_gym.utils.terrains import RlTerrains
+from omni_robo_gym.utils.math_utils import quat_to_omega
+
 from abc import abstractmethod
 from typing import List, Dict
 
@@ -52,6 +54,7 @@ class CustomTask(BaseTask):
 
     def __init__(self, 
                 name: str,
+                integration_dt: float,
                 robot_names: List[str],
                 robot_pkg_names: List[str] = None, 
                 contact_prims: Dict[str, List] = None,
@@ -76,6 +79,8 @@ class CustomTask(BaseTask):
         
         self.num_envs = num_envs
 
+        self.integration_dt = integration_dt
+        
         self.torch_device = torch.device(device) # defaults to "cuda" ("cpu" also valid)
 
         self.journal = Journal()
@@ -159,12 +164,16 @@ class CustomTask(BaseTask):
 
         self.root_p = {}
         self.root_q = {}
-        self.root_v = {}
-        self.root_omega = {}
         self.jnts_q = {} 
-        self.jnts_v = {}
+        self.root_p_prev = {} # used for num differentiation
+        self.root_q_prev = {} # used for num differentiation
+        self.jnts_q_prev = {} # used for num differentiation
         self.root_p_default = {} 
         self.root_q_default = {}
+
+        self.root_v = {}
+        self.root_omega = {}
+        self.jnts_v = {}
         
         self.root_abs_offsets = {}
 
@@ -449,8 +458,17 @@ class CustomTask(BaseTask):
                                 clone = True) # tuple: (pos, quat)
         
             self.root_p[robot_name] = pose[0]  
+            self.root_p_prev[robot_name] = pose[0]
+            self.root_p_default[robot_name] = torch.clone(pose[0]) + self.distr_offset[robot_name]
 
             self.root_q[robot_name] = pose[1] # root orientation
+            self.root_q_prev[robot_name] = pose[1]
+            self.root_q_default[robot_name] = torch.clone(pose[1])
+
+            self.jnts_q[robot_name] = self._robots_art_views[robot_name].get_joint_positions(
+                                            clone = True) # joint positions 
+            self.jnts_q_prev[robot_name] = self._robots_art_views[robot_name].get_joint_positions(
+                                            clone = True) 
 
             self.root_v[robot_name] = self._robots_art_views[robot_name].get_linear_velocities(
                                             clone = True) # root lin. velocity
@@ -458,15 +476,8 @@ class CustomTask(BaseTask):
             self.root_omega[robot_name] = self._robots_art_views[robot_name].get_angular_velocities(
                                             clone = True) # root ang. velocity
             
-            self.jnts_q[robot_name] = self._robots_art_views[robot_name].get_joint_positions(
-                                            clone = True) # joint positions 
-            
             self.jnts_v[robot_name] = self._robots_art_views[robot_name].get_joint_velocities( 
                                             clone = True) # joint velocities
-            
-            self.root_p_default[robot_name] = torch.clone(pose[0]) + self.distr_offset[robot_name]
-
-            self.root_q_default[robot_name] = torch.clone(pose[1])
 
             self.root_abs_offsets[robot_name] = torch.zeros((self.num_envs, 3), 
                                 device=self.torch_device) # reference clone positions
@@ -508,7 +519,8 @@ class CustomTask(BaseTask):
 
             self.distr_offset[self.robot_names[i]] = torch.stack(tensor_list, dim=0)
 
-    def _get_robots_state(self):
+    def _get_robots_state(self, 
+                    dt: float = None):
         
         for i in range(0, len(self.robot_names)):
 
@@ -518,21 +530,45 @@ class CustomTask(BaseTask):
                                             clone = True) # tuple: (pos, quat)
             
             self.root_p[robot_name][:, :] = pose[0]  
-
             self.root_q[robot_name][:, :] = pose[1] # root orientation
-
-            self.root_v[robot_name][:, :] = self._robots_art_views[robot_name].get_linear_velocities(
-                                            clone = True) # root lin. velocity
-            
-            self.root_omega[robot_name][:, :] = self._robots_art_views[robot_name].get_angular_velocities(
-                                            clone = True) # root ang. velocity
-            
             self.jnts_q[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_positions(
                                             clone = True) # joint positions 
+
+            if dt is None:
+                
+                # we get velocities from the simulation. This is not good since 
+                # these can actually represent artifacts which do not have physical meaning.
+                # It's better to obtain them by differentiation to avoid issues with controllers, etc...
+
+                self.root_v[robot_name][:, :] = self._robots_art_views[robot_name].get_linear_velocities(
+                                            clone = True) # root lin. velocity 
+                                            
+                self.root_omega[robot_name][:, :] = self._robots_art_views[robot_name].get_angular_velocities(
+                                                clone = True) # root ang. velocity
+                
+                self.jnts_v[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_velocities( 
+                                                clone = True) # joint velocities
             
-            self.jnts_v[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_velocities( 
-                                            clone = True) # joint velocities
+            else: 
+
+                # differentiate numerically
+
+                self.root_v[robot_name][:, :] = (self.root_p[robot_name][:, :] - \
+                                                self.root_p_prev[robot_name][:, :]) / dt 
+
+                self.root_omega[robot_name][:, :] = quat_to_omega(self.root_q[robot_name][:, :], 
+                                                            self.root_q_prev[robot_name][:, :], 
+                                                            dt)
+                
+                self.jnts_v[robot_name][:, :] = (self.jnts_q[robot_name][:, :] - \
+                                                self.jnts_q_prev[robot_name][:, :]) / dt
             
+                # update "previous" data for numerical differentiation
+
+                self.root_p_prev[robot_name][:, :] = self.root_p[robot_name][:, :] 
+                self.root_q_prev[robot_name][:, :] = self.root_q[robot_name][:, :]
+                self.jnts_q_prev[robot_name][:, :] = self.jnts_q[robot_name][:, :]
+                                            
     def world_was_initialized(self):
 
         self._world_initialized = True
@@ -815,12 +851,13 @@ class CustomTask(BaseTask):
         pass
 
     def reset(self, 
+            integration_dt: float = None,
             env_ids=None):
         
         self.set_robots_default_jnt_config()
         self.set_robots_root_default_config()
 
-        self._get_robots_state() # updates robot states
+        self._get_robots_state(integration_dt) # updates robot states
         
         for i in range(len(self.robot_names)):
             

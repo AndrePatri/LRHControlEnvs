@@ -152,7 +152,7 @@ class OmniContactSensors:
         
             self.contact_geom_prim_views[sensor_idx] = RigidPrimView(prim_paths_expr=envs_namespace + "/env_*/" + robot_name + \
                                                         "/" + contact_link_names[sensor_idx],
-                                                name="RigidPrimView" + contact_link_names[sensor_idx], 
+                                                name= self.name + "RigidPrimView" + contact_link_names[sensor_idx], 
                                                 contact_filter_prim_paths_expr= [self.filter_path],
                                                 prepare_contact_sensors=True, 
                                                 track_contact_forces = True,
