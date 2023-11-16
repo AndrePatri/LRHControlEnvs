@@ -94,6 +94,8 @@ class RobotVecEnv(gym.Env):
             enable_extension("omni.kit.livestream.native")
             enable_extension("omni.services.streaming.manager")
 
+        self.gpu_pipeline_enabled = False
+                 
     def set_task(self, 
                 task, 
                 backend="torch", 
@@ -118,6 +120,9 @@ class RobotVecEnv(gym.Env):
         if sim_params and "use_gpu_pipeline" in sim_params:
             if sim_params["use_gpu_pipeline"]:
                 device = torch.device("cuda") # 
+        
+        self.gpu_pipeline_enabled = sim_params["use_gpu_pipeline"]
+
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using device: " + str(device))
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using backend: " + backend)
 
@@ -256,9 +261,6 @@ class RobotVecEnv(gym.Env):
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + "[render]: " + str(self._render))
 
         if init_sim:
-                        
-            # self.task.init_contact_sensors(self._world) # init. contact sensors (if any)
-            # for all environments 
 
             self._world.reset() # after the first reset we get get all quantities 
             # from the scene 
