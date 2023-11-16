@@ -458,11 +458,11 @@ class CustomTask(BaseTask):
                                 clone = True) # tuple: (pos, quat)
         
             self.root_p[robot_name] = pose[0]  
-            self.root_p_prev[robot_name] = pose[0]
+            self.root_p_prev[robot_name] = torch.clone(pose[0])
             self.root_p_default[robot_name] = torch.clone(pose[0]) + self.distr_offset[robot_name]
 
             self.root_q[robot_name] = pose[1] # root orientation
-            self.root_q_prev[robot_name] = pose[1]
+            self.root_q_prev[robot_name] = torch.clone(pose[1])
             self.root_q_default[robot_name] = torch.clone(pose[1])
 
             self.jnts_q[robot_name] = self._robots_art_views[robot_name].get_joint_positions(
