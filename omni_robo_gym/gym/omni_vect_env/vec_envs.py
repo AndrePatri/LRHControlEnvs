@@ -141,7 +141,7 @@ class RobotVecEnv(gym.Env):
             
         if not("rendering_dt" in sim_params):
 
-            sim_params["rendering_dt"] = 1.0/60.0
+            sim_params["rendering_dt"] = sim_params["integration_dt"]
 
             print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using default rendering_dt of " + 
                 sim_params["rendering_dt"] + " s.")
@@ -149,7 +149,9 @@ class RobotVecEnv(gym.Env):
         self._world = World(
             stage_units_in_meters=1.0, 
             physics_dt=sim_params["integration_dt"], 
-            rendering_dt=sim_params["rendering_dt"],
+            rendering_dt=sim_params["rendering_dt"], # dt between rendering steps. Note: rendering means rendering a frame of 
+            # the current application and not only rendering a frame to the viewports/ cameras. 
+            # So UI elements of Isaac Sim will be refereshed with this dt as well if running non-headless
             backend=backend,
             device=str(device),
             physics_prim_path="/physicsScene", 
@@ -294,9 +296,13 @@ class RobotVecEnv(gym.Env):
         """
 
         if mode == "human":
+             
             self._world.render()
+             
         else:
+             
             gym.Env.render(self, mode=mode)
+    
         return
 
     def close(self) -> None:
