@@ -613,7 +613,6 @@ class JntImpCntrl:
                                                         torch.mul(self._vel_gains[selector],
                                                                 self.vel_err[selector])))
                                                         
-        
         else:
             
             if robot_indxs is None and jnt_indxs is None:

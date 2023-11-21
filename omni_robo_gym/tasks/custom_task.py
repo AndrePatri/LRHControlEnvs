@@ -34,7 +34,7 @@ from omni.isaac.core.utils.prims import move_prim
 from omni.isaac.cloner import GridCloner
 import omni.isaac.core.utils.prims as prim_utils
 
-from omni.isaac.sensor import ContactSensor
+# from omni.isaac.sensor import ContactSensor
 
 from omni.isaac.core.utils.stage import get_current_stage
 
@@ -67,6 +67,8 @@ class CustomTask(BaseTask):
                 self_collide: List[bool] = None,
                 merge_fixed: List[bool] = None,
                 replicate_physics: bool = True,
+                pos_iter_increase_factor: int = 1,
+                vel_iter_increase_factor: int = 1,
                 offset=None, 
                 env_spacing = 5.0, 
                 spawning_radius = 1.0,
@@ -157,6 +159,38 @@ class CustomTask(BaseTask):
         self._robots_art_views = {}
         self._robots_articulations = {}
         self._robots_geom_prim_views = {}
+
+        self._solver_position_iteration_counts = {}
+        self._solver_velocity_iteration_counts = {}
+        self._solver_stabilization_thresh = {}
+
+        self._pos_it_counts_increase_factor = pos_iter_increase_factor # by which factor to increase the default pos it count
+        self._vel_it_counts_increase_factor = vel_iter_increase_factor# by which factor to increase the default vel it count
+            
+        if (not isinstance(self._pos_it_counts_increase_factor, int)) or  \
+            (not self._pos_it_counts_increase_factor > 0):
+
+            warning = f"[{self.__class__.__name__}]" 
+                        + f"[{self.journal.warning}]" + 
+                        ": provided pos_iter_increase_factor should be integer and > 0. " + \
+                        "Resetting it to 1."
+
+            self._pos_it_counts_increase_factor = 1
+
+            print(warning)
+
+        if (not isinstance(self._vel_it_counts_increase_factor, int)) or  \
+            (not self._vel_it_counts_increase_factor > 0):
+
+            warning = f"[{self.__class__.__name__}]" 
+                        + f"[{self.journal.warning}]" + 
+                        ": provided vel_iter_increase_factor should be integer and > 0. " + \
+                        "Resetting it to 1."
+
+            self._vel_it_counts_increase_factor = 1
+            
+            print(warning)
+    
         self.robot_bodynames =  {}
         self.robot_n_links =  {}
         self.robot_n_dofs =  {}
@@ -190,7 +224,7 @@ class CustomTask(BaseTask):
         
         self.spawning_radius = spawning_radius # [m] -> default distance between roots of robots in a single 
         # environment 
-        self.calc_robot_distrib() # computes the offsets of robots withing each env.
+        self._calc_robot_distrib() # computes the offsets of robots withing each env.
         
         self._env_ns = "/World/envs"
         self._env_spacing = env_spacing # [m]
@@ -433,7 +467,7 @@ class CustomTask(BaseTask):
 
         return success
     
-    def init_contact_sensors(self):
+    def _init_contact_sensors(self):
 
         for robot_name in self.contact_prims:
             
@@ -443,7 +477,7 @@ class CustomTask(BaseTask):
                                                     self._env_ns
                                                 )
                               
-    def init_root_abs_offsets(self, 
+    def _init_root_abs_offsets(self, 
                     robot_name: str):
             
         self.root_abs_offsets[robot_name][:, 0:2]  = self.root_p[robot_name][:, 0:2]
@@ -483,7 +517,7 @@ class CustomTask(BaseTask):
                                 device=self.torch_device) # reference clone positions
             # on the ground plane (init to 0)
 
-            self.init_root_abs_offsets(robot_name)
+            self._init_root_abs_offsets(robot_name)
             
     def synch_default_root_states(self):
 
@@ -495,7 +529,7 @@ class CustomTask(BaseTask):
 
             self.root_q_default[robot_name][:, :] = self.root_q[robot_name]
 
-    def calc_robot_distrib(self):
+    def _calc_robot_distrib(self):
 
         import math
 
@@ -568,12 +602,40 @@ class CustomTask(BaseTask):
                 self.root_p_prev[robot_name][:, :] = self.root_p[robot_name][:, :] 
                 self.root_q_prev[robot_name][:, :] = self.root_q[robot_name][:, :]
                 self.jnts_q_prev[robot_name][:, :] = self.jnts_q[robot_name][:, :]
-                                            
-    def world_was_initialized(self):
+   
+    def post_initialization_steps(self):
 
-        self._world_initialized = True
+        self._world_initialized = True # used by other methods which nees to run
+        # only when the world was initialized
 
-    def set_robots_default_jnt_config(self):
+        
+        # populates robot info fields
+        self._fill_robot_info_from_world() 
+
+        # initializes homing managers
+        self._init_homing_managers() 
+
+        # initializes robot state data
+        self._init_robots_state()
+        
+        # default robot state
+        self._set_robots_default_jnt_config()
+        self._set_robots_root_default_config()
+
+        # initializes joint impedance controllers
+        self._init_imp_control(default_jnt_pgain = self.task.default_jnt_stiffness, 
+                        default_jnt_vgain = self.task.default_jnt_damping) 
+
+        # update solver options 
+        self._update_art_solver_options() 
+
+        self.reset()
+
+        self._get_solver_info() # get again solver option before printing everything
+
+        self._print_envs_info() # debug prints
+
+    def _set_robots_default_jnt_config(self):
         
         # we use the homing of the robots
         if (self._world_initialized):
@@ -593,10 +655,10 @@ class CustomTask(BaseTask):
         else:
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
-                        "Before calling _set_robots_default_jnt_config(), you need to reset the World" + \
+                        "Before calling __set_robots_default_jnt_config(), you need to reset the World" + \
                         " at least once and call _world_was_initialized()")
 
-    def set_robots_root_default_config(self):
+    def _set_robots_root_default_config(self):
         
         if (self._world_initialized):
 
@@ -610,7 +672,7 @@ class CustomTask(BaseTask):
         else:
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
-                        "Before calling set_robots_root_default_config(), you need to reset the World" + \
+                        "Before calling _set_robots_root_default_config(), you need to reset the World" + \
                         " at least once and call _world_was_initialized()")
         
 
@@ -626,7 +688,44 @@ class CustomTask(BaseTask):
                                 global_paths=[self._ground_plane_prim_path] # can collide with these prims
                             )
 
-    def print_envs_info(self):
+    def _get_solver_info(self):
+
+        for i in range(0, len(self.robot_names)):
+
+            robot_name = self.robot_names[i]
+
+            self._solver_position_iteration_counts[robot_name] = self._robots_art_views[robot_name].get_solver_position_iteration_counts()
+            self._solver_velocity_iteration_counts[robot_name] = self._robots_art_views[robot_name].get_solver_velocity_iteration_counts()
+            self._solver_stabilization_thresh[robot_name] = self._robots_art_views[robot_name].get_stabilization_thresholds()
+    
+    def _update_art_solver_options(self):
+        
+        # sets new solver iteration options for specifc articulations
+        
+        self._get_solver_info() # gets current solver info for the articulations of the 
+        # environments 
+        
+        if (self._world_initialized):
+
+            for i in range(0, len(self.robot_names)):
+
+                robot_name = self.robot_names[i]
+
+                # increase by a factor
+                self._solver_position_iteration_counts[robot_name] = self._solver_position_iteration_counts[robot_name] * \
+                                                                        self._pos_it_counts_increase_factor
+                self._solver_velocity_iteration_counts[robot_name] = self._solver_velocity_iteration_counts[robot_name] * \
+                                                                        self._vel_it_counts_increase_factor
+                
+                self._robots_art_views[robot_name].set_solver_position_iteration_counts(self._solver_position_iteration_counts[robot_name])
+                self._robots_art_views[robot_name].set_solver_velocity_iteration_counts(self._solver_velocity_iteration_counts[robot_name])
+        
+        else:
+
+            raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
+                            "Before calling update_art_solver_options(), you need to reset the World at least once!")
+            
+    def _print_envs_info(self):
         
         if (self._world_initialized):
             
@@ -635,6 +734,9 @@ class CustomTask(BaseTask):
             for i in range(0, len(self.robot_names)):
 
                 robot_name = self.robot_names[i]
+
+                self.get_solver_info()
+
                 print(f"[{robot_name}]")
                 print("bodies: " + str(self._robots_art_views[robot_name].body_names))
                 print("n. prims: " + str(self._robots_art_views[robot_name].count))
@@ -642,6 +744,10 @@ class CustomTask(BaseTask):
                 print("n. bodies: " + str(self._robots_art_views[robot_name].num_bodies))
                 print("n. dofs: " + str(self._robots_art_views[robot_name].num_dof))
                 print("dof names: " + str(self._robots_art_views[robot_name].dof_names))
+                print("solver_position_iteration_counts: " + str(self._solver_position_iteration_counts[robot_name]))
+                print("solver_velocity_iteration_counts: " + str(self._solver_velocity_iteration_counts[robot_name]))
+                print("stabiliz. thresholds: " + str(self._solver_stabilization_thresh[robot_name]))
+                
                 # print("dof limits: " + str(self._robots_art_views[robot_name].get_dof_limits()))
                 # print("effort modes: " + str(self._robots_art_views[robot_name].get_effort_modes()))
                 # print("dof gains: " + str(self._robots_art_views[robot_name].get_gains()))
@@ -652,9 +758,9 @@ class CustomTask(BaseTask):
         else:
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
-                            "Before calling _print_envs_info(), you need to reset the World at least once!")
+                            "Before calling __print_envs_info(), you need to reset the World at least once!")
 
-    def fill_robot_info_from_world(self):
+    def _fill_robot_info_from_world(self):
 
         if self._world_initialized:
             
@@ -670,9 +776,9 @@ class CustomTask(BaseTask):
         else:
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
-                        "Before calling fill_robot_info_from_world(), you need to reset the World at least once!")
+                        "Before calling _fill_robot_info_from_world(), you need to reset the World at least once!")
 
-    def init_homing_managers(self):
+    def _init_homing_managers(self):
         
         if self.world_was_initialized:
 
@@ -692,7 +798,7 @@ class CustomTask(BaseTask):
                             "homing manager."
                             )
         
-    def init_imp_control(self, 
+    def _init_imp_control(self, 
                 default_jnt_pgain = 300.0, 
                 default_jnt_vgain = 20.0, 
                 default_wheel_pgain = 0.0, # by default wheels are supposed to be controlled in velocity mode
@@ -756,7 +862,9 @@ class CustomTask(BaseTask):
     def set_up_scene(self, 
                     scene: Scene) -> None:
 
-        # this is called automatically
+        # this is called automatically by the environment BEFORE
+        # initializing the simulation
+
         for i in range(len(self.robot_names)):
             
             robot_name = self.robot_names[i]
@@ -775,7 +883,7 @@ class CustomTask(BaseTask):
                             merge_fixed=merge_fixed)
         
         # init contact sensors
-        self.init_contact_sensors() # IMPORTANT: this has to be called
+        self._init_contact_sensors() # IMPORTANT: this has to be called
         # before calling the clone() method!!! 
             
         print(f"[{self.__class__.__name__}]" + \
@@ -830,13 +938,13 @@ class CustomTask(BaseTask):
         # delete_prim(self._ground_plane_prim_path + "/SphereLight") # we remove the default spherical light
         
         # set default camera viewport position and target
-        self.set_initial_camera_params()
+        self._set_initial_camera_params()
         
         self.scene_setup_completed = True
 
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": done")
         
-    def set_initial_camera_params(self, 
+    def _set_initial_camera_params(self, 
                                 camera_position=[10, 10, 3], 
                                 camera_target=[0, 0, 0]):
         
@@ -847,27 +955,28 @@ class CustomTask(BaseTask):
     def post_reset(self):
         
         # post reset operations
-        
-        pass
+            
+        for i in range(len(self.robot_names)):
+            
+            robot_name = self.robot_names[i]
+
+            self._robots_art_views[robot_name].post_reset()
 
     def reset(self, 
             integration_dt: float = None,
             env_ids=None):
         
-        self.set_robots_default_jnt_config()
-        self.set_robots_root_default_config()
-
         self._get_robots_state(integration_dt) # updates robot states
         
         for i in range(len(self.robot_names)):
             
             robot_name = self.robot_names[i]
 
+            # resetting velocities
             self._robots_art_views[robot_name].set_velocities(torch.zeros((self.num_envs, 
                                                         6), device=self.torch_device))
-
-            self._robots_art_views[robot_name].post_reset()
-
+            
+            # resetting joint impedance controllers
             self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing())
             self.jnt_imp_controllers[robot_name].apply_refs()
 
@@ -877,6 +986,8 @@ class CustomTask(BaseTask):
                 robot_name: str) -> None:
         
         # apply actions to simulated robot
+        # to be overriden by child class depending
+        # on specific needs
 
         pass
 

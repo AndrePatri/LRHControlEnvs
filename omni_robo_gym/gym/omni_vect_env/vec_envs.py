@@ -271,22 +271,8 @@ class RobotVecEnv(gym.Env):
             # that the first reset was called -> all info is now available
             # to be retrieved
 
-            self.task.fill_robot_info_from_world() # populates robot info fields
-            # in task
-
-            self.task.init_homing_managers() 
-
-            self.task._init_robots_state()
-
-            # self.task.set_robots_default_jnt_config()
-            # self.task.set_robots_root_default_config()
-            
-            self.task.init_imp_control(default_jnt_pgain = self.task.default_jnt_stiffness, 
-                            default_jnt_vgain = self.task.default_jnt_damping) # initialized the impedance controller
-
-            self.task.reset()
-
-            self.task.print_envs_info() # debug prints
+            self.task.post_initialization_steps() # performs initializations 
+            # steps after the fisrt world reset was called
 
     def render(self, mode="human") -> None:
         """ Step the renderer.
