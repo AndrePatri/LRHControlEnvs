@@ -25,11 +25,13 @@ Installation instructions:
 
 - To be able to run any script with dependencies on Omniverse packages, it's necessary to first source ```${HOME}/.local/share/ov/pkg/isaac_sim-*/setup_conda_env.sh```.
 
+OmniRoboGym uses URDF and SRDF xacro files to import and load the robot into IsaacSim. For an example on how to structure you urdf/srdf folders, have a look at [these](https://github.com/AndrePatri/LRhcExamples) examples.
+
 External dependencies to be installed separately: 
 
-- [Omniverse Isaac Sim](https://docs.omniverse.nvidia.com/app_isaacsim/app_isaacsim.html), photo-realistic GPU accelerated simulatorfrom NVIDIA.
+- [Omniverse Isaac Sim](https://developer.nvidia.com/isaac-sim), photo-realistic GPU accelerated simulatorfrom NVIDIA.
 
 Other dependencies included in the environment thorough Anaconda which can optionally be installed directly from source for development purposes: 
 - [CoClusterBridge](https://github.com/AndrePatri/CoClusterBridge): utilities to create CPU-based control cluster to be interfaced with GPU-based simulators using shared memory for minimum latency.
 
-Optionally, the package is also available thorugh Anaconda at [omni_robo_gym](https://anaconda.org/andrepatri/omni_robo_gym).
+The package is also available thorugh Anaconda at [omni_robo_gym](https://anaconda.org/andrepatri/omni_robo_gym).

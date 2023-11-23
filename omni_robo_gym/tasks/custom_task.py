@@ -477,7 +477,7 @@ class CustomTask(BaseTask):
                                                     self._env_ns
                                                 )
                               
-    def _init_root_abs_offsets(self, 
+    def init_root_abs_offsets(self, 
                     robot_name: str):
             
         self.root_abs_offsets[robot_name][:, 0:2]  = self.root_p[robot_name][:, 0:2]
@@ -517,7 +517,7 @@ class CustomTask(BaseTask):
                                 device=self.torch_device) # reference clone positions
             # on the ground plane (init to 0)
 
-            self._init_root_abs_offsets(robot_name)
+            self.init_root_abs_offsets(robot_name)
             
     def synch_default_root_states(self):
 
