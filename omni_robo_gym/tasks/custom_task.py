@@ -170,10 +170,10 @@ class CustomTask(BaseTask):
         if (not isinstance(self._pos_it_counts_increase_factor, int)) or  \
             (not self._pos_it_counts_increase_factor > 0):
 
-            warning = f"[{self.__class__.__name__}]" 
-                        + f"[{self.journal.warning}]" + 
-                        ": provided pos_iter_increase_factor should be integer and > 0. " + \
-                        "Resetting it to 1."
+            warning = f"[{self.__class__.__name__}]" + \
+                    f"[{self.journal.warning}]" + \
+                    ": provided pos_iter_increase_factor should be integer and > 0. " + \
+                    "Resetting it to 1."
 
             self._pos_it_counts_increase_factor = 1
 
@@ -182,8 +182,8 @@ class CustomTask(BaseTask):
         if (not isinstance(self._vel_it_counts_increase_factor, int)) or  \
             (not self._vel_it_counts_increase_factor > 0):
 
-            warning = f"[{self.__class__.__name__}]" 
-                        + f"[{self.journal.warning}]" + 
+            warning = f"[{self.__class__.__name__}]" + \
+                        f"[{self.journal.warning}]" + \
                         ": provided vel_iter_increase_factor should be integer and > 0. " + \
                         "Resetting it to 1."
 
@@ -350,7 +350,7 @@ class CustomTask(BaseTask):
                 xacro_cmd = ["xacro"] + [xacro_path] + ["-o"] + [self._srdf_paths[robot_name]]
 
             else:
-
+                
                 xacro_cmd = ["xacro"] + [xacro_path] + cmds + ["-o"] + [self._srdf_paths[robot_name]]
 
         if self._xrdf_cmds() is None:
@@ -608,7 +608,6 @@ class CustomTask(BaseTask):
         self._world_initialized = True # used by other methods which nees to run
         # only when the world was initialized
 
-        
         # populates robot info fields
         self._fill_robot_info_from_world() 
 
@@ -623,8 +622,8 @@ class CustomTask(BaseTask):
         self._set_robots_root_default_config()
 
         # initializes joint impedance controllers
-        self._init_imp_control(default_jnt_pgain = self.task.default_jnt_stiffness, 
-                        default_jnt_vgain = self.task.default_jnt_damping) 
+        self._init_imp_control(default_jnt_pgain = self.default_jnt_stiffness, 
+                        default_jnt_vgain = self.default_jnt_damping) 
 
         # update solver options 
         self._update_art_solver_options() 
@@ -656,7 +655,7 @@ class CustomTask(BaseTask):
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
                         "Before calling __set_robots_default_jnt_config(), you need to reset the World" + \
-                        " at least once and call _world_was_initialized()")
+                        " at least once and call _post_initialization_steps()")
 
     def _set_robots_root_default_config(self):
         
@@ -673,7 +672,7 @@ class CustomTask(BaseTask):
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
                         "Before calling _set_robots_root_default_config(), you need to reset the World" + \
-                        " at least once and call _world_was_initialized()")
+                        " at least once and call _post_initialization_steps()")
         
 
         return True
@@ -735,8 +734,6 @@ class CustomTask(BaseTask):
 
                 robot_name = self.robot_names[i]
 
-                self.get_solver_info()
-
                 print(f"[{robot_name}]")
                 print("bodies: " + str(self._robots_art_views[robot_name].body_names))
                 print("n. prims: " + str(self._robots_art_views[robot_name].count))
@@ -780,7 +777,7 @@ class CustomTask(BaseTask):
 
     def _init_homing_managers(self):
         
-        if self.world_was_initialized:
+        if self._world_initialized:
 
             for i in range(0, len(self.robot_names)):
 
@@ -794,7 +791,7 @@ class CustomTask(BaseTask):
         else:
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + ": you should reset the World at least once and call the " + \
-                            "world_was_initialized() method before initializing the " + \
+                            "post_initialization_steps() method before initializing the " + \
                             "homing manager."
                             )
         
@@ -804,7 +801,7 @@ class CustomTask(BaseTask):
                 default_wheel_pgain = 0.0, # by default wheels are supposed to be controlled in velocity mode
                 default_wheel_vgain = 10.0):
 
-        if self.world_was_initialized:
+        if self._world_initialized:
             
             for i in range(0, len(self.robot_names)):
 
@@ -850,7 +847,7 @@ class CustomTask(BaseTask):
         else:
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + ": you should reset the World at least once and call the " + \
-                            "world_was_initialized() method before initializing the " + \
+                            "post_initialization_steps() method before initializing the " + \
                             "joint impedance controller."
                             )
     

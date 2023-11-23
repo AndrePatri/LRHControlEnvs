@@ -266,10 +266,6 @@ class RobotVecEnv(gym.Env):
 
             self._world.reset() # after the first reset we get get all quantities 
             # from the scene 
-            
-            self.task.world_was_initialized() # we signal the task 
-            # that the first reset was called -> all info is now available
-            # to be retrieved
 
             self.task.post_initialization_steps() # performs initializations 
             # steps after the fisrt world reset was called
