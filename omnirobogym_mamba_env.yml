@@ -5,7 +5,9 @@ channels:
   - nvidia
   - conda-forge
   - omnia
+  - robostack-staging
   - AndrePatri
+  
 dependencies: 
   - python=3.10
   - pip
@@ -24,6 +26,7 @@ dependencies:
   - eigen3
   - posix_ipc=1.0.4
   - rospkg=1.5.0
+  - ros-humble-xacro
   - empy 
   - python-devtools
   - perf_sleep
