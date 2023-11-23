@@ -11,7 +11,7 @@ channels:
 dependencies: 
   - python=3.10
   - pip
-  - pytorch
+  - pytorch == 2.0.1
   - torchvision 
   - torchaudio 
   - cuda-toolkit=11.7
