@@ -809,7 +809,7 @@ class CustomTask(BaseTask):
         # updates joint imp. controller with new impedance values
         
         info = f"[{self.__class__.__name__}]" + f"[{self.journal.info}]: " + \
-                        f"setting startup joint impedances..."
+                        f"updating joint impedances..."
         print(info)
         
         gains_pos = torch.full((self.num_envs, \
@@ -860,7 +860,7 @@ class CustomTask(BaseTask):
             print(warning)
         
         info = f"[{self.__class__.__name__}]" + f"[{self.journal.info}]: " + \
-            f"joint impedances set."
+            f"joint impedances updated."
         
         print(info)
     
