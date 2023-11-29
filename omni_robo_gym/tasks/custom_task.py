@@ -75,6 +75,8 @@ class CustomTask(BaseTask):
                 use_flat_ground = True,
                 default_jnt_stiffness = 300.0,
                 default_jnt_damping = 20.0,
+                default_wheel_stiffness = 0.0,
+                default_wheel_damping = 10.0,
                 dtype = torch.float64) -> None:
 
         self.torch_dtype = dtype
@@ -219,7 +221,9 @@ class CustomTask(BaseTask):
     
         self.default_jnt_stiffness = default_jnt_stiffness
         self.default_jnt_damping = default_jnt_damping
-        
+        self.default_wheel_stiffness = default_wheel_stiffness
+        self.default_wheel_damping = default_wheel_damping
+
         self.use_flat_ground = use_flat_ground
         
         self.spawning_radius = spawning_radius # [m] -> default distance between roots of robots in a single 
@@ -623,7 +627,9 @@ class CustomTask(BaseTask):
 
         # initializes joint impedance controllers
         self._init_imp_control(default_jnt_pgain = self.default_jnt_stiffness, 
-                        default_jnt_vgain = self.default_jnt_damping) 
+                default_jnt_vgain = self.default_jnt_damping, 
+                default_wheel_pgain = self.default_wheel_stiffness,
+                default_wheel_vgain = self.default_wheel_damping) 
 
         # update solver options 
         self._update_art_solver_options() 
