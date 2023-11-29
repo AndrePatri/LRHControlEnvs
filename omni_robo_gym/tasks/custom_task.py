@@ -218,12 +218,13 @@ class CustomTask(BaseTask):
         self.jnt_imp_controllers = {}
 
         self.homers = {} 
-    
+        
+        # default jnt impedance settings
         self.default_jnt_stiffness = default_jnt_stiffness
         self.default_jnt_damping = default_jnt_damping
         self.default_wheel_stiffness = default_wheel_stiffness
         self.default_wheel_damping = default_wheel_damping
-
+        
         self.use_flat_ground = use_flat_ground
         
         self.spawning_radius = spawning_radius # [m] -> default distance between roots of robots in a single 
@@ -626,10 +627,7 @@ class CustomTask(BaseTask):
         self._set_robots_root_default_config()
 
         # initializes joint impedance controllers
-        self._init_imp_control(default_jnt_pgain = self.default_jnt_stiffness, 
-                default_jnt_vgain = self.default_jnt_damping, 
-                default_wheel_pgain = self.default_wheel_stiffness,
-                default_wheel_vgain = self.default_wheel_damping) 
+        self._init_jnt_imp_control() 
 
         # update solver options 
         self._update_art_solver_options() 
@@ -800,38 +798,100 @@ class CustomTask(BaseTask):
                             "post_initialization_steps() method before initializing the " + \
                             "homing manager."
                             )
-        
-    def _init_imp_control(self, 
-                default_jnt_pgain = 300.0, 
-                default_jnt_vgain = 20.0, 
-                default_wheel_pgain = 0.0, # by default wheels are supposed to be controlled in velocity mode
-                default_wheel_vgain = 10.0):
+    
+    def update_jnt_imp_control(self, 
+                    robot_name: str,
+                    jnt_stiffness: float, 
+                    jnt_damping: float, 
+                    wheel_stiffness: float, 
+                    wheel_damping: float):
 
+        # updates joint imp. controller with new impedance values
+        
+        info = f"[{self.__class__.__name__}]" + f"[{self.journal.info}]: " + \
+                        f"setting startup joint impedances..."
+        print(info)
+        
+        gains_pos = torch.full((self.num_envs, \
+                                self.jnt_imp_controllers[self.robot_names[i]].n_dofs), 
+                    jnt_stiffness, 
+                    device = self.torch_device, 
+                    dtype=self.torch_dtype)
+        gains_vel = torch.full((self.num_envs, \
+                                self.jnt_imp_controllers[self.robot_names[i]].n_dofs), 
+                    jnt_damping, 
+                    device = self.torch_device, 
+                    dtype=self.torch_dtype)
+        
+        success = self.jnt_imp_controllers[self.robot_names[i]].set_gains(
+                                    pos_gains = gains_pos,
+                                    vel_gains = gains_vel)
+        
+        if not all(success):
+            
+            warning = f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]: " + \
+            f"impedance controller could not set gains."
+
+            print(warning)
+
+        # wheels are velocity-controlled
+        wheels_indxs = self.jnt_imp_controllers[self.robot_names[i]].get_jnt_idxs_matching(
+                                name_pattern="wheel")
+        wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                    wheel_stiffness, 
+                                    device = self.torch_device, 
+                                    dtype=self.torch_dtype)
+        
+        wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                    wheel_damping, 
+                                    device = self.torch_device, 
+                                    dtype=self.torch_dtype)
+        
+        success_wheels = self.jnt_imp_controllers[self.robot_names[i]].set_gains(
+                            pos_gains = wheels_pos_gains,
+                            vel_gains = wheels_vel_gains,
+                            jnt_indxs=wheels_indxs)
+
+        if not all(success_wheels):
+            
+            warning = f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]: " + \
+            f"impedance controller could not set wheel gains."
+
+            print(warning)
+        
+        info = f"[{self.__class__.__name__}]" + f"[{self.journal.info}]: " + \
+            f"joint impedances set."
+        
+        print(info)
+    
+    def _init_jnt_imp_control(self):
+    
         if self._world_initialized:
             
             for i in range(0, len(self.robot_names)):
 
                 robot_name = self.robot_names[i]
                 
+                # creates impedance controller
                 self.jnt_imp_controllers[robot_name] = OmniJntImpCntrl(articulation=self._robots_art_views[robot_name],
-                                                default_pgain = default_jnt_pgain, 
-                                                default_vgain = default_jnt_vgain,
-                                                device= self.torch_device, 
-                                                dtype=self.torch_dtype)
+                                            default_pgain = self.default_jnt_stiffness, # defaults
+                                            default_vgain = self.default_jnt_damping,
+                                            device= self.torch_device, 
+                                            dtype=self.torch_dtype)
 
-                # we override internal default gains for the wheels, which are usually
-                # velocity controlled
+                # we override internal default gains only for the wheels (which btw are usually
+                # velocity controlled)
                 wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(name_pattern="wheel")
 
                 if wheels_indxs.numel() != 0: # the robot has wheels
 
                     wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                                default_wheel_pgain, 
+                                                self.default_wheel_stiffness, 
                                                 device = self.torch_device, 
                                                 dtype=self.torch_dtype)
                     
                     wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                                default_wheel_vgain, 
+                                                self.default_wheel_damping, 
                                                 device = self.torch_device, 
                                                 dtype=self.torch_dtype)
 
