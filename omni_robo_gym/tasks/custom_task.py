@@ -813,17 +813,17 @@ class CustomTask(BaseTask):
         print(info)
         
         gains_pos = torch.full((self.num_envs, \
-                                self.jnt_imp_controllers[self.robot_names[i]].n_dofs), 
+                                self.jnt_imp_controllers[robot_name].n_dofs), 
                     jnt_stiffness, 
                     device = self.torch_device, 
                     dtype=self.torch_dtype)
         gains_vel = torch.full((self.num_envs, \
-                                self.jnt_imp_controllers[self.robot_names[i]].n_dofs), 
+                                self.jnt_imp_controllers[robot_name].n_dofs), 
                     jnt_damping, 
                     device = self.torch_device, 
                     dtype=self.torch_dtype)
         
-        success = self.jnt_imp_controllers[self.robot_names[i]].set_gains(
+        success = self.jnt_imp_controllers[robot_name].set_gains(
                                     pos_gains = gains_pos,
                                     vel_gains = gains_vel)
         
@@ -835,7 +835,7 @@ class CustomTask(BaseTask):
             print(warning)
 
         # wheels are velocity-controlled
-        wheels_indxs = self.jnt_imp_controllers[self.robot_names[i]].get_jnt_idxs_matching(
+        wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(
                                 name_pattern="wheel")
         wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
                                     wheel_stiffness, 
@@ -847,7 +847,7 @@ class CustomTask(BaseTask):
                                     device = self.torch_device, 
                                     dtype=self.torch_dtype)
         
-        success_wheels = self.jnt_imp_controllers[self.robot_names[i]].set_gains(
+        success_wheels = self.jnt_imp_controllers[robot_name].set_gains(
                             pos_gains = wheels_pos_gains,
                             vel_gains = wheels_vel_gains,
                             jnt_indxs=wheels_indxs)
