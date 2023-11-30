@@ -77,11 +77,14 @@ class CustomTask(BaseTask):
                 default_jnt_damping = 20.0,
                 default_wheel_stiffness = 0.0,
                 default_wheel_damping = 10.0,
+                override_art_controller = False,
                 dtype = torch.float64) -> None:
 
         self.torch_dtype = dtype
         
         self.num_envs = num_envs
+
+        self.override_art_controller = override_art_controller
 
         self.integration_dt = integration_dt
         
@@ -876,6 +879,7 @@ class CustomTask(BaseTask):
                 self.jnt_imp_controllers[robot_name] = OmniJntImpCntrl(articulation=self._robots_art_views[robot_name],
                                             default_pgain = self.default_jnt_stiffness, # defaults
                                             default_vgain = self.default_jnt_damping,
+                                            override_art_controller=self.override_art_controller,
                                             device= self.torch_device, 
                                             dtype=self.torch_dtype)
 
@@ -1041,7 +1045,7 @@ class CustomTask(BaseTask):
             
             # resetting joint impedance controllers
             self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing())
-            self.jnt_imp_controllers[robot_name].apply_refs()
+            self.jnt_imp_controllers[robot_name].apply_cmds()
 
     @abstractmethod
     def pre_physics_step(self, 
