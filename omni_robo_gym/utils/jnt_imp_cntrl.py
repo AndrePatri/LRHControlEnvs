@@ -706,9 +706,13 @@ class OmniJntImpCntrl:
                 device: torch.device = torch.device("cpu"), 
                 filter_BW = 50.0, # [Hz]
                 filter_dt = None, 
+                override_art_controller = False,
                 dtype = torch.double): # [s]
         
         self.torch_dtype = dtype
+
+        self.override_art_controller = override_art_controller # whether to override Isaac's internal joint
+        # articulation PD controller or not
 
         self.journal = Journal()
         
