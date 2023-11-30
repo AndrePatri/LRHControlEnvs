@@ -845,6 +845,8 @@ class OmniJntImpCntrl:
                                             torch.mul(self._vel_gains,
                                                     self._vel_err)))
 
+                torch.cuda.synchronize()
+                
                 # apply only effort (comprehensive of all imp. terms)
                 self._articulation_view.set_joint_efforts(self._imp_eff)
 
@@ -868,6 +870,8 @@ class OmniJntImpCntrl:
                                                     self._pos_err),
                                             torch.mul(self._vel_gains,
                                                     self._vel_err)))
+
+                torch.cuda.synchronize()
 
                 # apply only effort (comprehensive of all imp. terms)
                 self._articulation_view.set_joint_efforts(self._imp_eff)
