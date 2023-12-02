@@ -135,6 +135,12 @@ class OmniJntImpCntrl:
         self.gains_initialized = False
         self.refs_initialized = False
 
+        self._default_pgain = default_pgain
+        self._default_vgain = default_vgain
+
+        self._filter_BW = filter_BW
+        self._filter_dt = filter_dt
+        
         self.journal = Journal() # for logging
         
         self._articulation_view = articulation # used to actually apply control
@@ -166,25 +172,6 @@ class OmniJntImpCntrl:
         
         self._backend = "torch"
 
-        # we assume diagonal joint impedance gain matrices, so we can save on memory and only store the diagonal
-        self._default_pgain = default_pgain
-        self._default_vgain = default_vgain
-        self._pos_gains =  torch.full((self.num_robots, self.n_dofs), 
-                                    self._default_pgain, 
-                                    device = self._device, 
-                                    dtype=self.torch_dtype)
-        self._vel_gains = torch.full((self.num_robots, self.n_dofs), 
-                                    self._default_vgain,
-                                    device = self._device, 
-                                    dtype=self.torch_dtype)
-        
-        self._eff_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=self.torch_dtype)
-        self._pos_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=self.torch_dtype)
-        self._vel_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=self.torch_dtype)
-        
         self._pos_err = None
         self._vel_err = None
         
@@ -194,66 +181,40 @@ class OmniJntImpCntrl:
         
         self._imp_eff = None
 
-        if self.override_art_controller:
-            
-            # saving memory (these are not necessary if not overriding Isaac's art. controller)
-                                        
-            self._pos_err = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._vel_err = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            
-            self._pos = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._vel = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._eff = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            
-            self._imp_eff = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-
         self._filter_available = False
+
         if filter_dt is not None:
 
             self._filter_BW = filter_BW
-            self.filter_dt = filter_dt
+            self._filter_dt = filter_dt
 
-            self._pos_ref_filter = FirstOrderFilter(dt=self.filter_dt, 
+            self._pos_ref_filter = FirstOrderFilter(dt=self._filter_dt, 
                                     filter_BW=self._filter_BW, 
                                     rows=self.num_robots, 
                                     cols=self.n_dofs, 
                                     device=self._device, 
                                     dtype=self.torch_dtype)
-            self._vel_ref_filter = FirstOrderFilter(dt=self.filter_dt, 
+            self._vel_ref_filter = FirstOrderFilter(dt=self._filter_dt, 
                                     filter_BW=self._filter_BW, 
                                     rows=self.num_robots, 
                                     cols=self.n_dofs, 
                                     device=self._device, 
                                     dtype=self.torch_dtype)
-            self._eff_ref_filter = FirstOrderFilter(dt=self.filter_dt, 
+            self._eff_ref_filter = FirstOrderFilter(dt=self._filter_dt, 
                                     filter_BW=self._filter_BW, 
                                     rows=self.num_robots, 
                                     cols=self.n_dofs, 
                                     device=self._device, 
                                     dtype=self.torch_dtype)
             
-            self._pos_ref_filter.reset()
-            self._vel_ref_filter.reset()
-            self._eff_ref_filter.reset()
-
             self._filter_available = True
-    
+
         else:
 
             print(f"[{self.__class__.__name__}]"  + f"[{self.journal.warning}]" + \
                     ": no filter dt provided -> reference filter will not be available")
-
-        if self.init_on_creation:
-        
-            self._initialize_gains()
-
-            self._initialize_refs()
+                                      
+        self.reset()
                 
     def _initialize_gains(self):
         
@@ -294,25 +255,6 @@ class OmniJntImpCntrl:
     
             self.refs_initialized = True
     
-    def _get_jnt_imp_action(self):
-        
-        self.pos_err[selector] = torch.sub(self._pos_ref[selector], 
-                                            self._pos[selector])
-
-        self.vel_err[selector] = torch.sub(self._vel_ref[selector], 
-                self._vel[selector])
-                              
-        torch.add(self._eff_ref, 
-                torch.add(
-                    torch.mul(self._pos_gains, 
-                            self.pos_err),
-                    torch.mul(self._vel_gains,
-                            self.vel_err)))
-                
-        imp_effort
-      
-        return imp_effort
-
     def _validate_selectors(self, 
                 robot_indxs: torch.Tensor = None, 
                 jnt_indxs: torch.Tensor = None):
@@ -666,14 +608,6 @@ class OmniJntImpCntrl:
                 else:
 
                     success[2] = False
-        
-        else:
-            
-            warning = f"[{self.__class__.__name__}]"  + \
-                    f"[{self.journal.warning}]" + f"[{self.update_state.__name__}]" + \
-                    ": update_state() won't do anything, since override_art_controller is set to False"
-            
-            print(warning)
     
         return success
 
@@ -807,6 +741,79 @@ class OmniJntImpCntrl:
 
         return success
 
+    def reset(self):
+        
+        self.gains_initialized = False
+        self.refs_initialized = False
+        
+        # we assume diagonal joint impedance gain matrices, so we can save on memory and only store the diagonal
+        
+        self._pos_gains =  torch.full((self.num_robots, self.n_dofs), 
+                                    self._default_pgain, 
+                                    device = self._device, 
+                                    dtype=self.torch_dtype)
+        self._vel_gains = torch.full((self.num_robots, self.n_dofs), 
+                                    self._default_vgain,
+                                    device = self._device, 
+                                    dtype=self.torch_dtype)
+        
+        self._eff_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                    dtype=self.torch_dtype)
+        self._pos_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                    dtype=self.torch_dtype)
+        self._vel_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                    dtype=self.torch_dtype)
+            
+        if self.override_art_controller:
+            
+            # saving memory (these are not necessary if not overriding Isaac's art. controller)
+                                        
+            self._pos_err = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._vel_err = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            
+            self._pos = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._vel = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._eff = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            
+            self._imp_eff = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+
+        if self._filter_dt is not None:
+
+            self._pos_ref_filter = FirstOrderFilter(dt=self._filter_dt, 
+                                    filter_BW=self._filter_BW, 
+                                    rows=self.num_robots, 
+                                    cols=self.n_dofs, 
+                                    device=self._device, 
+                                    dtype=self.torch_dtype)
+            self._vel_ref_filter = FirstOrderFilter(dt=self._filter_dt, 
+                                    filter_BW=self._filter_BW, 
+                                    rows=self.num_robots, 
+                                    cols=self.n_dofs, 
+                                    device=self._device, 
+                                    dtype=self.torch_dtype)
+            self._eff_ref_filter = FirstOrderFilter(dt=self._filter_dt, 
+                                    filter_BW=self._filter_BW, 
+                                    rows=self.num_robots, 
+                                    cols=self.n_dofs, 
+                                    device=self._device, 
+                                    dtype=self.torch_dtype)
+            
+            self._pos_ref_filter.reset()
+            self._vel_ref_filter.reset()
+            self._eff_ref_filter.reset()
+
+        if self.init_on_creation:
+        
+            self._initialize_gains()
+
+            self._initialize_refs()
+                
     def apply_cmds(self, 
             filter = False):
 
@@ -873,6 +880,17 @@ class OmniJntImpCntrl:
 
                 torch.cuda.synchronize()
 
+                print("Impedance controller:")
+                print("Pos err")
+                print(self._pos_err)
+                print("Vel err")
+                print(self._vel_err)
+                print("vel")
+                print(self._vel)
+                print("vel_ref")
+                print(self._vel_ref)
+                print("Imp eff")
+                print(self._imp_eff)
                 # apply only effort (comprehensive of all imp. terms)
                 self._articulation_view.set_joint_efforts(self._imp_eff)
                               
