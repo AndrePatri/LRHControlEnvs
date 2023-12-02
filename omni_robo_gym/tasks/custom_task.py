@@ -562,7 +562,8 @@ class CustomTask(BaseTask):
             self.distr_offset[self.robot_names[i]] = torch.stack(tensor_list, dim=0)
 
     def _get_robots_state(self, 
-                    dt: float = None):
+                    dt: float = None, 
+                    reset: bool = False):
         
         for i in range(0, len(self.robot_names)):
 
@@ -594,17 +595,31 @@ class CustomTask(BaseTask):
             else: 
 
                 # differentiate numerically
-
-                self.root_v[robot_name][:, :] = (self.root_p[robot_name][:, :] - \
-                                                self.root_p_prev[robot_name][:, :]) / dt 
-
-                self.root_omega[robot_name][:, :] = quat_to_omega(self.root_q[robot_name][:, :], 
-                                                            self.root_q_prev[robot_name][:, :], 
-                                                            dt)
                 
-                self.jnts_v[robot_name][:, :] = (self.jnts_q[robot_name][:, :] - \
-                                                self.jnts_q_prev[robot_name][:, :]) / dt
-            
+                if not reset: 
+                                                 
+                    self.root_v[robot_name][:, :] = (self.root_p[robot_name][:, :] - \
+                                                    self.root_p_prev[robot_name][:, :]) / dt 
+
+                    self.root_omega[robot_name][:, :] = quat_to_omega(self.root_q[robot_name][:, :], 
+                                                                self.root_q_prev[robot_name][:, :], 
+                                                                dt)
+                    
+                    self.jnts_v[robot_name][:, :] = (self.jnts_q[robot_name][:, :] - \
+                                                    self.jnts_q_prev[robot_name][:, :]) / dt
+                    
+                    # self.jnts_v[robot_name][:, :].zero_()
+
+                else:
+                    
+                    # to avoid issues when differentiating numerically
+
+                    self.root_v[robot_name][:, :].zero_()
+
+                    self.root_omega[robot_name][:, :].zero_()
+                    
+                    self.jnts_v[robot_name][:, :].zero_()
+        
                 # update "previous" data for numerical differentiation
 
                 self.root_p_prev[robot_name][:, :] = self.root_p[robot_name][:, :] 
@@ -867,6 +882,48 @@ class CustomTask(BaseTask):
         
         print(info)
     
+    def _reset_jnt_imp_control(self, robot_name: str):
+        
+        self.jnt_imp_controllers[robot_name].reset() # resets all refs and cms and gains to 0 and internal defaults
+
+        # we override internal default gains only for the wheels (which btw are usually
+        # velocity controlled)
+        self.jnt_imp_controllers[robot_name].update_state(pos = self.jnts_q[robot_name], 
+                                                        vel = self.jnts_v[robot_name],
+                                                        eff = None)
+            
+        wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(name_pattern="wheel")
+
+        if wheels_indxs.numel() != 0: # the robot has wheels
+
+            wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                        self.default_wheel_stiffness, 
+                                        device = self.torch_device, 
+                                        dtype=self.torch_dtype)
+            
+            wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                        self.default_wheel_damping, 
+                                        device = self.torch_device, 
+                                        dtype=self.torch_dtype)
+
+            self.jnt_imp_controllers[robot_name].set_gains(pos_gains = wheels_pos_gains,
+                                        vel_gains = wheels_vel_gains,
+                                        jnt_indxs=wheels_indxs)
+                    
+        try:
+
+            self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing())
+        
+        except Exception:
+            
+            print(f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" +  f"[{self.init_imp_control.__name__}]" +\
+            ": cannot set imp. controller reference to homing. Did you call the \"init_homing_managers\" method ?")
+
+            pass      
+
+        # actually applies reset commands to the articulation
+        self.jnt_imp_controllers[robot_name].apply_cmds()          
+
     def _init_jnt_imp_control(self):
     
         if self._world_initialized:
@@ -883,36 +940,7 @@ class CustomTask(BaseTask):
                                             device= self.torch_device, 
                                             dtype=self.torch_dtype)
 
-                # we override internal default gains only for the wheels (which btw are usually
-                # velocity controlled)
-                wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(name_pattern="wheel")
-
-                if wheels_indxs.numel() != 0: # the robot has wheels
-
-                    wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                                self.default_wheel_stiffness, 
-                                                device = self.torch_device, 
-                                                dtype=self.torch_dtype)
-                    
-                    wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                                self.default_wheel_damping, 
-                                                device = self.torch_device, 
-                                                dtype=self.torch_dtype)
-
-                    self.jnt_imp_controllers[robot_name].set_gains(pos_gains = wheels_pos_gains,
-                                                vel_gains = wheels_vel_gains,
-                                                jnt_indxs=wheels_indxs)
-                            
-                try:
-
-                    self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing())
-                
-                except Exception:
-                    
-                    print(f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" +  f"[{self.init_imp_control.__name__}]" +\
-                    ": cannot set imp. controller reference to homing. Did you call the \"init_homing_managers\" method ?")
-
-                    pass                
+                self._reset_jnt_imp_control(robot_name)
                 
         else:
 
@@ -1032,20 +1060,14 @@ class CustomTask(BaseTask):
     def reset(self, 
             integration_dt: float = None,
             env_ids=None):
-        
-        self._get_robots_state(integration_dt) # updates robot states
-        
+    
+        self._get_robots_state(dt = integration_dt, reset = True) # updates robot states 
+
         for i in range(len(self.robot_names)):
             
             robot_name = self.robot_names[i]
 
-            # resetting velocities
-            self._robots_art_views[robot_name].set_velocities(torch.zeros((self.num_envs, 
-                                                        6), device=self.torch_device))
-            
-            # resetting joint impedance controllers
-            self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing())
-            self.jnt_imp_controllers[robot_name].apply_cmds()
+            self._reset_jnt_imp_control(robot_name)
 
     @abstractmethod
     def pre_physics_step(self, 
