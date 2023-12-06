@@ -293,6 +293,7 @@ class RobotVecEnv(gym.Env):
 
         # bypass USD warnings on stage close
         self._simulation_app.close()
+        
         return
 
     def seed(self, seed=-1):

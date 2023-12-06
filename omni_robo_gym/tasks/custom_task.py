@@ -625,7 +625,13 @@ class CustomTask(BaseTask):
                 self.root_p_prev[robot_name][:, :] = self.root_p[robot_name][:, :] 
                 self.root_q_prev[robot_name][:, :] = self.root_q[robot_name][:, :]
                 self.jnts_q_prev[robot_name][:, :] = self.jnts_q[robot_name][:, :]
-   
+    
+    def _custom_post_init(self):
+
+        # can be overridden by child class
+
+        pass
+
     def post_initialization_steps(self):
 
         self._world_initialized = True # used by other methods which nees to run
@@ -652,6 +658,8 @@ class CustomTask(BaseTask):
 
         self.reset()
 
+        self._custom_post_init()
+
         self._get_solver_info() # get again solver option before printing everything
 
         self._print_envs_info() # debug prints
@@ -677,7 +685,7 @@ class CustomTask(BaseTask):
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
                         "Before calling __set_robots_default_jnt_config(), you need to reset the World" + \
-                        " at least once and call _post_initialization_steps()")
+                        " at least once and call post_initialization_steps()")
 
     def _set_robots_root_default_config(self):
         
@@ -694,7 +702,7 @@ class CustomTask(BaseTask):
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
                         "Before calling _set_robots_root_default_config(), you need to reset the World" + \
-                        " at least once and call _post_initialization_steps()")
+                        " at least once and call post_initialization_steps()")
         
 
         return True
@@ -1094,4 +1102,8 @@ class CustomTask(BaseTask):
 
     def is_done(self) -> None:
         
+        pass
+
+    def terminate(self):
+
         pass
