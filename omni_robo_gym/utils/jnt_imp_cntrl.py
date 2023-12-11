@@ -119,7 +119,7 @@ class OmniJntImpCntrl:
                 backend = "torch", 
                 device: torch.device = torch.device("cpu"), 
                 filter_BW = 50.0, # [Hz]
-                filter_dt = None, 
+                filter_dt = None, # should correspond to the dt between samples
                 override_art_controller = False,
                 init_on_creation = False, 
                 dtype = torch.double): # [s]

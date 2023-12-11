@@ -945,6 +945,8 @@ class CustomTask(BaseTask):
                                             default_pgain = self.default_jnt_stiffness, # defaults
                                             default_vgain = self.default_jnt_damping,
                                             override_art_controller=self.override_art_controller,
+                                            filter_dt = None, 
+                                            filter_BW = 50,
                                             device= self.torch_device, 
                                             dtype=self.torch_dtype)
 
