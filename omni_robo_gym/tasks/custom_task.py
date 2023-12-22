@@ -244,7 +244,7 @@ class CustomTask(BaseTask):
         prim_utils.define_prim(self._template_env_ns)
         self._envs_prim_paths = self._cloner.generate_paths(self._env_ns + "/env", 
                                                 self.num_envs)
-        
+   
         self._cloning_offset = cloning_offset
             
         if self._cloning_offset is None:
@@ -994,7 +994,7 @@ class CustomTask(BaseTask):
         print(f"[{self.__class__.__name__}]" + \
             f"[{self.journal.status}]" + \
             ": cloning environments...")
-        
+
         self._cloner.clone(
             source_prim_path=self._template_env_ns,
             prim_paths=self._envs_prim_paths,

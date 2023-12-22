@@ -264,9 +264,11 @@ class RobotVecEnv(gym.Env):
 
         if init_sim:
 
+            print("Jijijijjijijijijiji")
             self._world.reset() # after the first reset we get get all quantities 
             # from the scene 
 
+            print("AUUHYHGYBIMOIIUBIBIBIUbn")
             self.task.post_initialization_steps() # performs initializations 
             # steps after the fisrt world reset was called
 
