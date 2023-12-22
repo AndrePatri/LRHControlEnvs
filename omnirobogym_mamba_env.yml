@@ -1,4 +1,4 @@
-name: omni_robo_gym_isaac2023.1.0
+name: omni_robo_gym_isaac2023.1.1
 channels: 
   - defaults
   - pytorch
