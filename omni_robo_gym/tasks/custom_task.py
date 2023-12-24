@@ -449,14 +449,21 @@ class CustomTask(BaseTask):
 
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": importing robot URDF")
 
+        _urdf.acquire_urdf_interface()  
+
         # we overwrite some settings which are bound to be fixed
         import_config.merge_fixed_joints = merge_fixed # makes sim more stable
         # in case of fixed joints with light objects
         import_config.import_inertia_tensor = True
+        # import_config.convex_decomp = False
         import_config.fix_base = fix_base
         import_config.self_collision = self_collide
-
-        _urdf.acquire_urdf_interface()
+        # import_config.distance_scale = 1
+        # import_config.make_default_prim = True
+        # import_config.create_physics_scene = True
+        # import_config.default_drive_strength = 1047.19751
+        # import_config.default_position_drive_damping = 52.35988
+        # import_config.default_drive_type = _urdf.UrdfJointTargetType.JOINT_DRIVE_POSITION
         
         # import URDF
         success, robot_prim_path_default = omni.kit.commands.execute(

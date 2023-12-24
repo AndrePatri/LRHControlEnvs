@@ -17,12 +17,18 @@
 # 
 from omni.isaac.kit import SimulationApp
 import os
+import signal
+
 import carb
 import gymnasium as gym 
+
 import torch
+
 from abc import ABC, abstractmethod
 from typing import Union, Tuple, Dict
+
 import numpy as np
+
 from omni_robo_gym.utils.defs import Journal
 
 class RobotVecEnv(gym.Env):
@@ -76,9 +82,7 @@ class RobotVecEnv(gym.Env):
 
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using IsaacSim experience file @ " + experience)
 
-        carb.settings.get_settings().set("/persistent/omnihydra/useSceneGraphInstancing", True)
-        self._render = not headless or enable_livestream or enable_viewport
-        self.sim_frame_count = 0
+        # carb.settings.get_settings().set("/persistent/omnihydra/useSceneGraphInstancing", True)
 
         if enable_livestream:
 
@@ -93,9 +97,21 @@ class RobotVecEnv(gym.Env):
             self._simulation_app.set_setting("/ngx/enabled", False)
             enable_extension("omni.kit.livestream.native")
             enable_extension("omni.services.streaming.manager")
+        
+        # handle ctrl+c event
+        signal.signal(signal.SIGINT, self.signal_handler)
+
+        self._render = not headless or enable_livestream or enable_viewport
+        self._record = False
+        self.sim_frame_count = 0
+        self._world = None
+        self.metadata = None
 
         self.gpu_pipeline_enabled = False
-                 
+    
+    def signal_handler(self, sig, frame):
+        self.close()
+
     def set_task(self, 
                 task, 
                 backend="torch", 
@@ -113,18 +129,26 @@ class RobotVecEnv(gym.Env):
             init_sim (Optional[bool]): Automatically starts simulation. Defaults to True.
         """
 
-        ## we first set up the World ##
         from omni.isaac.core.world import World
 
-        device = torch.device("cpu") # defaults to CPU, unless this is set in sim_params
-        if sim_params and "use_gpu_pipeline" in sim_params:
-            if sim_params["use_gpu_pipeline"]:
-                device = torch.device("cuda") # 
+        # parse device based on sim_param settings
+        if sim_params and "sim_device" in sim_params:
+            device = sim_params["sim_device"]
+        else:
+            device = "cpu"
+            physics_device_id = carb.settings.get_settings().get_as_int("/physics/cudaDevice")
+            gpu_id = 0 if physics_device_id < 0 else physics_device_id
+            if sim_params and "use_gpu_pipeline" in sim_params:
+                # GPU pipeline must use GPU simulation
+                if sim_params["use_gpu_pipeline"]:
+                    device = "cuda:" + str(gpu_id)
+            elif sim_params and "use_gpu" in sim_params:
+                if sim_params["use_gpu"]:
+                    device = "cuda:" + str(gpu_id)
         
         self.gpu_pipeline_enabled = sim_params["use_gpu_pipeline"]
 
         print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using device: " + str(device))
-        print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using backend: " + backend)
 
         if (sim_params is None):
             
@@ -244,18 +268,18 @@ class RobotVecEnv(gym.Env):
         distantLight = UsdLux.DistantLight.Define(self._stage, Sdf.Path("/World/DistantLight"))
         distantLight.CreateIntensityAttr(500)
 
+        self._world._current_tasks = dict() # resets registered tasks
         self._world.add_task(task)
-        self.task = task
-        self.task.set_world(self._world)
+        self._task = task
+        self._task.set_world(self._world)
+        self._num_envs = self._task.num_envs
 
         # filter collisions between envs
-        self.task.apply_collision_filters(self._physics_scene_path, 
+        self._task.apply_collision_filters(self._physics_scene_path, 
                                 "/World/collisions")
         
-        self._num_envs = self.task.num_envs
-
-        self.observation_space = self.task.observation_space
-        self.action_space = self.task.action_space
+        self.observation_space = self._task.observation_space
+        self.action_space = self._task.action_space
 
         if sim_params and "enable_viewport" in sim_params:
             self._render = sim_params["enable_viewport"]
@@ -269,7 +293,7 @@ class RobotVecEnv(gym.Env):
             # from the scene 
 
             print("AUUHYHGYBIMOIIUBIBIBIUbn")
-            self.task.post_initialization_steps() # performs initializations 
+            self._task.post_initialization_steps() # performs initializations 
             # steps after the fisrt world reset was called
 
     def render(self, mode="human") -> None:
@@ -280,14 +304,40 @@ class RobotVecEnv(gym.Env):
         """
 
         if mode == "human":
-             
             self._world.render()
-             
+            return None
+        elif mode == "rgb_array":
+            # check if viewport is enabled -- if not, then complain because we won't get any data
+            if not self._render or not self._record:
+                raise RuntimeError(
+                    f"Cannot render '{mode}' when rendering is not enabled. Please check the provided"
+                    "arguments to the environment class at initialization."
+                )
+            # obtain the rgb data
+            rgb_data = self._rgb_annotator.get_data()
+            # convert to numpy array
+            rgb_data = np.frombuffer(rgb_data, dtype=np.uint8).reshape(*rgb_data.shape)
+            # return the rgb data
+            return rgb_data[:, :, :3]
         else:
-             
             gym.Env.render(self, mode=mode)
-    
-        return
+            return None
+
+    def create_viewport_render_product(self, resolution=(1280, 720)):
+        """Create a render product of the viewport for rendering."""
+
+        try:
+            import omni.replicator.core as rep
+
+            # create render product
+            self._render_product = rep.create.render_product("/OmniverseKit_Persp", resolution)
+            # create rgb annotator -- used to read data from the render product
+            self._rgb_annotator = rep.AnnotatorRegistry.get_annotator("rgb", device="cpu")
+            self._rgb_annotator.attach([self._render_product])
+            self._record = True
+        except Exception as e:
+            carb.log_info("omni.replicator.core could not be imported. Skipping creation of render product.")
+            carb.log_info(str(e))
 
     def close(self) -> None:
         """ Closes simulation.
@@ -349,3 +399,39 @@ class RobotVecEnv(gym.Env):
             num_envs(int): Number of environments.
         """
         return self._num_envs
+    
+    @property
+    def simulation_app(self):
+        """Retrieves the SimulationApp object.
+
+        Returns:
+            simulation_app(SimulationApp): SimulationApp.
+        """
+        return self._simulation_app
+
+    @property
+    def world(self):
+        """Retrieves the World object for simulation.
+
+        Returns:
+            world(World): Simulation World.
+        """
+        return self._world
+
+    @property
+    def task(self):
+        """Retrieves the task.
+
+        Returns:
+            task(BaseTask): Task.
+        """
+        return self._task
+
+    @property
+    def render_enabled(self):
+        """Whether rendering is enabled.
+
+        Returns:
+            render(bool): is render enabled.
+        """
+        return self._render
