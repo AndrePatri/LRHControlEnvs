@@ -1018,11 +1018,11 @@ class CustomTask(BaseTask):
             robot_name = self.robot_names[i]
 
             self._robots_art_views[robot_name] = ArticulationView(name = robot_name + "ArtView",
-                                                        prim_paths_expr = self._env_ns + "/env*"+ "/" + robot_name, 
+                                                        prim_paths_expr = self._env_ns + "/env*"+ "/" + robot_name + "/base_link", 
                                                         reset_xform_properties=False)
 
             self._robots_articulations[robot_name] = scene.add(self._robots_art_views[robot_name])
-
+            
             # self._robots_geom_prim_views[robot_name] = GeometryPrimView(name = robot_name + "GeomView",
             #                                                 prim_paths_expr = self._env_ns + "/env*"+ "/" + robot_name,
             #                                                 # prepare_contact_sensors = True
