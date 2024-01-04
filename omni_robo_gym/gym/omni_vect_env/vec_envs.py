@@ -156,29 +156,33 @@ class RobotVecEnv(gym.Env):
             sim_params = {}
 
         # defaults for integration and rendering dt
-        if not("integration_dt" in sim_params):
+        if not("physics_dt" in sim_params):
     
-            sim_params["integration_dt"] = 1.0/60.0
+            sim_params["physics_dt"] = 1.0/60.0
 
             print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using default integration_dt of " + 
-                sim_params["integration_dt"] + " s.")
+                sim_params["physics_dt"] + " s.")
             
         if not("rendering_dt" in sim_params):
 
-            sim_params["rendering_dt"] = sim_params["integration_dt"]
+            sim_params["rendering_dt"] = sim_params["physics_dt"]
 
             print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using default rendering_dt of " + 
                 sim_params["rendering_dt"] + " s.")
 
         self._world = World(
             stage_units_in_meters=1.0, 
-            physics_dt=sim_params["integration_dt"], 
+            physics_dt=sim_params["physics_dt"], 
             rendering_dt=sim_params["rendering_dt"], # dt between rendering steps. Note: rendering means rendering a frame of 
             # the current application and not only rendering a frame to the viewports/ cameras. 
             # So UI elements of Isaac Sim will be refereshed with this dt as well if running non-headless
             backend=backend,
             device=str(device),
             physics_prim_path="/physicsScene", 
+            set_defaults = False, # set to True to use the defaults settings [physics_dt = 1.0/ 60.0, 
+            # stage units in meters = 0.01 (i.e in cms), rendering_dt = 1.0 / 60.0, gravity = -9.81 m / s 
+            # ccd_enabled, stabilization_enabled, gpu dynamics turned off, 
+            # broadcast type is MBP, solver type is TGS]
             sim_params=sim_params
         )
 
@@ -190,7 +194,7 @@ class RobotVecEnv(gym.Env):
         print("use_gpu_pipeline: " + str(sim_params["use_gpu_pipeline"]))
         print("device: " + str(device))
         print("backend: " + str(backend))
-        print("integration_dt: " + str(sim_params["integration_dt"]))
+        print("integration_dt: " + str(sim_params["physics_dt"]))
         print("rendering_dt: " + str(sim_params["rendering_dt"]))
 
         ## we get the physics context to expose additional low-level ##
@@ -288,11 +292,9 @@ class RobotVecEnv(gym.Env):
 
         if init_sim:
 
-            print("Jijijijjijijijijiji")
             self._world.reset() # after the first reset we get get all quantities 
             # from the scene 
 
-            print("AUUHYHGYBIMOIIUBIBIBIUbn")
             self._task.post_initialization_steps() # performs initializations 
             # steps after the fisrt world reset was called
 
