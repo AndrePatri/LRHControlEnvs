@@ -67,8 +67,9 @@ class CustomTask(BaseTask):
                 self_collide: List[bool] = None,
                 merge_fixed: List[bool] = None,
                 replicate_physics: bool = True,
-                pos_iter_increase_factor: int = 1,
-                vel_iter_increase_factor: int = 1,
+                solver_position_iteration_count: int = 4,
+                solver_velocity_iteration_count: int = 1,
+                solver_stabilization_thresh: float = 1e-5,
                 offset=None, 
                 env_spacing = 5.0, 
                 spawning_radius = 1.0,
@@ -86,7 +87,7 @@ class CustomTask(BaseTask):
 
         self.override_art_controller = override_art_controller
 
-        self.integration_dt = integration_dt
+        self.integration_dt = integration_dt # just used for contact reporting
         
         self.torch_device = torch.device(device) # defaults to "cuda" ("cpu" also valid)
 
@@ -164,38 +165,17 @@ class CustomTask(BaseTask):
         self._robots_art_views = {}
         self._robots_articulations = {}
         self._robots_geom_prim_views = {}
-
+        
+        self.solver_position_iteration_count = solver_position_iteration_count # solver position iteration count
+        # -> higher number makes simulation more accurate
+        self.solver_velocity_iteration_count = solver_velocity_iteration_count
+        self.solver_stabilization_thresh = solver_stabilization_thresh # threshold for kin. energy below which an articulatiion
+        # "goes to sleep", i.e. it's not simulated anymore until some action wakes him up
+        # potentially, each robot could have its own setting for the solver (not supported yet)
         self._solver_position_iteration_counts = {}
         self._solver_velocity_iteration_counts = {}
         self._solver_stabilization_thresh = {}
 
-        self._pos_it_counts_increase_factor = pos_iter_increase_factor # by which factor to increase the default pos it count
-        self._vel_it_counts_increase_factor = vel_iter_increase_factor# by which factor to increase the default vel it count
-            
-        if (not isinstance(self._pos_it_counts_increase_factor, int)) or  \
-            (not self._pos_it_counts_increase_factor > 0):
-
-            warning = f"[{self.__class__.__name__}]" + \
-                    f"[{self.journal.warning}]" + \
-                    ": provided pos_iter_increase_factor should be integer and > 0. " + \
-                    "Resetting it to 1."
-
-            self._pos_it_counts_increase_factor = 1
-
-            print(warning)
-
-        if (not isinstance(self._vel_it_counts_increase_factor, int)) or  \
-            (not self._vel_it_counts_increase_factor > 0):
-
-            warning = f"[{self.__class__.__name__}]" + \
-                        f"[{self.journal.warning}]" + \
-                        ": provided vel_iter_increase_factor should be integer and > 0. " + \
-                        "Resetting it to 1."
-
-            self._vel_it_counts_increase_factor = 1
-            
-            print(warning)
-    
         self.robot_bodynames =  {}
         self.robot_n_links =  {}
         self.robot_n_dofs =  {}
@@ -739,7 +719,7 @@ class CustomTask(BaseTask):
         # sets new solver iteration options for specifc articulations
         
         self._get_solver_info() # gets current solver info for the articulations of the 
-        # environments 
+        # environments, so that dictionaries are filled properly
         
         if (self._world_initialized):
 
@@ -748,19 +728,22 @@ class CustomTask(BaseTask):
                 robot_name = self.robot_names[i]
 
                 # increase by a factor
-                self._solver_position_iteration_counts[robot_name] = self._solver_position_iteration_counts[robot_name] * \
-                                                                        self._pos_it_counts_increase_factor
-                self._solver_velocity_iteration_counts[robot_name] = self._solver_velocity_iteration_counts[robot_name] * \
-                                                                        self._vel_it_counts_increase_factor
-                
+                self._solver_position_iteration_counts[robot_name] = torch.full((self.num_envs,), self.solver_position_iteration_count)
+                self._solver_velocity_iteration_counts[robot_name] = torch.full((self.num_envs,), self.solver_velocity_iteration_count)
+                self._solver_stabilization_thresh[robot_name] = torch.full((self.num_envs,), self.solver_stabilization_thresh)
+
                 self._robots_art_views[robot_name].set_solver_position_iteration_counts(self._solver_position_iteration_counts[robot_name])
                 self._robots_art_views[robot_name].set_solver_velocity_iteration_counts(self._solver_velocity_iteration_counts[robot_name])
+                self._robots_art_views[robot_name].set_stabilization_thresholds(self._solver_stabilization_thresh[robot_name])
+
+                self._get_solver_info() # gets again solver info for articulation, so that it's possible to debug if
+                # the operation was successful
         
         else:
 
             raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
                             "Before calling update_art_solver_options(), you need to reset the World at least once!")
-            
+        
     def _print_envs_info(self):
         
         if (self._world_initialized):
