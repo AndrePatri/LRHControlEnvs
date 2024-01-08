@@ -103,7 +103,7 @@ class RobotVecEnv(gym.Env):
 
         self._render = not headless or enable_livestream or enable_viewport
         self._record = False
-        self.sim_frame_count = 0
+        self.step_counter = 0 # step counter
         self._world = None
         self.metadata = None
 
@@ -365,7 +365,6 @@ class RobotVecEnv(gym.Env):
 
     @abstractmethod
     def step(self, 
-            index: int,
             actions = None) -> Tuple[Union[np.ndarray, torch.Tensor], 
                                     Union[np.ndarray, torch.Tensor],
                                     Union[np.ndarray, torch.Tensor],
