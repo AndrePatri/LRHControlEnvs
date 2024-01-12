@@ -23,6 +23,7 @@ from enum import Enum
 from omni.isaac.core.articulations.articulation_view import ArticulationView
 
 from omni_robo_gym.utils.defs import Journal
+from omni_robo_gym.utils.urdf_helpers import UrdfLimitsParser
 
 class FirstOrderFilter:
 
@@ -101,7 +102,45 @@ class FirstOrderFilter:
     def get(self):
 
         return self.yk
-    
+
+class JntSafety:
+
+    def __init__(self, 
+            urdf_parser: UrdfLimitsParser):
+
+        self.limits_parser = urdf_parser
+
+        self.limit_matrix = self.limits_parser.get_limits_matrix()
+
+    def apply(self, q_cmd=None, v_cmd=None, eff_cmd=None):
+
+        if q_cmd is not None:
+            self.saturate_tensor(q_cmd, position=True)
+
+        if v_cmd is not None:
+            self.saturate_tensor(v_cmd, velocity=True)
+
+        if eff_cmd is not None:
+            self.saturate_tensor(eff_cmd, effort=True)
+
+    def saturate_tensor(self, tensor, position=False, velocity=False, effort=False):
+
+        for j in range(tensor.shape[1]):
+
+            joint_limits = self.limit_matrix[j]
+
+            if position and not torch.isnan(joint_limits[0]):
+
+                tensor[:, j] = torch.clamp(tensor[:, j], min=joint_limits[0], max=joint_limits[3])
+
+            elif velocity and not torch.isnan(joint_limits[4]):
+
+                tensor[:, j] = torch.clamp(tensor[:, j], min=joint_limits[1], max=joint_limits[4])
+
+            elif effort and not torch.isnan(joint_limits[2]):
+
+                tensor[:, j] = torch.clamp(tensor[:, j], min=joint_limits[2], max=joint_limits[5])
+                
 class OmniJntImpCntrl:
 
     # Exploits IsaacSim's low level articulation joint impedance controller
