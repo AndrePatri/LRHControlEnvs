@@ -125,22 +125,18 @@ class JntSafety:
 
     def saturate_tensor(self, tensor, position=False, velocity=False, effort=False):
 
-        for j in range(tensor.shape[1]):
+        if position:
 
-            joint_limits = self.limit_matrix[j]
+            tensor[:, :] = torch.clamp(tensor[:, :], min=self.limit_matrix[:, 0], max=self.limit_matrix[:, 3])
 
-            if position and not torch.isnan(joint_limits[0]):
+        elif velocity:
 
-                tensor[:, j] = torch.clamp(tensor[:, j], min=joint_limits[0], max=joint_limits[3])
+            tensor[:, :] = torch.clamp(tensor[:, :], min=self.limit_matrix[:, 1], max=self.limit_matrix[:, 4])
 
-            elif velocity and not torch.isnan(joint_limits[4]):
+        elif effort:
 
-                tensor[:, j] = torch.clamp(tensor[:, j], min=joint_limits[1], max=joint_limits[4])
+            tensor[:, :] = torch.clamp(tensor[:, :], min=self.limit_matrix[:, 2], max=self.limit_matrix[:, 5])               
 
-            elif effort and not torch.isnan(joint_limits[2]):
-
-                tensor[:, j] = torch.clamp(tensor[:, j], min=joint_limits[2], max=joint_limits[5])
-                
 class OmniJntImpCntrl:
 
     # Exploits IsaacSim's low level articulation joint impedance controller
@@ -161,9 +157,16 @@ class OmniJntImpCntrl:
                 filter_dt = None, # should correspond to the dt between samples
                 override_art_controller = False,
                 init_on_creation = False, 
-                dtype = torch.double): # [s]
+                dtype = torch.double,
+                enable_safety = True,
+                urdf_path: str = None): # [s]
         
         self.torch_dtype = dtype
+
+        self.enable_safety = enable_safety
+        self.limiter = None
+        self.robot_limits = None
+        self.urdf_path = urdf_path
 
         self.override_art_controller = override_art_controller # whether to override Isaac's internal joint
         # articulation PD controller or not
@@ -190,7 +193,7 @@ class OmniJntImpCntrl:
             raise Exception(f"[{self.__class__.__name__}]" + \
                             f"[{self.journal.exception}]" + \
                             ": the provided articulation_view is not initialized properly!!")
-
+        
         self._valid_signal_types = ["pos_ref", "vel_ref", "eff_ref", # references 
                                     "pos", "vel", "eff", # measurements (necessary if overriding Isaac's art. controller)
                                     "pgain", "vgain"] 
@@ -211,6 +214,17 @@ class OmniJntImpCntrl:
         
         self._backend = "torch"
 
+        if self.enable_safety:
+            
+            if self.urdf_path is None:
+
+                raise Exception("If enable_safety is set to True, a urdf_path should be provided too!")
+
+            self.robot_limits = UrdfLimitsParser(urdf_path=self.urdf_path, 
+                                        joint_names=self.jnts_names,
+                                        backend=self._backend)
+            self.limiter = JntSafety(urdf_parser=self.robot_limits)
+            
         self._pos_err = None
         self._vel_err = None
         
@@ -872,17 +886,29 @@ class OmniJntImpCntrl:
             self._vel_ref_filter.update(self._vel_ref)
             self._eff_ref_filter.update(self._eff_ref)
 
+            # we first filter, then apply safety
+            eff_ref_filt = self._eff_ref_filter.get()
+            pos_ref_filt = self._pos_ref_filter.get()
+            vel_ref_filt = self._vel_ref_filter.get()
+
+            if self.limiter is not None:
+                    
+                    self.limiter.apply(q_cmd=pos_ref_filt,
+                                    v_cmd=vel_ref_filt,
+                                    eff_cmd=eff_ref_filt)
+                    
             if not self.override_art_controller:
-            
-                self._articulation_view.set_joint_position_targets(self._pos_ref_filter.get())
-                self._articulation_view.set_joint_velocity_targets(self.vel_ref_filter.get())
-                self._articulation_view.set_joint_efforts(self._eff_ref_filter.get())
+                    
+                self._articulation_view.set_joint_efforts(eff_ref_filt)
+                self._articulation_view.set_joint_position_targets(pos_ref_filt)
+                self._articulation_view.set_joint_velocity_targets(vel_ref_filt)
 
             else:
                 
+                # impedance torque computed explicitly
                 self._pos_err  = torch.sub(self._pos_ref_filter.get(), self._pos)
 
-                self._vel_err = torch.sub(self.vel_ref_filter.get(), self._vel)
+                self._vel_err = torch.sub(self._vel_ref_filter.get(), self._vel)
 
                 self._imp_eff = torch.add(self._eff_ref_filter.get(), 
                                         torch.add(
@@ -893,13 +919,26 @@ class OmniJntImpCntrl:
 
                 torch.cuda.synchronize()
                 
+                # we also make the resulting imp eff safe
+                if self.limiter is not None:
+                    
+                    self.limiter.apply(eff_cmd=eff_ref_filt)
+                    
                 # apply only effort (comprehensive of all imp. terms)
                 self._articulation_view.set_joint_efforts(self._imp_eff)
 
         else:
+            
+            # we first apply safety to reference joint cmds
 
+            if self.limiter is not None:
+                    
+                    self.limiter.apply(q_cmd=self._pos_ref,
+                                    v_cmd=self._vel_ref,
+                                    eff_cmd=self._eff_ref)
+                    
             if not self.override_art_controller:
-
+                    
                 self._articulation_view.set_joint_efforts(self._eff_ref)
                 self._articulation_view.set_joint_position_targets(self._pos_ref)
                 self._articulation_view.set_joint_velocity_targets(self._vel_ref)
@@ -918,6 +957,11 @@ class OmniJntImpCntrl:
                                                     self._vel_err)))
 
                 torch.cuda.synchronize()
+
+                # we also make the resulting imp eff safe
+                if self.limiter is not None:
+                    
+                    self.limiter.apply(eff_cmd=self._imp_eff)
 
                 # apply only effort (comprehensive of all imp. terms)
                 self._articulation_view.set_joint_efforts(self._imp_eff)

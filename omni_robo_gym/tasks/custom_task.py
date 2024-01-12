@@ -938,7 +938,9 @@ class CustomTask(BaseTask):
                                             filter_dt = None, 
                                             filter_BW = 50,
                                             device= self.torch_device, 
-                                            dtype=self.torch_dtype)
+                                            dtype=self.torch_dtype,
+                                            enable_safety=True, 
+                                            urdf_path=self._urdf_paths[robot_name])
 
                 self._reset_jnt_imp_control(robot_name)
                 

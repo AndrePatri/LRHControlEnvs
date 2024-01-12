@@ -18,7 +18,7 @@ class UrdfLimitsParser:
         num_joints = len(self.joint_names)
 
         self.limits_matrix = None
-        self.nan = None
+        self.inf = None
 
         if self.backend == "numpy":
 
@@ -26,7 +26,7 @@ class UrdfLimitsParser:
 
             self.limits_matrix = np.full((num_joints, 6), np.nan)
             
-            self.nan = np.nan
+            self.inf = np.inf
 
         elif self.backend == "torch":
             
@@ -34,7 +34,7 @@ class UrdfLimitsParser:
 
             self.limits_matrix = torch.full((num_joints, 6), torch.nan)
 
-            self.nan = torch.nan
+            self.inf = torch.inf
 
         else:
 
@@ -52,29 +52,23 @@ class UrdfLimitsParser:
 
                 # position limits
                 
-                q_lower = float(limit_element.get('lower', self.nan))
-                q_upper = float(limit_element.get('upper', self.nan))
+                q_lower = float(limit_element.get('lower', - self.inf))
+                q_upper = float(limit_element.get('upper', self.inf))
 
                 # effort limits
-                effort_limit = float(limit_element.get('effort', self.nan))
+                effort_limit = float(limit_element.get('effort', self.inf))
                 
                 # vel limits
-                velocity_limit = float(limit_element.get('velocity', self.nan))
+                velocity_limit = float(limit_element.get('velocity', self.inf))
 
                 self.limits_matrix[jnt_index, 0] = q_lower
                 self.limits_matrix[jnt_index, 3] = q_upper
-                self.limits_matrix[jnt_index, 1] = - abs(effort_limit)
-                self.limits_matrix[jnt_index, 4] = abs(effort_limit)
-                self.limits_matrix[jnt_index, 2] = - abs(velocity_limit)
-                self.limits_matrix[jnt_index, 5] = abs(velocity_limit)
+                self.limits_matrix[jnt_index, 1] = - abs(velocity_limit)
+                self.limits_matrix[jnt_index, 4] = abs(velocity_limit)
+                self.limits_matrix[jnt_index, 2] = - abs(effort_limit)
+                self.limits_matrix[jnt_index, 5] = abs(effort_limit)
+                
 
     def get_limits_matrix(self):
         return self.limits_matrix
-
-# Example usage
-urdf_parser = UrdfLimitsParser("/home/apatrizi/Desktop/kyon.urdf", ["knee_pitch_4", "hip_roll_4", "wheel_joint_2"])
-limits_matrix = urdf_parser.get_limits_matrix()
-
-print("Joint Limits Matrix:")
-print(limits_matrix)
 
