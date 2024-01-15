@@ -189,12 +189,18 @@ class CustomTask(BaseTask):
         self.jnts_q_prev = {} # used for num differentiation
         self.root_p_default = {} 
         self.root_q_default = {}
+        self.jnts_q_default = {}
 
         self.root_v = {}
+        self.root_v_default = {}
         self.root_omega = {}
+        self.root_omega_default = {}
         self.jnts_v = {}
-        
-        self.root_abs_offsets = {}
+        self.jnts_v_default = {}
+
+        self.jnts_eff_default = {}
+
+        self.root_abs_offsets = {} 
 
         self.distr_offset = {} # decribed how robots within each env are distributed
  
@@ -463,7 +469,7 @@ class CustomTask(BaseTask):
         return success
     
     def _init_contact_sensors(self):
-
+        
         for robot_name in self.contact_prims:
             
             # creates base contact sensor (which is then cloned)
@@ -472,9 +478,9 @@ class CustomTask(BaseTask):
                                                     self._env_ns
                                                 )
                               
-    def init_root_abs_offsets(self, 
+    def update_root_offsets(self, 
                     robot_name: str):
-            
+        
         self.root_abs_offsets[robot_name][:, 0:2]  = self.root_p[robot_name][:, 0:2]
 
     def _init_robots_state(self):
@@ -485,34 +491,58 @@ class CustomTask(BaseTask):
 
             pose = self._robots_art_views[robot_name].get_world_poses( 
                                 clone = True) # tuple: (pos, quat)
-        
+
+            # root p (measured, previous, default)
             self.root_p[robot_name] = pose[0]  
             self.root_p_prev[robot_name] = torch.clone(pose[0])
             self.root_p_default[robot_name] = torch.clone(pose[0]) + self.distr_offset[robot_name]
 
+            # root q (measured, previous, default)
             self.root_q[robot_name] = pose[1] # root orientation
             self.root_q_prev[robot_name] = torch.clone(pose[1])
             self.root_q_default[robot_name] = torch.clone(pose[1])
 
+            # jnt q (measured, previous, default)
             self.jnts_q[robot_name] = self._robots_art_views[robot_name].get_joint_positions(
                                             clone = True) # joint positions 
             self.jnts_q_prev[robot_name] = self._robots_art_views[robot_name].get_joint_positions(
                                             clone = True) 
+            self.jnts_q_default[robot_name] = self.homers[robot_name].get_homing(clone=True)
 
+            # root v (measured, default)
             self.root_v[robot_name] = self._robots_art_views[robot_name].get_linear_velocities(
                                             clone = True) # root lin. velocity
+            self.root_v_default[robot_name] = torch.full((self.root_v[robot_name].shape[0], self.root_v[robot_name].shape[1]), 
+                                                        0.0, 
+                                                        dtype=self.torch_dtype, 
+                                                        device=self.torch_device)
             
+            # root omega (measured, default)
             self.root_omega[robot_name] = self._robots_art_views[robot_name].get_angular_velocities(
                                             clone = True) # root ang. velocity
+            self.root_omega_default[robot_name] = torch.full((self.root_omega[robot_name].shape[0], self.root_omega[robot_name].shape[1]), 
+                                                        0.0, 
+                                                        dtype=self.torch_dtype, 
+                                                        device=self.torch_device)
             
+            # joints v (measured, default)
             self.jnts_v[robot_name] = self._robots_art_views[robot_name].get_joint_velocities( 
                                             clone = True) # joint velocities
-
+            self.jnts_v_default[robot_name] = torch.full((self.jnts_v[robot_name].shape[0], self.jnts_v[robot_name].shape[1]), 
+                                                        0.0, 
+                                                        dtype=self.torch_dtype, 
+                                                        device=self.torch_device)
+            
+            self.jnts_eff_default[robot_name] = torch.full((self.jnts_v[robot_name].shape[0], self.jnts_v[robot_name].shape[1]), 
+                                                        0.0, 
+                                                        dtype=self.torch_dtype, 
+                                                        device=self.torch_device)
+            
             self.root_abs_offsets[robot_name] = torch.zeros((self.num_envs, 3), 
                                 device=self.torch_device) # reference clone positions
             # on the ground plane (init to 0)
 
-            self.init_root_abs_offsets(robot_name)
+            self.update_root_offsets(robot_name)
             
     def synch_default_root_states(self):
 
@@ -549,69 +579,145 @@ class CustomTask(BaseTask):
             self.distr_offset[self.robot_names[i]] = torch.stack(tensor_list, dim=0)
 
     def _get_robots_state(self, 
-                    dt: float = None, 
-                    reset: bool = False):
+                env_ids: List[int] = None, 
+                robot_names: List[str] = None,
+                dt: float = None, 
+                reset: bool = False):
         
-        for i in range(0, len(self.robot_names)):
+        rob_names = robot_names if (robot_names is not None) else self.robot_names
 
-            robot_name = self.robot_names[i]
+        if env_ids is not None:
 
-            pose = self._robots_art_views[robot_name].get_world_poses( 
-                                            clone = True) # tuple: (pos, quat)
+            for i in range(0, len(rob_names)):
+
+                robot_name = rob_names[i]
+
+                pose = self._robots_art_views[robot_name].get_world_poses( 
+                                                clone = True,
+                                                indices=env_ids) # tuple: (pos, quat)
+                
+                self.root_p[robot_name][env_ids, :] = pose[0] 
+                self.root_q[robot_name][env_ids, :] = pose[1] # root orientation
+                self.jnts_q[robot_name][env_ids, :] = self._robots_art_views[robot_name].get_joint_positions(
+                                                clone = True,
+                                                indices=env_ids) # joint positions 
+
+                if dt is None:
+                    
+                    # we get velocities from the simulation. This is not good since 
+                    # these can actually represent artifacts which do not have physical meaning.
+                    # It's better to obtain them by differentiation to avoid issues with controllers, etc...
+
+                    self.root_v[robot_name][env_ids, :] = self._robots_art_views[robot_name].get_linear_velocities(
+                                                clone = True,
+                                                indices=env_ids) # root lin. velocity 
+                                                
+                    self.root_omega[robot_name][env_ids, :] = self._robots_art_views[robot_name].get_angular_velocities(
+                                                clone = True,
+                                                indices=env_ids) # root ang. velocity
+                    
+                    self.jnts_v[robot_name][env_ids, :] = self._robots_art_views[robot_name].get_joint_velocities( 
+                                                clone = True,
+                                                indices=env_ids) # joint velocities
+                
+                else: 
+
+                    # differentiate numerically
+                    
+                    if not reset: 
+                                                    
+                        self.root_v[robot_name][env_ids, :] = (self.root_p[robot_name][env_ids, :] - \
+                                                        self.root_p_prev[robot_name][env_ids, :]) / dt 
+
+                        self.root_omega[robot_name][env_ids, :] = quat_to_omega(self.root_q[robot_name][env_ids, :], 
+                                                                    self.root_q_prev[robot_name][env_ids, :], 
+                                                                    dt)
+                        
+                        self.jnts_v[robot_name][env_ids, :] = (self.jnts_q[robot_name][env_ids, :] - \
+                                                        self.jnts_q_prev[robot_name][env_ids, :]) / dt
+                        
+                        # self.jnts_v[robot_name][:, :].zero_()
+
+                    else:
+                        
+                        # to avoid issues when differentiating numerically
+
+                        self.root_v[robot_name][env_ids, :].zero_()
+
+                        self.root_omega[robot_name][env_ids, :].zero_()
+                        
+                        self.jnts_v[robot_name][env_ids, :].zero_()
             
-            self.root_p[robot_name][:, :] = pose[0]  
-            self.root_q[robot_name][:, :] = pose[1] # root orientation
-            self.jnts_q[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_positions(
-                                            clone = True) # joint positions 
+                    # update "previous" data for numerical differentiation
 
-            if dt is None:
-                
-                # we get velocities from the simulation. This is not good since 
-                # these can actually represent artifacts which do not have physical meaning.
-                # It's better to obtain them by differentiation to avoid issues with controllers, etc...
+                    self.root_p_prev[robot_name][env_ids, :] = self.root_p[robot_name][env_ids, :] 
+                    self.root_q_prev[robot_name][env_ids, :] = self.root_q[robot_name][env_ids, :]
+                    self.jnts_q_prev[robot_name][env_ids, :] = self.jnts_q[robot_name][env_ids, :]
 
-                self.root_v[robot_name][:, :] = self._robots_art_views[robot_name].get_linear_velocities(
-                                            clone = True) # root lin. velocity 
-                                            
-                self.root_omega[robot_name][:, :] = self._robots_art_views[robot_name].get_angular_velocities(
-                                                clone = True) # root ang. velocity
-                
-                self.jnts_v[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_velocities( 
-                                                clone = True) # joint velocities
+        else:
             
-            else: 
+            # updating data for all environments
 
-                # differentiate numerically
+            for i in range(0, len(rob_names)):
+
+                robot_name = rob_names[i]
+
+                pose = self._robots_art_views[robot_name].get_world_poses( 
+                                                clone = True) # tuple: (pos, quat)
                 
-                if not reset: 
-                                                 
-                    self.root_v[robot_name][:, :] = (self.root_p[robot_name][:, :] - \
-                                                    self.root_p_prev[robot_name][:, :]) / dt 
+                self.root_p[robot_name][:, :] = pose[0]  
+                self.root_q[robot_name][:, :] = pose[1] # root orientation
+                self.jnts_q[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_positions(
+                                                clone = True) # joint positions 
 
-                    self.root_omega[robot_name][:, :] = quat_to_omega(self.root_q[robot_name][:, :], 
-                                                                self.root_q_prev[robot_name][:, :], 
-                                                                dt)
+                if dt is None:
                     
-                    self.jnts_v[robot_name][:, :] = (self.jnts_q[robot_name][:, :] - \
-                                                    self.jnts_q_prev[robot_name][:, :]) / dt
+                    # we get velocities from the simulation. This is not good since 
+                    # these can actually represent artifacts which do not have physical meaning.
+                    # It's better to obtain them by differentiation to avoid issues with controllers, etc...
+
+                    self.root_v[robot_name][:, :] = self._robots_art_views[robot_name].get_linear_velocities(
+                                                clone = True) # root lin. velocity 
+                                                
+                    self.root_omega[robot_name][:, :] = self._robots_art_views[robot_name].get_angular_velocities(
+                                                    clone = True) # root ang. velocity
                     
-                    # self.jnts_v[robot_name][:, :].zero_()
+                    self.jnts_v[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_velocities( 
+                                                    clone = True) # joint velocities
+                
+                else: 
 
-                else:
+                    # differentiate numerically
                     
-                    # to avoid issues when differentiating numerically
+                    if not reset: 
+                                                    
+                        self.root_v[robot_name][:, :] = (self.root_p[robot_name][:, :] - \
+                                                        self.root_p_prev[robot_name][:, :]) / dt 
 
-                    self.root_v[robot_name][:, :].zero_()
+                        self.root_omega[robot_name][:, :] = quat_to_omega(self.root_q[robot_name][:, :], 
+                                                                    self.root_q_prev[robot_name][:, :], 
+                                                                    dt)
+                        
+                        self.jnts_v[robot_name][:, :] = (self.jnts_q[robot_name][:, :] - \
+                                                        self.jnts_q_prev[robot_name][:, :]) / dt
+                        
+                        # self.jnts_v[robot_name][:, :].zero_()
 
-                    self.root_omega[robot_name][:, :].zero_()
-                    
-                    self.jnts_v[robot_name][:, :].zero_()
-        
-                # update "previous" data for numerical differentiation
+                    else:
+                        
+                        # to avoid issues when differentiating numerically
 
-                self.root_p_prev[robot_name][:, :] = self.root_p[robot_name][:, :] 
-                self.root_q_prev[robot_name][:, :] = self.root_q[robot_name][:, :]
-                self.jnts_q_prev[robot_name][:, :] = self.jnts_q[robot_name][:, :]
+                        self.root_v[robot_name][:, :].zero_()
+
+                        self.root_omega[robot_name][:, :].zero_()
+                        
+                        self.jnts_v[robot_name][:, :].zero_()
+            
+                    # update "previous" data for numerical differentiation
+
+                    self.root_p_prev[robot_name][:, :] = self.root_p[robot_name][:, :] 
+                    self.root_q_prev[robot_name][:, :] = self.root_q[robot_name][:, :]
+                    self.jnts_q_prev[robot_name][:, :] = self.jnts_q[robot_name][:, :]
     
     def _custom_post_init(self):
 
@@ -653,6 +759,10 @@ class CustomTask(BaseTask):
 
     def _set_robots_default_jnt_config(self):
         
+        # setting Isaac's internal defaults. Useful is resetting
+        # whole scenes or views, but single env reset has to be implemented
+        # manueally
+
         # we use the homing of the robots
         if (self._world_initialized):
 
@@ -880,9 +990,12 @@ class CustomTask(BaseTask):
         
         print(info)
     
-    def _reset_jnt_imp_control(self, robot_name: str):
+    def _reset_jnt_imp_control(self, 
+                robot_name: str,
+                env_idxs: List[int] = None):
         
-        self.jnt_imp_controllers[robot_name].reset() # resets all refs and cms and gains to 0 and internal defaults
+        # resets all internal data e sets the defaults to the articulation
+        self.jnt_imp_controllers[robot_name].reset(env_idxs = env_idxs)
 
         # we override internal default gains only for the wheels (which btw are usually
         # velocity controlled)
@@ -1053,24 +1166,103 @@ class CustomTask(BaseTask):
         
         # post reset operations
             
-        for i in range(len(self.robot_names)):
+        # for i in range(len(self.robot_names)):
             
-            robot_name = self.robot_names[i]
+        #     robot_name = self.robot_names[i]
 
-            self._robots_art_views[robot_name].post_reset()
+        #     # resets articulations to their default state
+        #     self._robots_art_views[robot_name].post_reset()
+    
+        pass
 
     def reset(self, 
-            integration_dt: float = None,
-            env_ids=None):
-    
-        self._get_robots_state(dt = integration_dt, reset = True) # updates robot states 
+            env_ids: List[int] =None,
+            robot_names: List[str] =None):
 
-        for i in range(len(self.robot_names)):
+        # we first reset all target articulations to their default state
+
+        rob_names = robot_names if (robot_names is not None) else self.robot_names
+
+        # resets the state of target robot and env to the defaults
+        self.reset_state(env_ids=env_ids, 
+                    robot_names=rob_names)
+        
+        # we then update the robots state (this should only be done
+        # on target robots and envs)
+        self._get_robots_state(dt = self.integration_dt, 
+                        env_ids=env_ids, 
+                        robot_names=rob_names,
+                        reset = True)
+
+        # and, based on that, we reset the jnt imp. controller
+        for i in range(len(rob_names)):
             
-            robot_name = self.robot_names[i]
+            self._reset_jnt_imp_control(robot_name=rob_names[i],
+                                env_idxs=env_ids)
 
-            self._reset_jnt_imp_control(robot_name)
+    def reset_state(self,
+            env_ids: List[int] =None,
+            robot_names: List[str] =None):
 
+        rob_names = robot_names if (robot_names is not None) else self.robot_names
+
+        if env_ids is not None:
+
+            for i in range(len(rob_names)):
+
+                robot_name = rob_names[i]
+        
+                # root q
+                self._robots_art_views[robot_name].set_world_poses(positions = self.root_p_default[robot_name][env_ids, :],
+                                                    orientations=self.root_q_default[robot_name][env_ids, :],
+                                                    indices = env_ids)
+                # jnts q
+                self._robots_art_views[robot_name].set_joint_positions(positions = self.jnts_q_default[robot_name][env_ids, :],
+                                                        indices = env_ids)
+                
+                # root v and omega
+                self._robots_art_views[robot_name].set_joint_velocities(velocities = self.jnts_v_default[robot_name][env_ids, :],
+                                                        indices = env_ids)
+                
+                # jnts v
+                concatenated_vel = torch.cat((self.root_v_default[robot_name][env_ids, :], 
+                                                self.root_omega_default[robot_name][env_ids, :]), dim=1)
+            
+                self._robots_art_views[robot_name].set_velocities(velocities = concatenated_vel,
+                                                        indices = env_ids)
+                
+                # jnts eff
+                self._robots_art_views[robot_name].set_joint_efforts(efforts = self.jnts_eff_default[robot_name][env_ids, :],
+                                                        indices = env_ids)
+        
+        else:
+
+            for i in range(len(rob_names)):
+
+                robot_name = rob_names[i]
+        
+                # root q
+                self._robots_art_views[robot_name].set_world_poses(positions = self.root_p_default[robot_name][:, :],
+                                                    orientations=self.root_q_default[robot_name][:, :],
+                                                    indices = None)
+                # jnts q
+                self._robots_art_views[robot_name].set_joint_positions(positions = self.jnts_q_default[robot_name][:, :],
+                                                        indices = None)
+                
+                # root v and omega
+                self._robots_art_views[robot_name].set_joint_velocities(velocities = self.jnts_v_default[robot_name][:, :],
+                                                        indices = None)
+                
+                # jnts v
+                concatenated_vel = torch.cat((self.root_v_default[robot_name][:, :], 
+                                                self.root_omega_default[robot_name][:, :]), dim=1)
+
+                self._robots_art_views[robot_name].set_velocities(velocities = concatenated_vel,
+                                                        indices = None)
+                
+                # jnts eff
+                self._robots_art_views[robot_name].set_joint_efforts(efforts = self.jnts_eff_default[robot_name][:, :],
+                                                        indices = None)
     @abstractmethod
     def pre_physics_step(self, 
                 actions, 

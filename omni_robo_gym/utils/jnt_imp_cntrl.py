@@ -658,10 +658,12 @@ class OmniJntImpCntrl:
             
             self._imp_eff = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
                                         dtype=self.torch_dtype)
-                
-            self._pos_ref_filter.reset()
-            self._vel_ref_filter.reset()
-            self._eff_ref_filter.reset()
+            
+            if self._filter_available:
+            
+                self._pos_ref_filter.reset()
+                self._vel_ref_filter.reset()
+                self._eff_ref_filter.reset()
 
             if self.init_on_creation:
             
@@ -714,9 +716,11 @@ class OmniJntImpCntrl:
             self._imp_eff[idxs, :] = torch.zeros((len(env_idxs), self.n_dofs), device = self._device, 
                                         dtype=self.torch_dtype)
 
-            self._pos_ref_filter.reset(idxs = idxs)
-            self._vel_ref_filter.reset(idxs = idxs)
-            self._eff_ref_filter.reset(idxs = idxs)
+            if self._filter_available:
+            
+                self._pos_ref_filter.reset(idxs = idxs)
+                self._vel_ref_filter.reset(idxs = idxs)
+                self._eff_ref_filter.reset(idxs = idxs)
 
             if self.init_on_creation:
                 

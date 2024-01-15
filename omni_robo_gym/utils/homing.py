@@ -118,6 +118,13 @@ class OmniRobotHomer:
                 print(f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" + f"[{self._assign2homing.__name__}]" \
                       + ": joint " + f"{joint}" + " is not present in the articulation. It will be ignored.")
                 
-    def get_homing(self):
+    def get_homing(self, 
+                clone: bool = False):
 
-        return self._homing
+        if not clone:
+
+            return self._homing
+        
+        else:
+
+            return self._homing.clone()
