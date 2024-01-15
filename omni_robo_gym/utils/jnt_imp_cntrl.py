@@ -81,24 +81,45 @@ class FirstOrderFilter:
         self.refkm1[:, :] = self.refk
         self.ykm1[:, :] = self.yk
     
-    def reset(self):
+    def reset(self,
+            idxs: torch.Tensor = None):
 
-        self.yk[:, :] = torch.zeros((self._rows, self._cols), 
-                            device = self._device, 
-                            dtype=self.torch_dtype)
-        
-        self.ykm1[:, :] = torch.zeros((self._rows, self._cols), 
-                            device = self._device, 
-                            dtype=self.torch_dtype)
-        
-        self.refk[:, :] = torch.zeros((self._rows, self._cols), 
-                            device = self._device, 
-                            dtype=self.torch_dtype)
-        
-        self.refkm1[:, :] = torch.zeros((self._rows, self._cols), 
-                            device = self._device, 
-                            dtype=self.torch_dtype)
-    
+        if idxs is not None:
+
+            self.yk[:, :] = torch.zeros((self._rows, self._cols), 
+                                device = self._device, 
+                                dtype=self.torch_dtype)
+            
+            self.ykm1[:, :] = torch.zeros((self._rows, self._cols), 
+                                device = self._device, 
+                                dtype=self.torch_dtype)
+            
+            self.refk[:, :] = torch.zeros((self._rows, self._cols), 
+                                device = self._device, 
+                                dtype=self.torch_dtype)
+            
+            self.refkm1[:, :] = torch.zeros((self._rows, self._cols), 
+                                device = self._device, 
+                                dtype=self.torch_dtype)
+
+        else:
+            
+            self.yk[idxs, :] = torch.zeros((idxs.shape[0], self._cols), 
+                                device = self._device, 
+                                dtype=self.torch_dtype)
+            
+            self.ykm1[idxs, :] = torch.zeros((idxs.shape[0], self._cols), 
+                                device = self._device, 
+                                dtype=self.torch_dtype)
+            
+            self.refk[idxs, :] = torch.zeros((idxs.shape[0], self._cols), 
+                                device = self._device, 
+                                dtype=self.torch_dtype)
+            
+            self.refkm1[idxs, :] = torch.zeros((idxs.shape[0], self._cols), 
+                                device = self._device, 
+                                dtype=self.torch_dtype)
+            
     def get(self):
 
         return self.yk
@@ -269,7 +290,7 @@ class OmniJntImpCntrl:
                                       
         self.reset()
                 
-    def _initialize_gains(self):
+    def _apply_init_gains(self):
         
         if not self.gains_initialized:
             
@@ -290,7 +311,7 @@ class OmniJntImpCntrl:
             
             self.gains_initialized = True
 
-    def _initialize_refs(self):
+    def _apply_init_refs(self):
 
         if not self.refs_initialized: 
             
@@ -593,78 +614,117 @@ class OmniJntImpCntrl:
 
             return False
     
-    def reset(self):
+    def reset(self,
+            env_idxs: List[int] = None):
         
-        self.gains_initialized = False
-        self.refs_initialized = False
-        
-        # we assume diagonal joint impedance gain matrices, so we can save on memory and only store the diagonal
-        
-        self._pos_gains =  torch.full((self.num_robots, self.n_dofs), 
-                                    self._default_pgain, 
-                                    device = self._device, 
-                                    dtype=self.torch_dtype)
-        self._vel_gains = torch.full((self.num_robots, self.n_dofs), 
-                                    self._default_vgain,
-                                    device = self._device, 
-                                    dtype=self.torch_dtype)
-        
-        self._eff_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=self.torch_dtype)
-        self._pos_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=self.torch_dtype)
-        self._vel_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=self.torch_dtype)
-            
-        # if self.override_art_controller:
-            
-        # saving memory (these are not necessary if not overriding Isaac's art. controller)
-                                    
-        self._pos_err = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=self.torch_dtype)
-        self._vel_err = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=self.torch_dtype)
-        
-        self._pos = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=self.torch_dtype)
-        self._vel = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=self.torch_dtype)
-        self._eff = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=self.torch_dtype)
-        
-        self._imp_eff = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=self.torch_dtype)
+        if env_idxs is None:
 
-        if self._filter_dt is not None:
-
-            self._pos_ref_filter = FirstOrderFilter(dt=self._filter_dt, 
-                                    filter_BW=self._filter_BW, 
-                                    rows=self.num_robots, 
-                                    cols=self.n_dofs, 
-                                    device=self._device, 
-                                    dtype=self.torch_dtype)
-            self._vel_ref_filter = FirstOrderFilter(dt=self._filter_dt, 
-                                    filter_BW=self._filter_BW, 
-                                    rows=self.num_robots, 
-                                    cols=self.n_dofs, 
-                                    device=self._device, 
-                                    dtype=self.torch_dtype)
-            self._eff_ref_filter = FirstOrderFilter(dt=self._filter_dt, 
-                                    filter_BW=self._filter_BW, 
-                                    rows=self.num_robots, 
-                                    cols=self.n_dofs, 
-                                    device=self._device, 
-                                    dtype=self.torch_dtype)
+            self.gains_initialized = False
+            self.refs_initialized = False
             
+            # we assume diagonal joint impedance gain matrices, so we can save on memory and only store the diagonal
+            
+            self._pos_gains =  torch.full((self.num_robots, self.n_dofs), 
+                                        self._default_pgain, 
+                                        device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._vel_gains = torch.full((self.num_robots, self.n_dofs), 
+                                        self._default_vgain,
+                                        device = self._device, 
+                                        dtype=self.torch_dtype)
+            
+            self._eff_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._pos_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._vel_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+                
+            # if self.override_art_controller:
+                
+            # saving memory (these are not necessary if not overriding Isaac's art. controller)
+                                        
+            self._pos_err = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._vel_err = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            
+            self._pos = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._vel = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._eff = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            
+            self._imp_eff = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+                
             self._pos_ref_filter.reset()
             self._vel_ref_filter.reset()
             self._eff_ref_filter.reset()
 
-        if self.init_on_creation:
-        
-            self._initialize_gains()
+            if self.init_on_creation:
+            
+                self._apply_init_gains()
 
-            self._initialize_refs()
+                self._apply_init_refs()
+        
+        else:
+            
+            idxs = torch.tensor(env_idxs, dtype=torch.int) # converting to torch tensor for
+            # efficiency
+
+            self.gains_initialized = False
+            self.refs_initialized = False
+            
+            # we assume diagonal joint impedance gain matrices, so we can save on memory and only store the diagonal
+            
+            self._pos_gains[idxs, :] =  torch.full((len(env_idxs), self.n_dofs), 
+                                        self._default_pgain, 
+                                        device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._vel_gains[idxs, :] = torch.full((len(env_idxs), self.n_dofs), 
+                                        self._default_vgain,
+                                        device = self._device, 
+                                        dtype=self.torch_dtype)
+            
+            self._eff_ref[idxs, :] = torch.zeros((len(env_idxs), self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._pos_ref[idxs, :] = torch.zeros((len(env_idxs), self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._vel_ref[idxs, :] = torch.zeros((len(env_idxs), self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+                
+            # if self.override_art_controller:
+                
+            # saving memory (these are not necessary if not overriding Isaac's art. controller)
+                                        
+            self._pos_err[idxs, :] = torch.zeros((len(env_idxs), self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._vel_err[idxs, :] = torch.zeros((len(env_idxs), self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            
+            self._pos[idxs, :] = torch.zeros((len(env_idxs), self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._vel[idxs, :] = torch.zeros((len(env_idxs), self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            self._eff[idxs, :] = torch.zeros((len(env_idxs), self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+            
+            self._imp_eff[idxs, :] = torch.zeros((len(env_idxs), self.n_dofs), device = self._device, 
+                                        dtype=self.torch_dtype)
+
+            self._pos_ref_filter.reset(idxs = idxs)
+            self._vel_ref_filter.reset(idxs = idxs)
+            self._eff_ref_filter.reset(idxs = idxs)
+
+            if self.init_on_creation:
+                
+                # will use updated gains/refs based on reset (non updated gains/refs will be the same)
+
+                self._apply_init_gains()
+
+                self._apply_init_refs()
         
     def update_state(self, 
         pos: torch.Tensor = None, 
@@ -874,11 +934,11 @@ class OmniJntImpCntrl:
             
         if not self.gains_initialized:
 
-            self._initialize_gains()
+            self._apply_init_gains()
         
         if not self.refs_initialized:
 
-            self._initialize_refs()
+            self._apply_init_refs()
                 
         if filter and self._filter_available:
             
