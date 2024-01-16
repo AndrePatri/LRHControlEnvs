@@ -411,7 +411,7 @@ class RobotVecEnv(gym.Env):
         return self._simulation_app
 
     @property
-    def world(self):
+    def get_world(self):
         """Retrieves the World object for simulation.
 
         Returns:

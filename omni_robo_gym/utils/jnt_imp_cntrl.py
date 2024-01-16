@@ -937,11 +937,11 @@ class OmniJntImpCntrl:
         # initialize gains and refs if not done previously 
             
         if not self.gains_initialized:
-
+            
             self._apply_init_gains()
         
         if not self.refs_initialized:
-
+            
             self._apply_init_refs()
                 
         if filter and self._filter_available:
