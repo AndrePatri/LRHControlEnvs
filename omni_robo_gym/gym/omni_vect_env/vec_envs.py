@@ -43,7 +43,8 @@ class RobotVecEnv(gym.Env):
         headless: bool, 
         sim_device: int = 0, 
         enable_livestream: bool = False, 
-        enable_viewport: bool = False
+        enable_viewport: bool = False,
+        debug = False
     ) -> None:
         """ Initializes RL and task parameters.
 
@@ -56,6 +57,8 @@ class RobotVecEnv(gym.Env):
 
         self.journal = Journal()
 
+        self.debug = debug
+        
         experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnirobogym.kit'
         # experience = ""
         if headless:
