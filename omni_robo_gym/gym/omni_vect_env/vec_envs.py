@@ -55,9 +55,9 @@ class RobotVecEnv(gym.Env):
             enable_viewport (bool): Whether to enable rendering in headless mode.
         """
 
-        self.journal = Journal()
-
         self.debug = debug
+        
+        self.journal = Journal()
         
         experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnirobogym.kit'
         # experience = ""

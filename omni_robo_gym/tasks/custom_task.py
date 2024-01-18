@@ -79,13 +79,15 @@ class CustomTask(BaseTask):
                 default_wheel_stiffness = 0.0,
                 default_wheel_damping = 10.0,
                 override_art_controller = False,
-                dtype = torch.float64) -> None:
+                dtype = torch.float64,
+                debug_mode_jnt_imp = False) -> None:
 
         self.torch_dtype = dtype
         
         self.num_envs = num_envs
 
         self.override_art_controller = override_art_controller
+        self.debug_mode_jnt_imp = debug_mode_jnt_imp
 
         self.integration_dt = integration_dt # just used for contact reporting
         
@@ -1053,7 +1055,8 @@ class CustomTask(BaseTask):
                                             device= self.torch_device, 
                                             dtype=self.torch_dtype,
                                             enable_safety=True, 
-                                            urdf_path=self._urdf_paths[robot_name])
+                                            urdf_path=self._urdf_paths[robot_name],
+                                            debug = self.debug_mode_jnt_imp)
 
                 self._reset_jnt_imp_control(robot_name)
                 

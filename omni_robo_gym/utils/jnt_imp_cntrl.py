@@ -25,6 +25,8 @@ from omni.isaac.core.articulations.articulation_view import ArticulationView
 from omni_robo_gym.utils.defs import Journal
 from omni_robo_gym.utils.urdf_helpers import UrdfLimitsParser
 
+import time
+    
 class FirstOrderFilter:
 
     # a class implementing a simple first order filter
@@ -180,15 +182,26 @@ class OmniJntImpCntrl:
                 init_on_creation = False, 
                 dtype = torch.double,
                 enable_safety = True,
-                urdf_path: str = None): # [s]
+                urdf_path: str = None,
+                debug: bool = False): # [s]
         
         self.torch_dtype = dtype
+
+        self.debug = debug
+        # debug data
+        self.debug_data = {}
+        self.debug_data["time_to_update_state"] = -1.0
+        self.debug_data["time_to_set_refs"] = -1.0
+        self.debug_data["time_to_apply_cmds"] = -1.0
+        self.start_time = None
+        if self.debug:
+            self.start_time = time.perf_counter()
 
         self.enable_safety = enable_safety
         self.limiter = None
         self.robot_limits = None
         self.urdf_path = urdf_path
-
+    
         self.override_art_controller = override_art_controller # whether to override Isaac's internal joint
         # articulation PD controller or not
 
@@ -243,7 +256,8 @@ class OmniJntImpCntrl:
 
             self.robot_limits = UrdfLimitsParser(urdf_path=self.urdf_path, 
                                         joint_names=self.jnts_names,
-                                        backend=self._backend)
+                                        backend=self._backend, 
+                                        device=self._device)
             self.limiter = JntSafety(urdf_parser=self.robot_limits)
             
         self._pos_err = None
@@ -737,6 +751,10 @@ class OmniJntImpCntrl:
         robot_indxs: torch.Tensor = None, 
         jnt_indxs: torch.Tensor = None):
 
+        if self.debug:
+            
+            self.start_time = time.perf_counter()
+            
         success = [True] * 4 # error codes:
         # success[0] == False -> pos error
         # success[1] == False -> vel error
@@ -798,7 +816,12 @@ class OmniJntImpCntrl:
             else:
 
                 success[2] = False
-    
+        
+        if self.debug:
+                
+                self.debug_data["time_to_update_state"] = \
+                    time.perf_counter() - self.start_time
+                
         return success
 
     def set_gains(self, 
@@ -806,7 +829,7 @@ class OmniJntImpCntrl:
                 vel_gains: torch.Tensor = None, 
                 robot_indxs: torch.Tensor = None, 
                 jnt_indxs: torch.Tensor = None):
-
+        
         success = [True] * 3 # error codes:
         # success[0] == False -> pos_gains error
         # success[1] == False -> vel_gains error
@@ -869,6 +892,10 @@ class OmniJntImpCntrl:
             robot_indxs: torch.Tensor = None, 
             jnt_indxs: torch.Tensor = None):
         
+        if self.debug:
+        
+            self.start_time = time.perf_counter()
+        
         success = [True] * 4 # error codes:
         # success[0] == False -> eff_ref error
         # success[1] == False -> pos_ref error
@@ -929,13 +956,21 @@ class OmniJntImpCntrl:
 
                 success[2] = False
 
+        if self.debug:
+        
+            self.debug_data["time_to_set_refs"] = time.perf_counter() - self.start_time
+        
         return success
         
     def apply_cmds(self, 
             filter = False):
 
         # initialize gains and refs if not done previously 
-            
+        
+        if self.debug:
+
+            self.start_time = time.perf_counter()
+
         if not self.gains_initialized:
             
             self._apply_init_gains()
@@ -1029,7 +1064,12 @@ class OmniJntImpCntrl:
 
                 # apply only effort (comprehensive of all imp. terms)
                 self._articulation_view.set_joint_efforts(self._imp_eff)
-                            
+        
+        if self.debug:
+                               
+            self.debug_data["time_to_apply_cmds"] = \
+                time.perf_counter() - self.start_time 
+    
     def get_jnt_names_matching(self, 
                         name_pattern: str):
 

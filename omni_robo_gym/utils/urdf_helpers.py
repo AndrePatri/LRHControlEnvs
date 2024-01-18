@@ -2,13 +2,21 @@ import xml.etree.ElementTree as ET
 
 class UrdfLimitsParser:
     def __init__(self, urdf_path, joint_names,
-                backend = "numpy"):
+                backend = "numpy",
+                device = "cpu"):
+        
         self.urdf_path = urdf_path
         self.joint_names = joint_names
         self.limits_matrix = None
 
         self.backend = backend
+        self.device = device
 
+        if self.backend == "numpy" and \
+            self.device != "cpu":
+
+            raise Exception("When using numpy backend, only cpu device is supported!")
+        
         self.parse_urdf()
 
     def parse_urdf(self):
@@ -32,7 +40,7 @@ class UrdfLimitsParser:
             
             import torch
 
-            self.limits_matrix = torch.full((num_joints, 6), torch.nan)
+            self.limits_matrix = torch.full((num_joints, 6), torch.nan, device=self.device)
 
             self.inf = torch.inf
 
