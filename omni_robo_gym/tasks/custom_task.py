@@ -92,7 +92,10 @@ class CustomTask(BaseTask):
         self.integration_dt = integration_dt # just used for contact reporting
         
         self.torch_device = torch.device(device) # defaults to "cuda" ("cpu" also valid)
-
+        self.using_gpu = False
+        if self.torch_device == torch.device("cuda"):
+            self.using_gpu = True
+        
         self.journal = Journal()
         
         self.robot_names = robot_names # these are (potentially) custom names to 
@@ -932,12 +935,24 @@ class CustomTask(BaseTask):
                     jnt_stiffness: float, 
                     jnt_damping: float, 
                     wheel_stiffness: float, 
-                    wheel_damping: float):
+                    wheel_damping: float,
+                    robot_indxs: torch.Tensor = None):
 
         # updates joint imp. controller with new impedance values
         
+        for_robots = ""
+        if robot_indxs is not None:
+            
+            if not isinstance(robot_indxs, torch.tensor):
+                
+                msg = "Provided robot_indxs should be a torch tensor of indexes!"
+            
+                raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]: " + msg)
+                
+            for_robots = "for robot indexes: " + str(robot_indxs.tolist())
+        
         info = f"[{self.__class__.__name__}]" + f"[{self.journal.info}]: " + \
-                        f"updating joint impedances..."
+                        f"updating joint impedances " + for_robots
         print(info)
         
         gains_pos = torch.full((self.num_envs, \
@@ -953,7 +968,8 @@ class CustomTask(BaseTask):
         
         success = self.jnt_imp_controllers[robot_name].set_gains(
                                     pos_gains = gains_pos,
-                                    vel_gains = gains_vel)
+                                    vel_gains = gains_vel,
+                                    robot_indxs = robot_indxs)
         
         if not all(success):
             
@@ -978,17 +994,18 @@ class CustomTask(BaseTask):
         success_wheels = self.jnt_imp_controllers[robot_name].set_gains(
                             pos_gains = wheels_pos_gains,
                             vel_gains = wheels_vel_gains,
-                            jnt_indxs=wheels_indxs)
+                            jnt_indxs=wheels_indxs,
+                            robot_indxs = robot_indxs)
 
         if not all(success_wheels):
             
             warning = f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]: " + \
-            f"impedance controller could not set wheel gains."
+            f"impedance controller could not set wheel gains " + for_robots
 
             print(warning)
         
         info = f"[{self.__class__.__name__}]" + f"[{self.journal.info}]: " + \
-            f"joint impedances updated."
+            f"joint impedances updated " + for_robots
         
         print(info)
     
