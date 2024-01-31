@@ -943,7 +943,7 @@ class CustomTask(BaseTask):
         for_robots = ""
         if robot_indxs is not None:
             
-            if not isinstance(robot_indxs, torch.tensor):
+            if not isinstance(robot_indxs, torch.Tensor):
                 
                 msg = "Provided robot_indxs should be a torch tensor of indexes!"
             
