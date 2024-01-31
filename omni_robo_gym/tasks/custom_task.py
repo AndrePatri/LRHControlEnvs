@@ -24,8 +24,8 @@ from omni.isaac.core.world import World
 
 import omni.kit
 
-import gymnasium as gym
-from gym import spaces
+import gymnasium
+from gymnasium import spaces
 import numpy as np
 import torch
 
