@@ -955,22 +955,62 @@ class CustomTask(BaseTask):
                         f"updating joint impedances " + for_robots
         print(info)
         
-        gains_pos = torch.full((self.num_envs, \
-                                self.jnt_imp_controllers[robot_name].n_dofs), 
-                    jnt_stiffness, 
-                    device = self.torch_device, 
-                    dtype=self.torch_dtype)
-        gains_vel = torch.full((self.num_envs, \
-                                self.jnt_imp_controllers[robot_name].n_dofs), 
-                    jnt_damping, 
-                    device = self.torch_device, 
-                    dtype=self.torch_dtype)
-        
+        wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(
+                                name_pattern="wheel")
+            
+        if robot_indxs is None:
+                                
+            gains_pos = torch.full((self.num_envs, \
+                                    self.jnt_imp_controllers[robot_name].n_dofs), 
+                        jnt_stiffness, 
+                        device = self.torch_device, 
+                        dtype=self.torch_dtype)
+            gains_vel = torch.full((self.num_envs, \
+                                    self.jnt_imp_controllers[robot_name].n_dofs), 
+                        jnt_damping, 
+                        device = self.torch_device, 
+                        dtype=self.torch_dtype)
+
+            # wheels are velocity-controlled
+            wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                        wheel_stiffness, 
+                                        device = self.torch_device, 
+                                        dtype=self.torch_dtype)
+            
+            wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                        wheel_damping, 
+                                        device = self.torch_device, 
+                                        dtype=self.torch_dtype)
+
+        else:
+
+            gains_pos = torch.full((robot_indxs.shape[0], \
+                                    self.jnt_imp_controllers[robot_name].n_dofs), 
+                        jnt_stiffness, 
+                        device = self.torch_device, 
+                        dtype=self.torch_dtype)
+            gains_vel = torch.full((robot_indxs.shape[0], \
+                                    self.jnt_imp_controllers[robot_name].n_dofs), 
+                        jnt_damping, 
+                        device = self.torch_device, 
+                        dtype=self.torch_dtype)
+
+            # wheels are velocity-controlled
+            wheels_pos_gains = torch.full((robot_indxs.shape[0], len(wheels_indxs)), 
+                                        wheel_stiffness, 
+                                        device = self.torch_device, 
+                                        dtype=self.torch_dtype)
+            
+            wheels_vel_gains = torch.full((robot_indxs.shape[0], len(wheels_indxs)), 
+                                        wheel_damping, 
+                                        device = self.torch_device, 
+                                        dtype=self.torch_dtype)
+            
         success = self.jnt_imp_controllers[robot_name].set_gains(
                                     pos_gains = gains_pos,
                                     vel_gains = gains_vel,
                                     robot_indxs = robot_indxs)
-        
+            
         if not all(success):
             
             warning = f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]: " + \
@@ -978,24 +1018,11 @@ class CustomTask(BaseTask):
 
             print(warning)
 
-        # wheels are velocity-controlled
-        wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(
-                                name_pattern="wheel")
-        wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                    wheel_stiffness, 
-                                    device = self.torch_device, 
-                                    dtype=self.torch_dtype)
-        
-        wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                    wheel_damping, 
-                                    device = self.torch_device, 
-                                    dtype=self.torch_dtype)
-        
         success_wheels = self.jnt_imp_controllers[robot_name].set_gains(
-                            pos_gains = wheels_pos_gains,
-                            vel_gains = wheels_vel_gains,
-                            jnt_indxs=wheels_indxs,
-                            robot_indxs = robot_indxs)
+                                pos_gains = wheels_pos_gains,
+                                vel_gains = wheels_vel_gains,
+                                jnt_indxs=wheels_indxs,
+                                robot_indxs = robot_indxs)
 
         if not all(success_wheels):
             
