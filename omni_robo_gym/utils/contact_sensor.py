@@ -197,6 +197,7 @@ class OmniContactSensors:
     def get(self, 
         dt: float, 
         contact_link: str,
+        env_indxs: torch.Tensor = None,
         clone = False):
         
         index = -1
@@ -211,5 +212,24 @@ class OmniContactSensors:
         
             raise Exception(exception)
 
-        return self.contact_geom_prim_views[index].get_net_contact_forces(clone = clone, 
-                                        dt = dt).view(self.n_envs, 3)
+        if env_indxs is None:
+            
+            return self.contact_geom_prim_views[index].get_net_contact_forces(clone = clone, 
+                                            dt = dt).view(self.n_envs, 3)
+        
+        else:
+            
+            if not isinstance(env_indxs, torch.Tensor):
+                
+                msg = "Provided env_indxs should be a torch tensor of indexes!"
+            
+                raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]: " + msg)
+            
+            if not len(env_indxs.shape) == 1:
+
+                msg = "Provided robot_indxs should be a 1D torch tensor!"
+            
+                raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]: " + msg)
+
+            return self.contact_geom_prim_views[index].get_net_contact_forces(clone = clone, 
+                                            dt = dt).view(self.n_envs, 3)[env_indxs, :]
