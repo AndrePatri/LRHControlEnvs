@@ -383,26 +383,26 @@ class CustomTask(BaseTask):
                                 global_paths=[self._ground_plane_prim_path] # can collide with these prims
                             )
 
-    def update_jnt_imp_control(self, 
+    def update_jnt_imp_control_gains(self, 
                     robot_name: str,
                     jnt_stiffness: float, 
                     jnt_damping: float, 
                     wheel_stiffness: float, 
                     wheel_damping: float,
-                    robot_indxs: torch.Tensor = None):
+                    env_indxs: torch.Tensor = None):
 
         # updates joint imp. controller with new impedance values
         
         for_robots = ""
-        if robot_indxs is not None:
+        if env_indxs is not None:
             
-            if not isinstance(robot_indxs, torch.Tensor):
+            if not isinstance(env_indxs, torch.Tensor):
                 
-                msg = "Provided robot_indxs should be a torch tensor of indexes!"
+                msg = "Provided env_indxs should be a torch tensor of indexes!"
             
                 raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]: " + msg)
                 
-            for_robots = f"for robot {robot_name}, indexes: " + str(robot_indxs.tolist())
+            for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
         
         info = f"[{self.__class__.__name__}]" + f"[{self._journal.info}]: " + \
                         f"updating joint impedances " + for_robots
@@ -411,7 +411,7 @@ class CustomTask(BaseTask):
         wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(
                                 name_pattern="wheel")
             
-        if robot_indxs is None:
+        if env_indxs is None:
                                 
             gains_pos = torch.full((self.num_envs, \
                                     self.jnt_imp_controllers[robot_name].n_dofs), 
@@ -437,24 +437,24 @@ class CustomTask(BaseTask):
 
         else:
 
-            gains_pos = torch.full((robot_indxs.shape[0], \
+            gains_pos = torch.full((env_indxs.shape[0], \
                                     self.jnt_imp_controllers[robot_name].n_dofs), 
                         jnt_stiffness, 
                         device = self.torch_device, 
                         dtype=self.torch_dtype)
-            gains_vel = torch.full((robot_indxs.shape[0], \
+            gains_vel = torch.full((env_indxs.shape[0], \
                                     self.jnt_imp_controllers[robot_name].n_dofs), 
                         jnt_damping, 
                         device = self.torch_device, 
                         dtype=self.torch_dtype)
 
             # wheels are velocity-controlled
-            wheels_pos_gains = torch.full((robot_indxs.shape[0], len(wheels_indxs)), 
+            wheels_pos_gains = torch.full((env_indxs.shape[0], len(wheels_indxs)), 
                                         wheel_stiffness, 
                                         device = self.torch_device, 
                                         dtype=self.torch_dtype)
             
-            wheels_vel_gains = torch.full((robot_indxs.shape[0], len(wheels_indxs)), 
+            wheels_vel_gains = torch.full((env_indxs.shape[0], len(wheels_indxs)), 
                                         wheel_damping, 
                                         device = self.torch_device, 
                                         dtype=self.torch_dtype)
@@ -462,7 +462,7 @@ class CustomTask(BaseTask):
         success = self.jnt_imp_controllers[robot_name].set_gains(
                                     pos_gains = gains_pos,
                                     vel_gains = gains_vel,
-                                    robot_indxs = robot_indxs)
+                                    robot_indxs = env_indxs)
             
         if not all(success):
             
@@ -475,7 +475,7 @@ class CustomTask(BaseTask):
                                 pos_gains = wheels_pos_gains,
                                 vel_gains = wheels_vel_gains,
                                 jnt_indxs=wheels_indxs,
-                                robot_indxs = robot_indxs)
+                                robot_indxs = env_indxs)
 
         if not all(success_wheels):
             
