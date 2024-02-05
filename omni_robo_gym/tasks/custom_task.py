@@ -489,6 +489,66 @@ class CustomTask(BaseTask):
         
         print(info)
     
+    def reset_jnt_imp_control(self, 
+                robot_name: str,
+                env_idxs: List[int] = None):
+        
+        for_robots = ""
+        if env_idxs is not None:
+            
+            if not isinstance(env_idxs, List):
+                
+                msg = "Provided env_idxs should be a List of indexes!"
+            
+                raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]: " + msg)
+                
+            for_robots = f"for robot {robot_name}, indexes: " + str(env_idxs)
+        
+        info = f"[{self.__class__.__name__}]" + f"[{self._journal.info}]: " + \
+                        f"resetting joint imp control " + for_robots
+        print(info)
+
+        # resets all internal data e sets the defaults to the articulation
+        self.jnt_imp_controllers[robot_name].reset(env_idxs = env_idxs)
+
+        # we override internal default gains only for the wheels (which btw are usually
+        # velocity controlled)
+        self.jnt_imp_controllers[robot_name].update_state(pos = self._jnts_q[robot_name], 
+                                                        vel = self._jnts_v[robot_name],
+                                                        eff = None)
+            
+        wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(name_pattern="wheel")
+
+        if wheels_indxs.numel() != 0: # the robot has wheels
+
+            wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                        self.default_wheel_stiffness, 
+                                        device = self.torch_device, 
+                                        dtype=self.torch_dtype)
+            
+            wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                        self.default_wheel_damping, 
+                                        device = self.torch_device, 
+                                        dtype=self.torch_dtype)
+
+            self.jnt_imp_controllers[robot_name].set_gains(pos_gains = wheels_pos_gains,
+                                        vel_gains = wheels_vel_gains,
+                                        jnt_indxs=wheels_indxs)
+                    
+        try:
+
+            self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing())
+        
+        except Exception:
+            
+            print(f"[{self.__class__.__name__}]" + f"[{self._journal.warning}]" +  f"[{self.init_imp_control.__name__}]" +\
+            ": cannot set imp. controller reference to homing. Did you call the \"init_homing_managers\" method ?")
+
+            pass      
+
+        # actually applies reset commands to the articulation
+        self.jnt_imp_controllers[robot_name].apply_cmds()          
+
     def set_world(self,
                 world: World):
         
@@ -1377,51 +1437,6 @@ class CustomTask(BaseTask):
                             "homing manager."
                             )
     
-    def reset_jnt_imp_control(self, 
-                robot_name: str,
-                env_idxs: List[int] = None):
-        
-        # resets all internal data e sets the defaults to the articulation
-        self.jnt_imp_controllers[robot_name].reset(env_idxs = env_idxs)
-
-        # we override internal default gains only for the wheels (which btw are usually
-        # velocity controlled)
-        self.jnt_imp_controllers[robot_name].update_state(pos = self._jnts_q[robot_name], 
-                                                        vel = self._jnts_v[robot_name],
-                                                        eff = None)
-            
-        wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(name_pattern="wheel")
-
-        if wheels_indxs.numel() != 0: # the robot has wheels
-
-            wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                        self.default_wheel_stiffness, 
-                                        device = self.torch_device, 
-                                        dtype=self.torch_dtype)
-            
-            wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                        self.default_wheel_damping, 
-                                        device = self.torch_device, 
-                                        dtype=self.torch_dtype)
-
-            self.jnt_imp_controllers[robot_name].set_gains(pos_gains = wheels_pos_gains,
-                                        vel_gains = wheels_vel_gains,
-                                        jnt_indxs=wheels_indxs)
-                    
-        try:
-
-            self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing())
-        
-        except Exception:
-            
-            print(f"[{self.__class__.__name__}]" + f"[{self._journal.warning}]" +  f"[{self.init_imp_control.__name__}]" +\
-            ": cannot set imp. controller reference to homing. Did you call the \"init_homing_managers\" method ?")
-
-            pass      
-
-        # actually applies reset commands to the articulation
-        self.jnt_imp_controllers[robot_name].apply_cmds()          
-
     def _init_jnt_imp_control(self):
     
         if self._world_initialized:
