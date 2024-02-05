@@ -301,6 +301,21 @@ class CustomTask(BaseTask):
                     robot_name: str,
                     env_indxs: torch.Tensor = None):
         
+        for_robots = ""
+        if env_indxs is not None:
+            
+            if not isinstance(env_indxs, torch.Tensor):
+                
+                msg = "Provided env_indxs should be a torch tensor of indexes!"
+            
+                raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]: " + msg)
+                
+            for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
+        
+        info = f"[{self.__class__.__name__}]" + f"[{self._journal.info}]: " + \
+                        f"updating root offsets " + for_robots
+        print(info)
+
         if env_indxs is None:
 
             self._root_abs_offsets[robot_name][:, 0:2]  = self._root_p[robot_name][:, 0:2]
@@ -312,6 +327,21 @@ class CustomTask(BaseTask):
     def synch_default_root_states(self,
             robot_name: str = None,
             env_indxs: torch.Tensor = None):
+
+        for_robots = ""
+        if env_indxs is not None:
+            
+            if not isinstance(env_indxs, torch.Tensor):
+                
+                msg = "Provided env_indxs should be a torch tensor of indexes!"
+            
+                raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]: " + msg)
+                
+            for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
+        
+        info = f"[{self.__class__.__name__}]" + f"[{self._journal.info}]: " + \
+                        f"updating default root states " + for_robots
+        print(info)
 
         names = []
         
@@ -491,53 +521,61 @@ class CustomTask(BaseTask):
     
     def reset_jnt_imp_control(self, 
                 robot_name: str,
-                env_idxs: List[int] = None):
+                env_indxs: torch.Tensor = None):
         
         for_robots = ""
-        if env_idxs is not None:
+        if env_indxs is not None:
             
-            if not isinstance(env_idxs, List):
+            if not isinstance(env_indxs, torch.Tensor):
                 
-                msg = "Provided env_idxs should be a List of indexes!"
+                msg = "Provided env_indxs should be a torch tensor of indexes!"
             
                 raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]: " + msg)
                 
-            for_robots = f"for robot {robot_name}, indexes: " + str(env_idxs)
+            for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs)
         
         info = f"[{self.__class__.__name__}]" + f"[{self._journal.info}]: " + \
-                        f"resetting joint imp control " + for_robots
+                        f"resetting joint impedances " + for_robots
         print(info)
 
-        # resets all internal data e sets the defaults to the articulation
-        self.jnt_imp_controllers[robot_name].reset(env_idxs = env_idxs)
+        # resets all internal data, refs, 
+        self.jnt_imp_controllers[robot_name].reset(robot_indxs = env_indxs)
 
         # we override internal default gains only for the wheels (which btw are usually
         # velocity controlled)
-        self.jnt_imp_controllers[robot_name].update_state(pos = self._jnts_q[robot_name], 
-                                                        vel = self._jnts_v[robot_name],
-                                                        eff = None)
+
+        if env_indxs is None:
             
-        wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(name_pattern="wheel")
-
-        if wheels_indxs.numel() != 0: # the robot has wheels
-
-            wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                        self.default_wheel_stiffness, 
-                                        device = self.torch_device, 
-                                        dtype=self.torch_dtype)
+            self.jnt_imp_controllers[robot_name].update_state(pos = self._jnts_q[robot_name][:, :], 
+                vel = self._jnts_v[robot_name][:, :],
+                eff = None,
+                robot_indxs = None)
+        
+        else:
+        
+            self.jnt_imp_controllers[robot_name].update_state(pos = self._jnts_q[robot_name][env_indxs, :], 
+                vel = self._jnts_v[robot_name][env_indxs, :],
+                eff = None,
+                robot_indxs = env_indxs)
+        
+        self.update_jnt_imp_control_gains(robot_name = robot_name,
+                                jnt_stiffness = self.default_jnt_stiffness,
+                                jnt_damping = self.default_jnt_damping,
+                                wheel_stiffness = self.default_wheel_stiffness, 
+                                wheel_damping = self.default_wheel_damping,
+                                env_indxs = env_indxs)
             
-            wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                        self.default_wheel_damping, 
-                                        device = self.torch_device, 
-                                        dtype=self.torch_dtype)
-
-            self.jnt_imp_controllers[robot_name].set_gains(pos_gains = wheels_pos_gains,
-                                        vel_gains = wheels_vel_gains,
-                                        jnt_indxs=wheels_indxs)
-                    
         try:
+            
+            if env_indxs is None:
+                                                          
+                self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing()[:, :],
+                                                        robot_indxs = None)
 
-            self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing())
+            else:
+                
+                self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing()[env_indxs, :],
+                                                                robot_indxs = env_indxs)
         
         except Exception:
             
@@ -652,8 +690,8 @@ class CustomTask(BaseTask):
     
         pass
 
-    def reset(self, 
-            env_ids: List[int] =None,
+    def reset(self,
+            env_indxs: torch.Tensor = None,
             robot_names: List[str] =None):
 
         # we first reset all target articulations to their default state
@@ -661,13 +699,13 @@ class CustomTask(BaseTask):
         rob_names = robot_names if (robot_names is not None) else self.robot_names
 
         # resets the state of target robot and env to the defaults
-        self.reset_state(env_ids=env_ids, 
+        self.reset_state(env_indxs=env_indxs, 
                     robot_names=rob_names)
         
         # we then update the robots state (this should only be done
         # on target robots and envs)
         self._get_robots_state(dt = self._integration_dt, 
-                        env_ids=env_ids, 
+                        env_indxs=env_indxs, 
                         robot_names=rob_names,
                         reset = True)
 
@@ -675,42 +713,42 @@ class CustomTask(BaseTask):
         for i in range(len(rob_names)):
             
             self.reset_jnt_imp_control(robot_name=rob_names[i],
-                                env_idxs=env_ids)
+                                env_indxs=env_indxs)
 
     def reset_state(self,
-            env_ids: List[int] =None,
+            env_indxs: torch.Tensor = None,
             robot_names: List[str] =None):
 
         rob_names = robot_names if (robot_names is not None) else self.robot_names
 
-        if env_ids is not None:
+        if env_indxs is not None:
 
             for i in range(len(rob_names)):
 
                 robot_name = rob_names[i]
         
                 # root q
-                self._robots_art_views[robot_name].set_world_poses(positions = self._root_p_default[robot_name][env_ids, :],
-                                                    orientations=self._root_q_default[robot_name][env_ids, :],
-                                                    indices = env_ids)
+                self._robots_art_views[robot_name].set_world_poses(positions = self._root_p_default[robot_name][env_indxs, :],
+                                                    orientations=self._root_q_default[robot_name][env_indxs, :],
+                                                    indices = env_indxs)
                 # jnts q
-                self._robots_art_views[robot_name].set_joint_positions(positions = self._jnts_q_default[robot_name][env_ids, :],
-                                                        indices = env_ids)
+                self._robots_art_views[robot_name].set_joint_positions(positions = self._jnts_q_default[robot_name][env_indxs, :],
+                                                        indices = env_indxs)
                 
                 # root v and omega
-                self._robots_art_views[robot_name].set_joint_velocities(velocities = self._jnts_v_default[robot_name][env_ids, :],
-                                                        indices = env_ids)
+                self._robots_art_views[robot_name].set_joint_velocities(velocities = self._jnts_v_default[robot_name][env_indxs, :],
+                                                        indices = env_indxs)
                 
                 # jnts v
-                concatenated_vel = torch.cat((self._root_v_default[robot_name][env_ids, :], 
-                                                self._root_omega_default[robot_name][env_ids, :]), dim=1)
+                concatenated_vel = torch.cat((self._root_v_default[robot_name][env_indxs, :], 
+                                                self._root_omega_default[robot_name][env_indxs, :]), dim=1)
             
                 self._robots_art_views[robot_name].set_velocities(velocities = concatenated_vel,
-                                                        indices = env_ids)
+                                                        indices = env_indxs)
                 
                 # jnts eff
-                self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][env_ids, :],
-                                                        indices = env_ids)
+                self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][env_indxs, :],
+                                                        indices = env_indxs)
         
         else:
 
@@ -1133,14 +1171,14 @@ class CustomTask(BaseTask):
             self.distr_offset[self.robot_names[i]] = torch.stack(tensor_list, dim=0)
 
     def _get_robots_state(self, 
-                env_ids: List[int] = None, 
+                env_indxs: torch.Tensor = None,
                 robot_names: List[str] = None,
                 dt: float = None, 
                 reset: bool = False):
         
         rob_names = robot_names if (robot_names is not None) else self.robot_names
 
-        if env_ids is not None:
+        if env_indxs is not None:
 
             for i in range(0, len(rob_names)):
 
@@ -1148,13 +1186,13 @@ class CustomTask(BaseTask):
 
                 pose = self._robots_art_views[robot_name].get_world_poses( 
                                                 clone = True,
-                                                indices=env_ids) # tuple: (pos, quat)
+                                                indices=env_indxs) # tuple: (pos, quat)
                 
-                self._root_p[robot_name][env_ids, :] = pose[0] 
-                self._root_q[robot_name][env_ids, :] = pose[1] # root orientation
-                self._jnts_q[robot_name][env_ids, :] = self._robots_art_views[robot_name].get_joint_positions(
+                self._root_p[robot_name][env_indxs, :] = pose[0] 
+                self._root_q[robot_name][env_indxs, :] = pose[1] # root orientation
+                self._jnts_q[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_joint_positions(
                                                 clone = True,
-                                                indices=env_ids) # joint positions 
+                                                indices=env_indxs) # joint positions 
 
                 if dt is None:
                     
@@ -1162,17 +1200,17 @@ class CustomTask(BaseTask):
                     # these can actually represent artifacts which do not have physical meaning.
                     # It's better to obtain them by differentiation to avoid issues with controllers, etc...
 
-                    self._root_v[robot_name][env_ids, :] = self._robots_art_views[robot_name].get_linear_velocities(
+                    self._root_v[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_linear_velocities(
                                                 clone = True,
-                                                indices=env_ids) # root lin. velocity 
+                                                indices=env_indxs) # root lin. velocity 
                                                 
-                    self._root_omega[robot_name][env_ids, :] = self._robots_art_views[robot_name].get_angular_velocities(
+                    self._root_omega[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_angular_velocities(
                                                 clone = True,
-                                                indices=env_ids) # root ang. velocity
+                                                indices=env_indxs) # root ang. velocity
                     
-                    self._jnts_v[robot_name][env_ids, :] = self._robots_art_views[robot_name].get_joint_velocities( 
+                    self._jnts_v[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_joint_velocities( 
                                                 clone = True,
-                                                indices=env_ids) # joint velocities
+                                                indices=env_indxs) # joint velocities
                 
                 else: 
 
@@ -1180,15 +1218,15 @@ class CustomTask(BaseTask):
                     
                     if not reset: 
                                                     
-                        self._root_v[robot_name][env_ids, :] = (self._root_p[robot_name][env_ids, :] - \
-                                                        self._root_p_prev[robot_name][env_ids, :]) / dt 
+                        self._root_v[robot_name][env_indxs, :] = (self._root_p[robot_name][env_indxs, :] - \
+                                                        self._root_p_prev[robot_name][env_indxs, :]) / dt 
 
-                        self._root_omega[robot_name][env_ids, :] = quat_to_omega(self._root_q[robot_name][env_ids, :], 
-                                                                    self._root_q_prev[robot_name][env_ids, :], 
+                        self._root_omega[robot_name][env_indxs, :] = quat_to_omega(self._root_q[robot_name][env_indxs, :], 
+                                                                    self._root_q_prev[robot_name][env_indxs, :], 
                                                                     dt)
                         
-                        self._jnts_v[robot_name][env_ids, :] = (self._jnts_q[robot_name][env_ids, :] - \
-                                                        self._jnts_q_prev[robot_name][env_ids, :]) / dt
+                        self._jnts_v[robot_name][env_indxs, :] = (self._jnts_q[robot_name][env_indxs, :] - \
+                                                        self._jnts_q_prev[robot_name][env_indxs, :]) / dt
                         
                         # self._jnts_v[robot_name][:, :].zero_()
 
@@ -1196,17 +1234,17 @@ class CustomTask(BaseTask):
                         
                         # to avoid issues when differentiating numerically
 
-                        self._root_v[robot_name][env_ids, :].zero_()
+                        self._root_v[robot_name][env_indxs, :].zero_()
 
-                        self._root_omega[robot_name][env_ids, :].zero_()
+                        self._root_omega[robot_name][env_indxs, :].zero_()
                         
-                        self._jnts_v[robot_name][env_ids, :].zero_()
+                        self._jnts_v[robot_name][env_indxs, :].zero_()
             
                     # update "previous" data for numerical differentiation
 
-                    self._root_p_prev[robot_name][env_ids, :] = self._root_p[robot_name][env_ids, :] 
-                    self._root_q_prev[robot_name][env_ids, :] = self._root_q[robot_name][env_ids, :]
-                    self._jnts_q_prev[robot_name][env_ids, :] = self._jnts_q[robot_name][env_ids, :]
+                    self._root_p_prev[robot_name][env_indxs, :] = self._root_p[robot_name][env_indxs, :] 
+                    self._root_q_prev[robot_name][env_indxs, :] = self._root_q[robot_name][env_indxs, :]
+                    self._jnts_q_prev[robot_name][env_indxs, :] = self._jnts_q[robot_name][env_indxs, :]
 
         else:
             
