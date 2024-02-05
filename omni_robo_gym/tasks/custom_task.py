@@ -614,7 +614,7 @@ class CustomTask(BaseTask):
         # and, based on that, we reset the jnt imp. controller
         for i in range(len(rob_names)):
             
-            self._reset_jnt_imp_control(robot_name=rob_names[i],
+            self.reset_jnt_imp_control(robot_name=rob_names[i],
                                 env_idxs=env_ids)
 
     def reset_state(self,
@@ -1377,7 +1377,7 @@ class CustomTask(BaseTask):
                             "homing manager."
                             )
     
-    def _reset_jnt_imp_control(self, 
+    def reset_jnt_imp_control(self, 
                 robot_name: str,
                 env_idxs: List[int] = None):
         
@@ -1443,7 +1443,7 @@ class CustomTask(BaseTask):
                                             urdf_path=self._urdf_paths[robot_name],
                                             debug = self._debug_mode_jnt_imp)
 
-                self._reset_jnt_imp_control(robot_name)
+                self.reset_jnt_imp_control(robot_name)
                 
         else:
 
