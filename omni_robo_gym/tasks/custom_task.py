@@ -316,6 +316,7 @@ class CustomTask(BaseTask):
                         f"updating root offsets " + for_robots
         print(info)
 
+        # only planar position used
         if env_indxs is None:
 
             self._root_abs_offsets[robot_name][:, 0:2]  = self._root_p[robot_name][:, 0:2]
@@ -343,31 +344,17 @@ class CustomTask(BaseTask):
                         f"updating default root states " + for_robots
         print(info)
 
-        names = []
-        
-        if robot_name is None:
+        if env_indxs is None:
 
-            names = self.robot_names
+            self._root_p_default[robot_name][:, :] = self._root_p[robot_name]
+
+            self._root_q_default[robot_name][:, :] = self._root_q[robot_name]
         
         else:
-
-            names.append(robot_name)
             
-        for i in range(0, len(names)):
+            self._root_p_default[robot_name][env_indxs, :] = self._root_p[robot_name][env_indxs, :]
 
-            robot_name = names[i]
-
-            if env_indxs is None:
-
-                self._root_p_default[robot_name][:, :] = self._root_p[robot_name]
-
-                self._root_q_default[robot_name][:, :] = self._root_q[robot_name]
-            
-            else:
-                
-                self._root_p_default[robot_name][env_indxs, :] = self._root_p[robot_name][env_indxs, :]
-
-                self._root_q_default[robot_name][env_indxs, :] = self._root_q[robot_name][env_indxs, :]
+            self._root_q_default[robot_name][env_indxs, :] = self._root_q[robot_name][env_indxs, :]
 
     def post_initialization_steps(self):
         
@@ -538,12 +525,10 @@ class CustomTask(BaseTask):
                         f"resetting joint impedances " + for_robots
         print(info)
 
-        # resets all internal data, refs, 
+        # resets all internal data, refs to defaults
         self.jnt_imp_controllers[robot_name].reset(robot_indxs = env_indxs)
 
-        # we override internal default gains only for the wheels (which btw are usually
-        # velocity controlled)
-
+        # restore current state
         if env_indxs is None:
             
             self.jnt_imp_controllers[robot_name].update_state(pos = self._jnts_q[robot_name][:, :], 
@@ -558,13 +543,15 @@ class CustomTask(BaseTask):
                 eff = None,
                 robot_indxs = env_indxs)
         
+        # restore default gains
         self.update_jnt_imp_control_gains(robot_name = robot_name,
                                 jnt_stiffness = self.default_jnt_stiffness,
                                 jnt_damping = self.default_jnt_damping,
                                 wheel_stiffness = self.default_wheel_stiffness, 
                                 wheel_damping = self.default_wheel_damping,
                                 env_indxs = env_indxs)
-            
+        
+        # restore jnt imp refs to homing
         try:
             
             if env_indxs is None:
