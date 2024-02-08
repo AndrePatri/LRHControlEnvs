@@ -24,8 +24,6 @@ from omni.isaac.core.world import World
 
 import omni.kit
 
-import gymnasium
-from gymnasium import spaces
 import numpy as np
 import torch
 
@@ -50,7 +48,7 @@ from omni_robo_gym.utils.math_utils import quat_to_omega
 from abc import abstractmethod
 from typing import List, Dict
 
-class CustomTask(BaseTask):
+class IsaacTask(BaseTask):
 
     def __init__(self, 
                 name: str,
@@ -253,20 +251,6 @@ class CustomTask(BaseTask):
         #     print(warn)
 
         #     self._cloning_offset = np.array([[0, 0, 0]] * self.num_envs)
-
-        # values used for defining RL buffers
-        self._num_observations = 4
-        self._num_actions = 1
-
-        # a few class buffers to store RL-related states
-        self.obs = torch.zeros((self.num_envs, self._num_observations))
-        self.resets = torch.zeros((self.num_envs, 1))
-
-        # set the action and observation space for RL
-        self.action_space = spaces.Box(np.ones(self._num_actions) * -1.0, np.ones(self._num_actions) * 1.0)
-        self.observation_space = spaces.Box(
-            np.ones(self._num_observations) * -np.Inf, np.ones(self._num_observations) * np.Inf
-        )
 
         self._replicate_physics = replicate_physics
 
@@ -765,22 +749,6 @@ class CustomTask(BaseTask):
                 # jnts eff
                 self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][:, :],
                                                         indices = None)
-
-    def get_observations(self):
-        
-        # retrieve data from the simulation
-
-        pass
-
-    def calculate_metrics(self) -> None:
-        
-        # compute any metric to be fed to the agent
-
-        pass
-
-    def is_done(self) -> None:
-        
-        pass
 
     def close(self):
 

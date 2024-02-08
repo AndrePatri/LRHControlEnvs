@@ -20,7 +20,6 @@ import os
 import signal
 
 import carb
-import gymnasium as gym 
 
 import torch
 
@@ -31,7 +30,7 @@ import numpy as np
 
 from omni_robo_gym.utils.defs import Journal
 
-class RobotVecEnv(gym.Env):
+class IsaacSimEnv():
     """ This class provides a base interface for connecting RL policies with task implementations.
         APIs provided in this interface follow the interface in gymnasium.Env.
         This class also provides utilities for initializing simulation apps, creating the World,
@@ -285,9 +284,6 @@ class RobotVecEnv(gym.Env):
         self._task.apply_collision_filters(self._physics_scene_path, 
                                 "/World/collisions")
         
-        self.observation_space = self._task.observation_space
-        self.action_space = self._task.action_space
-
         if sim_params and "enable_viewport" in sim_params:
             self._render = sim_params["enable_viewport"]
 
@@ -325,7 +321,7 @@ class RobotVecEnv(gym.Env):
             # return the rgb data
             return rgb_data[:, :, :3]
         else:
-            gym.Env.render(self, mode=mode)
+
             return None
 
     def create_viewport_render_product(self, resolution=(1280, 720)):
