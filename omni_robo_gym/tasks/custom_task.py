@@ -1266,6 +1266,20 @@ class IsaacTask(BaseTask):
                     self._root_q_prev[robot_name][:, :] = self._root_q[robot_name][:, :]
                     self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name][:, :]
     
+    def get_states(self):
+        
+        if self.use_diff_velocities:
+            
+            self._get_robots_state(dt = self.integration_dt) # updates robot states
+            # but velocities are obtained via num. differentiation
+        
+        else:
+
+            self._get_robots_state() # velocities directly from simulator (can 
+            # introduce relevant artifacts, making them unrealistic)
+
+        return self.obs
+
     def _custom_post_init(self):
 
         # can be overridden by child class
