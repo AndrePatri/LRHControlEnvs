@@ -1278,8 +1278,6 @@ class IsaacTask(BaseTask):
             self._get_robots_state() # velocities directly from simulator (can 
             # introduce relevant artifacts, making them unrealistic)
 
-        return self.obs
-
     def _custom_post_init(self):
 
         # can be overridden by child class

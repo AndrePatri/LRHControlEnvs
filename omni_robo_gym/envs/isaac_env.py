@@ -30,12 +30,10 @@ import numpy as np
 
 from omni_robo_gym.utils.defs import Journal
 
+# import gymnasium as gym 
+    
+# class IsaacSimEnv(gym.Env):
 class IsaacSimEnv():
-    """ This class provides a base interface for connecting RL policies with task implementations.
-        APIs provided in this interface follow the interface in gymnasium.Env.
-        This class also provides utilities for initializing simulation apps, creating the World,
-        and registering a task.
-    """
 
     def __init__(
         self, 
@@ -321,7 +319,9 @@ class IsaacSimEnv():
             # return the rgb data
             return rgb_data[:, :, :3]
         else:
-
+            
+            # gym.Env.render(self, mode=mode)
+    
             return None
 
     def create_viewport_render_product(self, resolution=(1280, 720)):
