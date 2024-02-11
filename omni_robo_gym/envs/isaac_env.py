@@ -349,43 +349,17 @@ class IsaacSimEnv():
         
         return
 
-    def seed(self, seed=-1):
-        """ Sets a seed. Pass in -1 for a random seed.
-
-        Args:
-            seed (int): Seed to set. Defaults to -1.
-        Returns:
-            seed (int): Seed that was set.
-        """
-
-        from omni.isaac.core.utils.torch.maths import set_seed
-
-        return set_seed(seed)
-
     @abstractmethod
     def step(self, 
-            actions = None) -> Tuple[Union[np.ndarray, torch.Tensor], 
-                                    Union[np.ndarray, torch.Tensor],
-                                    Union[np.ndarray, torch.Tensor],
-                                    Dict]:
-        """ Basic implementation for stepping simulation. 
-            Can be overriden by inherited Env classes
-            to satisfy requirements of specific RL libraries. This method passes actions to task
-            for processing, steps simulation, and computes observations, rewards, and resets.
-
-        Args:
-            actions (Union[numpy.ndarray, torch.Tensor]): Actions buffer from policy.
-        Returns:
-            observations(Union[numpy.ndarray, torch.Tensor]): Buffer of observation data.
-            rewards(Union[numpy.ndarray, torch.Tensor]): Buffer of rewards data.
-            dones(Union[numpy.ndarray, torch.Tensor]): Buffer of resets/dones data.
-            info(dict): Dictionary of extras data.
-        """
+            actions = None):
+                                     
+        """ Basic implementation for stepping simulation"""
         
         pass
     
     @abstractmethod
     def reset(self):
+            
         """ Usually resets the task and updates observations +
         # other custom operations. """
 
