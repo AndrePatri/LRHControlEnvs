@@ -3,12 +3,13 @@ import numpy as np
 
 from omni.isaac.sensor import ContactSensor
 
-from omni_robo_gym.utils.defs import Journal
-
 from typing import List, Dict
 
 from omni.isaac.core.world import World
 from omni.isaac.core.prims import RigidPrimView, RigidContactView
+
+from SharsorIPCpp.PySharsorIPC import LogType
+from SharsorIPCpp.PySharsorIPC import Journal
 
 class OmniContactSensors:
 
@@ -30,8 +31,6 @@ class OmniContactSensors:
 
         self.device = device
         self.dtype = dtype
-
-        self.journal = Journal()
 
         self.name = name
 
@@ -78,9 +77,11 @@ class OmniContactSensors:
 
         except:
             
-            exception = f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
-                f"Could not find key {name} in" + \
-                "contact_prims dictionary."
+            Journal.log(self.__class__.__name__,
+                "_parse_contact_dicts",
+                f"Could not find key {name} in contact_prims dictionary.",
+                LogType.EXCEP,
+                throw_when_excep = True)                
             
             raise Exception(exception)
         
@@ -90,9 +91,11 @@ class OmniContactSensors:
 
         except:
             
-            exception = f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
-                f"Could not find key {name} in" + \
-                "contact_offsets dictionary."
+            Journal.log(self.__class__.__name__,
+                "_parse_contact_dicts",
+                f"Could not find key {name} in contact_offsets dictionary.",
+                LogType.EXCEP,
+                throw_when_excep = True)
             
             raise Exception(exception)
         
@@ -102,9 +105,11 @@ class OmniContactSensors:
 
         except:
             
-            exception = f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
-                f"Could not find key {name} in" + \
-                "sensor_radii dictionary."
+            Journal.log(self.__class__.__name__,
+                "_parse_contact_dicts",
+                f"Could not find key {name} in sensor_radii dictionary.",
+                LogType.EXCEP,
+                throw_when_excep = True)
             
             raise Exception(exception)
         
@@ -112,26 +117,32 @@ class OmniContactSensors:
         sensor_radii_ok = all(item in self.sensor_radii for item in self.contact_prims)
 
         if not contact_offsets_ok:
-
-            exception = f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" + \
-                f"Provided contact_offsets dictionary does not posses all the necessary keys. " + \
+            
+            warning = f"Provided contact_offsets dictionary does not posses all the necessary keys. " + \
                 f"It should contain all of [{' '.join(self.contact_prims)}]. \n" + \
                 f"Resetting all offsets to zero..."
             
-            print(exception)
-
+            Journal.log(self.__class__.__name__,
+                "_parse_contact_dicts",
+                warning,
+                LogType.WARN,
+                throw_when_excep = True)
+            
             for i in range(0, len(self.contact_prims)):
 
                 self.contact_offsets[self.contact_prims[i]] = np.array([0.0, 0.0, 0.0])
 
         if not sensor_radii_ok:
-
-            exception = f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" + \
-                f"Provided sensor_radii dictionary does not posses all the necessary keys. " + \
+            
+            warning = f"Provided sensor_radii dictionary does not posses all the necessary keys. " + \
                 f"It should contain all of [{' '.join(self.contact_prims)}]. \n" + \
                 f"Resetting all radii to {self.contact_radius_default} ..."
             
-            print(exception)
+            Journal.log(self.__class__.__name__,
+                "_parse_contact_dicts",
+                warning,
+                LogType.WARN,
+                throw_when_excep = True)
 
             for i in range(0, len(self.contact_prims)):
 

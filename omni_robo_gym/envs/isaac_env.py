@@ -26,9 +26,11 @@ import torch
 from abc import ABC, abstractmethod
 from typing import Union, Tuple, Dict
 
-import numpy as np
+from SharsorIPCpp.PySharsorIPC import VLevel
+from SharsorIPCpp.PySharsorIPC import LogType
+from SharsorIPCpp.PySharsorIPC import Journal
 
-from omni_robo_gym.utils.defs import Journal
+import numpy as np
 
 # import gymnasium as gym 
     
@@ -53,23 +55,32 @@ class IsaacSimEnv():
         """
 
         self.debug = debug
-        
-        self.journal = Journal()
-        
+                
         experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnirobogym.kit'
         # experience = ""
         if headless:
-
-            print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": will run in headless mode")
             
+            info = f"Will run in headless mode."
+
+            Journal.log(self.__class__.__name__,
+                "__init__",
+                info,
+                LogType.INFO,
+                throw_when_excep = True)
+                            
             if enable_livestream:
                  
                 experience = ""
             
             elif enable_viewport:
-                 
-                raise Exception(f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
-                            ": using viewport is not supported yet.")
+                
+                exception = f"Using viewport is not supported yet."
+
+                Journal.log(self.__class__.__name__,
+                    "__init__",
+                    exception,
+                    LogType.EXCEP,
+                    throw_when_excep = True)
                 
             else:
                  
@@ -80,13 +91,25 @@ class IsaacSimEnv():
                                             "physics_gpu": sim_device}, 
                                             experience=experience)
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using IsaacSim experience file @ " + experience)
+        info = "Using IsaacSim experience file @ " + experience
 
+        Journal.log(self.__class__.__name__,
+            "__init__",
+            info,
+            LogType.INFO,
+            throw_when_excep = True)
+        
         # carb.settings.get_settings().set("/persistent/omnihydra/useSceneGraphInstancing", True)
 
         if enable_livestream:
 
-            print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": livestream enabled")
+            info = "Livestream enabled"
+
+            Journal.log(self.__class__.__name__,
+                "__init__",
+                info,
+                LogType.INFO,
+                throw_when_excep = True)
 
             from omni.isaac.core.utils.extensions import enable_extension
 
@@ -148,11 +171,24 @@ class IsaacSimEnv():
         
         self.gpu_pipeline_enabled = sim_params["use_gpu_pipeline"]
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using device: " + str(device))
+        info = "Using device: " + str(device)
 
+        Journal.log(self.__class__.__name__,
+            "__init__",
+            info,
+            LogType.INFO,
+            throw_when_excep = True)
+            
         if (sim_params is None):
             
-            print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": no sim params provided -> defaults will be used")
+            info = f"No sim params provided -> defaults will be used."
+
+            Journal.log(self.__class__.__name__,
+                "set_task",
+                info,
+                LogType.INFO,
+                throw_when_excep = True)
+            
             sim_params = {}
 
         # defaults for integration and rendering dt
@@ -160,15 +196,29 @@ class IsaacSimEnv():
     
             sim_params["physics_dt"] = 1.0/60.0
 
-            print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using default integration_dt of " + 
-                sim_params["physics_dt"] + " s.")
-            
+            dt = sim_params["physics_dt"]
+
+            info = f"Using default integration_dt of {dt} s."
+
+            Journal.log(self.__class__.__name__,
+                "set_task",
+                info,
+                LogType.INFO,
+                throw_when_excep = True)
+                        
         if not("rendering_dt" in sim_params):
 
             sim_params["rendering_dt"] = sim_params["physics_dt"]
+            
+            dt = sim_params["rendering_dt"]
 
-            print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + ": using default rendering_dt of " + 
-                sim_params["rendering_dt"] + " s.")
+            info = f"Using default rendering_dt of {dt} s."
+
+            Journal.log(self.__class__.__name__,
+                "set_task",
+                info,
+                LogType.INFO,
+                throw_when_excep = True)
 
         self._world = World(
             stage_units_in_meters=1.0, 
@@ -188,14 +238,18 @@ class IsaacSimEnv():
 
         self._sim_params = sim_params
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.journal.status}]" + ": creating task " + task.name + "\n")
+        big_info = "[World] Creating task " + task.name + "\n" + \
+            "use_gpu_pipeline: " + str(sim_params["use_gpu_pipeline"]) + "\n" + \
+            "device: " + str(device) + "\n" +\
+            "backend: " + str(backend) + "\n" +\
+            "integration_dt: " + str(sim_params["physics_dt"]) + "\n" + \
+            "rendering_dt: " + str(sim_params["rendering_dt"]) + "\n" \
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + "[world]:")
-        print("use_gpu_pipeline: " + str(sim_params["use_gpu_pipeline"]))
-        print("device: " + str(device))
-        print("backend: " + str(backend))
-        print("integration_dt: " + str(sim_params["physics_dt"]))
-        print("rendering_dt: " + str(sim_params["rendering_dt"]))
+        Journal.log(self.__class__.__name__,
+            "set_task",
+            big_info,
+            LogType.INFO,
+            throw_when_excep = True)
 
         ## we get the physics context to expose additional low-level ##
         # settings of the simulation
@@ -250,16 +304,22 @@ class IsaacSimEnv():
         self._gpu_temp_buffer_capacity = self._physics_context.get_gpu_temp_buffer_capacity()
         # self._gpu_max_num_partitions = physics_context.get_gpu_max_num_partitions() # BROKEN->method does not exist
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + "[physics context]:")
-        print("gpu_max_rigid_contact_count: " + str(self._gpu_max_rigid_contact_count))
-        print("gpu_max_rigid_patch_count: " + str(self._gpu_max_rigid_patch_count))
-        print("gpu_found_lost_pairs_capacity: " + str(self._gpu_found_lost_pairs_capacity))
-        print("gpu_found_lost_aggregate_pairs_capacity: " + str(self._gpu_found_lost_aggregate_pairs_capacity))
-        print("gpu_total_aggregate_pairs_capacity: " + str(self._gpu_total_aggregate_pairs_capacity))
-        print("gpu_max_soft_body_contacts: " + str(self._gpu_max_soft_body_contacts))
-        print("gpu_max_particle_contacts: " + str(self._gpu_max_particle_contacts))
-        print("gpu_heap_capacity: " + str(self._gpu_heap_capacity))
-        print("gpu_temp_buffer_capacity: " + str(self._gpu_temp_buffer_capacity))
+        big_info2 = "[physics context]:" + "\n" + \
+            "gpu_max_rigid_contact_count: " + str(self._gpu_max_rigid_contact_count) + "\n" + \
+            "gpu_max_rigid_patch_count: " + str(self._gpu_max_rigid_patch_count) + "\n" + \
+            "gpu_found_lost_pairs_capacity: " + str(self._gpu_found_lost_pairs_capacity) + "\n" + \
+            "gpu_found_lost_aggregate_pairs_capacity: " + str(self._gpu_found_lost_aggregate_pairs_capacity) + "\n" + \
+            "gpu_total_aggregate_pairs_capacity: " + str(self._gpu_total_aggregate_pairs_capacity) + "\n" + \
+            "gpu_max_soft_body_contacts: " + str(self._gpu_max_soft_body_contacts) + "\n" + \
+            "gpu_max_particle_contacts: " + str(self._gpu_max_particle_contacts) + "\n" + \
+            "gpu_heap_capacity: " + str(self._gpu_heap_capacity) + "\n" + \
+            "gpu_temp_buffer_capacity: " + str(self._gpu_temp_buffer_capacity)
+        
+        Journal.log(self.__class__.__name__,
+            "set_task",
+            big_info2,
+            LogType.INFO,
+            throw_when_excep = True)
 
         self._scene = self._world.scene
 
@@ -285,7 +345,11 @@ class IsaacSimEnv():
         if sim_params and "enable_viewport" in sim_params:
             self._render = sim_params["enable_viewport"]
 
-        print(f"[{self.__class__.__name__}]" + f"[{self.journal.info}]" + "[render]: " + str(self._render))
+        Journal.log(self.__class__.__name__,
+            "set_task",
+            "[render]: " + str(self._render),
+            LogType.INFO,
+            throw_when_excep = True)
 
         if init_sim:
 
@@ -308,10 +372,16 @@ class IsaacSimEnv():
         elif mode == "rgb_array":
             # check if viewport is enabled -- if not, then complain because we won't get any data
             if not self._render or not self._record:
-                raise RuntimeError(
-                    f"Cannot render '{mode}' when rendering is not enabled. Please check the provided"
+
+                exception = f"Cannot render '{mode}' when rendering is not enabled. Please check the provided" + \
                     "arguments to the environment class at initialization."
-                )
+
+                Journal.log(self.__class__.__name__,
+                    "__init__",
+                    exception,
+                    LogType.EXCEP,
+                    throw_when_excep = True)
+            
             # obtain the rgb data
             rgb_data = self._rgb_annotator.get_data()
             # convert to numpy array

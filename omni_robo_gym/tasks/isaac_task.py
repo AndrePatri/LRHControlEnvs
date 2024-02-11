@@ -41,12 +41,15 @@ from omni.isaac.core.scenes.scene import Scene
 from omni_robo_gym.utils.jnt_imp_cntrl import OmniJntImpCntrl
 from omni_robo_gym.utils.homing import OmniRobotHomer
 from omni_robo_gym.utils.contact_sensor import OmniContactSensors
-from omni_robo_gym.utils.defs import Journal
+
 from omni_robo_gym.utils.terrains import RlTerrains
 from omni_robo_gym.utils.math_utils import quat_to_omega
 
 from abc import abstractmethod
 from typing import List, Dict
+
+from SharsorIPCpp.PySharsorIPC import LogType
+from SharsorIPCpp.PySharsorIPC import Journal
 
 class IsaacTask(BaseTask):
 
@@ -94,9 +97,7 @@ class IsaacTask(BaseTask):
         self.using_gpu = False
         if self.torch_device == torch.device("cuda"):
             self.using_gpu = True
-        
-        self._journal = Journal()
-        
+                
         self.robot_names = robot_names # these are (potentially) custom names to 
         self.robot_pkg_names = robot_pkg_names # will be used to search for URDF and SRDF packages
 
@@ -240,17 +241,6 @@ class IsaacTask(BaseTask):
         if self._cloning_offset is None:
             
             self._cloning_offset = np.array([[0, 0, 0]] * self.num_envs)
-        
-        # if len(self._cloning_offset[:, 0]) != self.num_envs or \
-        #     len(self._cloning_offset[0, :] != 3):
-        
-        #     warn = f"[{self.__class__.__name__}]" + \
-        #                     f"[{self._journal.warning}]" + \
-        #                     ": provided cloning offsets are not of the right shape." + \
-        #                     " Resetting them to zero..."
-        #     print(warn)
-
-        #     self._cloning_offset = np.array([[0, 0, 0]] * self.num_envs)
 
         self._replicate_physics = replicate_physics
 
@@ -291,14 +281,20 @@ class IsaacTask(BaseTask):
             if not isinstance(env_indxs, torch.Tensor):
                 
                 msg = "Provided env_indxs should be a torch tensor of indexes!"
-            
-                raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]: " + msg)
-                
+
+                Journal.log(self.__class__.__name__,
+                    "update_root_offsets",
+                    msg,
+                    LogType.EXCEP,
+                    throw_when_excep = True)
+                            
             for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
-        
-        info = f"[{self.__class__.__name__}]" + f"[{self._journal.info}]: " + \
-                        f"updating root offsets " + for_robots
-        print(info)
+                                
+        Journal.log(self.__class__.__name__,
+                    "update_root_offsets",
+                    f"updating root offsets " + for_robots,
+                    LogType.INFO,
+                    throw_when_excep = True)
 
         # only planar position used
         if env_indxs is None:
@@ -319,14 +315,20 @@ class IsaacTask(BaseTask):
             if not isinstance(env_indxs, torch.Tensor):
                 
                 msg = "Provided env_indxs should be a torch tensor of indexes!"
-            
-                raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]: " + msg)
                 
+                Journal.log(self.__class__.__name__,
+                    "synch_default_root_states",
+                    msg,
+                    LogType.EXCEP,
+                    throw_when_excep = True)
+                                
             for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
-        
-        info = f"[{self.__class__.__name__}]" + f"[{self._journal.info}]: " + \
-                        f"updating default root states " + for_robots
-        print(info)
+                                
+        Journal.log(self.__class__.__name__,
+                    "synch_default_root_states",
+                    f"updating default root states " + for_robots,
+                    LogType.INFO,
+                    throw_when_excep = True)
 
         if env_indxs is None:
 
@@ -400,14 +402,20 @@ class IsaacTask(BaseTask):
             if not isinstance(env_indxs, torch.Tensor):
                 
                 msg = "Provided env_indxs should be a torch tensor of indexes!"
-            
-                raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]: " + msg)
                 
+                Journal.log(self.__class__.__name__,
+                    "update_jnt_imp_control_gains",
+                    msg,
+                    LogType.EXCEP,
+                    throw_when_excep = True)
+                                
             for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
-        
-        info = f"[{self.__class__.__name__}]" + f"[{self._journal.info}]: " + \
-                        f"updating joint impedances " + for_robots
-        print(info)
+                                
+        Journal.log(self.__class__.__name__,
+                    "update_jnt_imp_control_gains",
+                    f"updating joint impedances " + for_robots,
+                    LogType.INFO,
+                    throw_when_excep = True)
         
         wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(
                                 name_pattern="wheel")
@@ -467,11 +475,12 @@ class IsaacTask(BaseTask):
             
         if not all(success):
             
-            warning = f"[{self.__class__.__name__}]" + f"[{self._journal.warning}]: " + \
-            f"impedance controller could not set gains."
-
-            print(warning)
-
+            Journal.log(self.__class__.__name__,
+                    "update_jnt_imp_control_gains",
+                    f"impedance controller could not set gains.",
+                    LogType.WARN,
+                    throw_when_excep = True)
+                        
         success_wheels = self.jnt_imp_controllers[robot_name].set_gains(
                                 pos_gains = wheels_pos_gains,
                                 vel_gains = wheels_vel_gains,
@@ -479,16 +488,18 @@ class IsaacTask(BaseTask):
                                 robot_indxs = env_indxs)
 
         if not all(success_wheels):
-            
-            warning = f"[{self.__class__.__name__}]" + f"[{self._journal.warning}]: " + \
-            f"impedance controller could not set wheel gains " + for_robots
-
-            print(warning)
-        
-        info = f"[{self.__class__.__name__}]" + f"[{self._journal.info}]: " + \
-            f"joint impedances updated " + for_robots
-        
-        print(info)
+                    
+            Journal.log(self.__class__.__name__,
+                    "update_jnt_imp_control_gains",
+                    f"impedance controller could not set wheel gains " + for_robots,
+                    LogType.WARN,
+                    throw_when_excep = True)
+                
+        Journal.log(self.__class__.__name__,
+                    "update_jnt_imp_control_gains",
+                    f"joint impedances updated " + for_robots,
+                    LogType.INFO,
+                    throw_when_excep = True)
     
     def reset_jnt_imp_control(self, 
                 robot_name: str,
@@ -499,15 +510,19 @@ class IsaacTask(BaseTask):
             
             if not isinstance(env_indxs, torch.Tensor):
                 
-                msg = "Provided env_indxs should be a torch tensor of indexes!"
-            
-                raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]: " + msg)
+                Journal.log(self.__class__.__name__,
+                    "reset_jnt_imp_control",
+                    "Provided env_indxs should be a torch tensor of indexes!",
+                    LogType.EXCEP,
+                    throw_when_excep = True)
                 
             for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs)
-        
-        info = f"[{self.__class__.__name__}]" + f"[{self._journal.info}]: " + \
-                        f"resetting joint impedances " + for_robots
-        print(info)
+                                
+        Journal.log(self.__class__.__name__,
+                    "reset_jnt_imp_control",
+                    f"resetting joint impedances " + for_robots,
+                    LogType.INFO,
+                    throw_when_excep = True)
 
         # resets all internal data, refs to defaults
         self.jnt_imp_controllers[robot_name].reset(robot_indxs = env_indxs)
@@ -550,8 +565,11 @@ class IsaacTask(BaseTask):
         
         except Exception:
             
-            print(f"[{self.__class__.__name__}]" + f"[{self._journal.warning}]" +  f"[{self.init_imp_control.__name__}]" +\
-            ": cannot set imp. controller reference to homing. Did you call the \"init_homing_managers\" method ?")
+            Journal.log(self.__class__.__name__,
+                    "reset_jnt_imp_control",
+                    "cannot set imp. controller reference to homing. Did you call the \"init_homing_managers\" method ?",
+                    LogType.EXCEP,
+                    throw_when_excep = True)
 
             pass      
 
@@ -589,11 +607,13 @@ class IsaacTask(BaseTask):
         # init contact sensors
         self._init_contact_sensors() # IMPORTANT: this has to be called
         # before calling the clone() method!!! 
-            
-        print(f"[{self.__class__.__name__}]" + \
-            f"[{self._journal.status}]" + \
-            ": cloning environments...")
 
+        Journal.log(self.__class__.__name__,
+                    "set_up_scene",
+                    "cloning environments...",
+                    LogType.INFO,
+                    throw_when_excep = True)
+        
         self._cloner.clone(
             source_prim_path=self._template_env_ns,
             prim_paths=self._envs_prim_paths,
@@ -601,10 +621,12 @@ class IsaacTask(BaseTask):
             position_offsets = self._cloning_offset
         ) # we can clone the environment in which all the robos are
 
-        print(f"[{self.__class__.__name__}]" + f"[{self._journal.status}]" + ": done")
-
-        print(f"[{self.__class__.__name__}]" + f"[{self._journal.status}]" + ": finishing scene setup...")
-        
+        Journal.log(self.__class__.__name__,
+                    "set_up_scene",
+                    "finishing scene setup...",
+                    LogType.INFO,
+                    throw_when_excep = True)
+                
         for i in range(len(self.robot_names)):
             
             robot_name = self.robot_names[i]
@@ -645,8 +667,6 @@ class IsaacTask(BaseTask):
         self._set_initial_camera_params()
         
         self.scene_setup_completed = True
-
-        print(f"[{self.__class__.__name__}]" + f"[{self._journal.status}]" + ": done")
     
     def post_reset(self):
         
@@ -919,10 +939,12 @@ class IsaacTask(BaseTask):
             xacro_gen = subprocess.check_call(xacro_cmd)
 
         except:
-
-            raise Exception(f"[{self.__class__.__name__}]" 
-                            + f"[{self._journal.exception}]" + 
-                            ": failed to generate " + robot_name + "\'S SRDF!!!")
+            
+            Journal.log(self.__class__.__name__,
+                "_generate_urdf",
+                "failed to generate " + robot_name + "\'S SRDF!!!",
+                LogType.EXCEP,
+                throw_when_excep = True)
         
     def _generate_urdf(self, 
                 robot_name: str, 
@@ -962,32 +984,37 @@ class IsaacTask(BaseTask):
 
         except:
 
-            raise Exception(f"[{self.__class__.__name__}]" + 
-                            f"[{self._journal.exception}]" + 
-                            ": failed to generate " + robot_name + "\'s URDF!!!")
+            Journal.log(self.__class__.__name__,
+                "_generate_urdf",
+                "Failed to generate " + robot_name + "\'s URDF!!!",
+                LogType.EXCEP,
+                throw_when_excep = True)
 
     def _generate_rob_descriptions(self, 
                     robot_name: str, 
                     robot_pkg_name: str):
         
         self._descr_dump_path = "/tmp/" + f"{self.__class__.__name__}"
-        print(f"[{self.__class__.__name__}]" + f"[{self._journal.status}]" + ": generating URDF for robot "+ 
-              f"{robot_name}, of type {robot_pkg_name}...")
 
+        Journal.log(self.__class__.__name__,
+                    "update_root_offsets",
+                    "generating URDF for robot "+ f"{robot_name}, of type {robot_pkg_name}...",
+                    LogType.INFO,
+                    throw_when_excep = True)
+        
         self._generate_urdf(robot_name=robot_name, 
                         robot_pkg_name=robot_pkg_name)
 
-        print(f"[{self.__class__.__name__}]" + f"[{self._journal.status}]" + ": done")
-
-        print(f"[{self.__class__.__name__}]" + f"[{self._journal.status}]" + ": generating SRDF for robot "+ 
-              f"{robot_name}, of type {robot_pkg_name}...")
+        Journal.log(self.__class__.__name__,
+                    "update_root_offsets",
+                    "generating SRDF for robot "+ f"{robot_name}, of type {robot_pkg_name}...",
+                    LogType.INFO,
+                    throw_when_excep = True)
 
         # we also generate SRDF files, which are useful for control
         self._generate_srdf(robot_name=robot_name, 
                         robot_pkg_name=robot_pkg_name)
         
-        print(f"[{self.__class__.__name__}]" + f"[{self._journal.status}]" + ": done")
-
     def _import_urdf(self, 
                 robot_name: str,
                 import_config: omni.importer.urdf._urdf.ImportConfig = _urdf.ImportConfig(), 
@@ -995,7 +1022,11 @@ class IsaacTask(BaseTask):
                 self_collide = False, 
                 merge_fixed = True):
 
-        print(f"[{self.__class__.__name__}]" + f"[{self._journal.status}]" + ": importing robot URDF")
+        Journal.log(self.__class__.__name__,
+            "update_root_offsets",
+            "importing robot URDF",
+            LogType.INFO,
+            throw_when_excep = True)
 
         _urdf.acquire_urdf_interface()  
 
@@ -1025,8 +1056,6 @@ class IsaacTask(BaseTask):
         # moving default prim to base prim path for cloning
         move_prim(robot_prim_path_default, # from
                 robot_base_prim_path) # to
-
-        print(f"[{self.__class__.__name__}]" + f"[{self._journal.status}]" + ": done")
 
         return success
     
@@ -1307,9 +1336,12 @@ class IsaacTask(BaseTask):
             
         else:
 
-            raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]" + \
-                        "Before calling __set_robots_default_jnt_config(), you need to reset the World" + \
-                        " at least once and call post_initialization_steps()")
+            Journal.log(self.__class__.__name__,
+                "_set_robots_default_jnt_config",
+                "Before calling __set_robots_default_jnt_config(), you need to reset the World" + \
+                            " at least once and call post_initialization_steps()",
+                LogType.EXCEP,
+                throw_when_excep = True)
 
     def _set_robots_root_default_config(self):
         
@@ -1323,11 +1355,13 @@ class IsaacTask(BaseTask):
                             orientations = self._root_q_default[robot_name])
             
         else:
-
-            raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]" + \
-                        "Before calling _set_robots_root_default_config(), you need to reset the World" + \
-                        " at least once and call post_initialization_steps()")
-        
+            
+            Journal.log(self.__class__.__name__,
+                "_generate_urdf",
+                "Before calling _set_robots_root_default_config(), you need to reset the World" + \
+                        " at least once and call post_initialization_steps()",
+                LogType.EXCEP,
+                throw_when_excep = True)
 
         return True
         
@@ -1368,8 +1402,11 @@ class IsaacTask(BaseTask):
         
         else:
 
-            raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]" + \
-                            "Before calling update_art_solver_options(), you need to reset the World at least once!")
+            Journal.log(self.__class__.__name__,
+                "_set_robots_default_jnt_config",
+                "Before calling update_art_solver_options(), you need to reset the World at least once!",
+                LogType.EXCEP,
+                throw_when_excep = True)                    
         
     def _print_envs_info(self):
         
@@ -1380,17 +1417,17 @@ class IsaacTask(BaseTask):
             for i in range(0, len(self.robot_names)):
 
                 robot_name = self.robot_names[i]
-
-                print(f"[{robot_name}]")
-                print("bodies: " + str(self._robots_art_views[robot_name].body_names))
-                print("n. prims: " + str(self._robots_art_views[robot_name].count))
-                print("prims names: " + str(self._robots_art_views[robot_name].prim_paths))
-                print("n. bodies: " + str(self._robots_art_views[robot_name].num_bodies))
-                print("n. dofs: " + str(self._robots_art_views[robot_name].num_dof))
-                print("dof names: " + str(self._robots_art_views[robot_name].dof_names))
-                print("solver_position_iteration_counts: " + str(self._solver_position_iteration_counts[robot_name]))
-                print("solver_velocity_iteration_counts: " + str(self._solver_velocity_iteration_counts[robot_name]))
-                print("stabiliz. thresholds: " + str(self._solver_stabilization_threshs[robot_name]))
+                
+                task_info = f"[{robot_name}]" + "\n" + \
+                    "bodies: " + str(self._robots_art_views[robot_name].body_names) + "\n" + \
+                    "n. prims: " + str(self._robots_art_views[robot_name].count) + "\n" + \
+                    "prims names: " + str(self._robots_art_views[robot_name].prim_paths) + "\n" + \
+                    "n. bodies: " + str(self._robots_art_views[robot_name].num_bodies) + "\n" + \
+                    "n. dofs: " + str(self._robots_art_views[robot_name].num_dof) + "\n" + \
+                    "dof names: " + str(self._robots_art_views[robot_name].dof_names) + "\n" + \
+                    "solver_position_iteration_counts: " + str(self._solver_position_iteration_counts[robot_name]) + "\n" + \
+                    "solver_velocity_iteration_counts: " + str(self._solver_velocity_iteration_counts[robot_name]) + "\n" + \
+                    "stabiliz. thresholds: " + str(self._solver_stabilization_threshs[robot_name])
                 
                 # print("dof limits: " + str(self._robots_art_views[robot_name].get_dof_limits()))
                 # print("effort modes: " + str(self._robots_art_views[robot_name].get_effort_modes()))
@@ -1399,10 +1436,19 @@ class IsaacTask(BaseTask):
                 # print("dof gains: " + str(self._robots_art_views[robot_name].get_gains()))
                 # print("physics handle valid: " + str(self._robots_art_views[robot_name].is_physics_handle_valid()))
 
+                Journal.log(self.__class__.__name__,
+                    "_print_envs_info",
+                    task_info,
+                    LogType.INFO,
+                    throw_when_excep = True)
+
         else:
 
-            raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]" + \
-                            "Before calling __print_envs_info(), you need to reset the World at least once!")
+            Journal.log(self.__class__.__name__,
+                        "_set_robots_default_jnt_config",
+                        "Before calling __print_envs_info(), you need to reset the World at least once!",
+                        LogType.EXCEP,
+                        throw_when_excep = True)  
 
     def _fill_robot_info_from_world(self):
 
@@ -1419,8 +1465,11 @@ class IsaacTask(BaseTask):
         
         else:
 
-            raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]" + \
-                        "Before calling _fill_robot_info_from_world(), you need to reset the World at least once!")
+            Journal.log(self.__class__.__name__,
+                "_fill_robot_info_from_world",
+                "Before calling _fill_robot_info_from_world(), you need to reset the World at least once!",
+                LogType.EXCEP,
+                throw_when_excep = True)  
 
     def _init_homing_managers(self):
         
@@ -1436,11 +1485,16 @@ class IsaacTask(BaseTask):
                                     dtype=self.torch_dtype)
                     
         else:
-
-            raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]" + ": you should reset the World at least once and call the " + \
+            
+            exception = "you should reset the World at least once and call the " + \
                             "post_initialization_steps() method before initializing the " + \
                             "homing manager."
-                            )
+                        
+            Journal.log(self.__class__.__name__,
+                "_init_homing_managers",
+                exception,
+                LogType.EXCEP,
+                throw_when_excep = True)  
     
     def _init_jnt_imp_control(self):
     
@@ -1466,11 +1520,16 @@ class IsaacTask(BaseTask):
                 self.reset_jnt_imp_control(robot_name)
                 
         else:
-
-            raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]" + ": you should reset the World at least once and call the " + \
+            
+            exception = "you should reset the World at least once and call the " + \
                             "post_initialization_steps() method before initializing the " + \
                             "joint impedance controller."
-                            )
+                        
+            Journal.log(self.__class__.__name__,
+                "_init_homing_managers",
+                exception,
+                LogType.EXCEP,
+                throw_when_excep = True)
     
     def _set_initial_camera_params(self, 
                                 camera_position=[10, 10, 3], 

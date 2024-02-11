@@ -21,7 +21,8 @@ import torch
 
 import xml.etree.ElementTree as ET
 
-from omni_robo_gym.utils.defs import Journal
+from SharsorIPCpp.PySharsorIPC import LogType
+from SharsorIPCpp.PySharsorIPC import Journal
 
 class OmniRobotHomer:
 
@@ -34,12 +35,16 @@ class OmniRobotHomer:
 
         self.torch_dtype = dtype 
         
-        self.journal = Journal()
-
         if not articulation.initialized:
+            
+            exception = f"the provided articulation is not initialized properly!"
 
-            raise Exception(f"[{self.__class__.__name__}]" + f"[{self.exception}]" + ": the provided articulation is not initialized properly!!")
-        
+            Journal.log(self.__class__.__name__,
+                "__init__",
+                exception,
+                LogType.EXCEP,
+                throw_when_excep = True)
+                    
         self._articulation = articulation
         self.srdf_path = srdf_path
 
