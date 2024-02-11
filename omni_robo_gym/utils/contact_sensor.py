@@ -10,8 +10,6 @@ from typing import List, Dict
 from omni.isaac.core.world import World
 from omni.isaac.core.prims import RigidPrimView, RigidContactView
 
-from control_cluster_bridge.utilities.shared_mem import SharedMemSrvr, SharedMemClient, SharedStringArray
-
 class OmniContactSensors:
 
     def __init__(self, 
