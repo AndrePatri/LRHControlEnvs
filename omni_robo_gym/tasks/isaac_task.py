@@ -293,7 +293,7 @@ class IsaacTask(BaseTask):
         Journal.log(self.__class__.__name__,
                     "update_root_offsets",
                     f"updating root offsets " + for_robots,
-                    LogType.STATUS,
+                    LogType.STAT,
                     throw_when_excep = True)
 
         # only planar position used
@@ -327,7 +327,7 @@ class IsaacTask(BaseTask):
         Journal.log(self.__class__.__name__,
                     "synch_default_root_states",
                     f"updating default root states " + for_robots,
-                    LogType.STATUS,
+                    LogType.STAT,
                     throw_when_excep = True)
 
         if env_indxs is None:
@@ -414,7 +414,7 @@ class IsaacTask(BaseTask):
         Journal.log(self.__class__.__name__,
                     "update_jnt_imp_control_gains",
                     f"updating joint impedances " + for_robots,
-                    LogType.STATUS,
+                    LogType.STAT,
                     throw_when_excep = True)
         
         wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(
@@ -498,7 +498,7 @@ class IsaacTask(BaseTask):
         Journal.log(self.__class__.__name__,
                     "update_jnt_imp_control_gains",
                     f"joint impedances updated " + for_robots,
-                    LogType.STATUS,
+                    LogType.STAT,
                     throw_when_excep = True)
     
     def reset_jnt_imp_control(self, 
@@ -521,7 +521,7 @@ class IsaacTask(BaseTask):
         Journal.log(self.__class__.__name__,
                     "reset_jnt_imp_control",
                     f"resetting joint impedances " + for_robots,
-                    LogType.STATUS,
+                    LogType.STAT,
                     throw_when_excep = True)
 
         # resets all internal data, refs to defaults
@@ -611,7 +611,7 @@ class IsaacTask(BaseTask):
         Journal.log(self.__class__.__name__,
                     "set_up_scene",
                     "cloning environments...",
-                    LogType.STATUS,
+                    LogType.STAT,
                     throw_when_excep = True)
         
         self._cloner.clone(
@@ -624,7 +624,7 @@ class IsaacTask(BaseTask):
         Journal.log(self.__class__.__name__,
                     "set_up_scene",
                     "finishing scene setup...",
-                    LogType.STATUS,
+                    LogType.STAT,
                     throw_when_excep = True)
                 
         for i in range(len(self.robot_names)):
@@ -999,7 +999,7 @@ class IsaacTask(BaseTask):
         Journal.log(self.__class__.__name__,
                     "update_root_offsets",
                     "generating URDF for robot "+ f"{robot_name}, of type {robot_pkg_name}...",
-                    LogType.STATUS,
+                    LogType.STAT,
                     throw_when_excep = True)
         
         self._generate_urdf(robot_name=robot_name, 
@@ -1008,7 +1008,7 @@ class IsaacTask(BaseTask):
         Journal.log(self.__class__.__name__,
                     "update_root_offsets",
                     "generating SRDF for robot "+ f"{robot_name}, of type {robot_pkg_name}...",
-                    LogType.STATUS,
+                    LogType.STAT,
                     throw_when_excep = True)
 
         # we also generate SRDF files, which are useful for control
@@ -1025,7 +1025,7 @@ class IsaacTask(BaseTask):
         Journal.log(self.__class__.__name__,
             "update_root_offsets",
             "importing robot URDF",
-            LogType.STATUS,
+            LogType.STAT,
             throw_when_excep = True)
 
         _urdf.acquire_urdf_interface()  
@@ -1439,7 +1439,7 @@ class IsaacTask(BaseTask):
                 Journal.log(self.__class__.__name__,
                     "_print_envs_info",
                     task_info,
-                    LogType.STATUS,
+                    LogType.STAT,
                     throw_when_excep = True)
 
         else:

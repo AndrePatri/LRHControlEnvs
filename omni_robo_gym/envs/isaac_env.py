@@ -65,7 +65,7 @@ class IsaacSimEnv():
             Journal.log(self.__class__.__name__,
                 "__init__",
                 info,
-                LogType.STATUS,
+                LogType.STAT,
                 throw_when_excep = True)
                             
             if enable_livestream:
@@ -96,7 +96,7 @@ class IsaacSimEnv():
         Journal.log(self.__class__.__name__,
             "__init__",
             info,
-            LogType.STATUS,
+            LogType.STAT,
             throw_when_excep = True)
         
         # carb.settings.get_settings().set("/persistent/omnihydra/useSceneGraphInstancing", True)
@@ -108,7 +108,7 @@ class IsaacSimEnv():
             Journal.log(self.__class__.__name__,
                 "__init__",
                 info,
-                LogType.STATUS,
+                LogType.STAT,
                 throw_when_excep = True)
 
             from omni.isaac.core.utils.extensions import enable_extension
@@ -176,7 +176,7 @@ class IsaacSimEnv():
         Journal.log(self.__class__.__name__,
             "__init__",
             info,
-            LogType.STATUS,
+            LogType.STAT,
             throw_when_excep = True)
             
         if (sim_params is None):
@@ -186,7 +186,7 @@ class IsaacSimEnv():
             Journal.log(self.__class__.__name__,
                 "set_task",
                 info,
-                LogType.STATUS,
+                LogType.STAT,
                 throw_when_excep = True)
             
             sim_params = {}
@@ -203,7 +203,7 @@ class IsaacSimEnv():
             Journal.log(self.__class__.__name__,
                 "set_task",
                 info,
-                LogType.STATUS,
+                LogType.STAT,
                 throw_when_excep = True)
                         
         if not("rendering_dt" in sim_params):
@@ -217,7 +217,7 @@ class IsaacSimEnv():
             Journal.log(self.__class__.__name__,
                 "set_task",
                 info,
-                LogType.STATUS,
+                LogType.STAT,
                 throw_when_excep = True)
 
         self._world = World(
@@ -248,7 +248,7 @@ class IsaacSimEnv():
         Journal.log(self.__class__.__name__,
             "set_task",
             big_info,
-            LogType.STATUS,
+            LogType.STAT,
             throw_when_excep = True)
 
         ## we get the physics context to expose additional low-level ##
@@ -318,7 +318,7 @@ class IsaacSimEnv():
         Journal.log(self.__class__.__name__,
             "set_task",
             big_info2,
-            LogType.STATUS,
+            LogType.STAT,
             throw_when_excep = True)
 
         self._scene = self._world.scene
@@ -348,7 +348,7 @@ class IsaacSimEnv():
         Journal.log(self.__class__.__name__,
             "set_task",
             "[render]: " + str(self._render),
-            LogType.STATUS,
+            LogType.STAT,
             throw_when_excep = True)
 
         if init_sim:
