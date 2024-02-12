@@ -26,7 +26,6 @@ from omni_robo_gym.utils.urdf_helpers import UrdfLimitsParser
 
 import time
 
-from SharsorIPCpp.PySharsorIPC import VLevel
 from SharsorIPCpp.PySharsorIPC import LogType
 from SharsorIPCpp.PySharsorIPC import Journal
 
