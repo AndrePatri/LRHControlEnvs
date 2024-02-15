@@ -693,8 +693,7 @@ class IsaacTask(BaseTask):
         self.reset_state(env_indxs=env_indxs, 
                     robot_names=rob_names)
         
-        # we then update the robots state (this should only be done
-        # on target robots and envs)
+        # we then update the robots state 
         self._get_robots_state(dt = self._integration_dt, 
                         env_indxs=env_indxs, 
                         robot_names=rob_names,
@@ -1295,16 +1294,21 @@ class IsaacTask(BaseTask):
                     self._root_q_prev[robot_name][:, :] = self._root_q[robot_name][:, :]
                     self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name][:, :]
     
-    def get_states(self):
+    def get_states(self,
+                env_indxs: torch.Tensor = None,
+                robot_names: List[str] = None):
         
         if self.use_diff_velocities:
             
-            self._get_robots_state(dt = self.integration_dt) # updates robot states
+            self._get_robots_state(dt = self.integration_dt(),
+                            env_indxs = env_indxs,
+                            robot_names = robot_names) # updates robot states
             # but velocities are obtained via num. differentiation
         
         else:
 
-            self._get_robots_state() # velocities directly from simulator (can 
+            self._get_robots_state(env_indxs = env_indxs,
+                            robot_names = robot_names) # velocities directly from simulator (can 
             # introduce relevant artifacts, making them unrealistic)
 
     def _custom_post_init(self):
