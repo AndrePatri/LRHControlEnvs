@@ -81,10 +81,13 @@ class IsaacTask(BaseTask):
                 default_wheel_damping = 10.0,
                 override_art_controller = False,
                 dtype = torch.float64,
-                debug_mode_jnt_imp = False) -> None:
+                debug_mode_jnt_imp = False,
+                verbose = False) -> None:
 
         self.torch_dtype = dtype
         
+        self._verbose = verbose
+
         self.num_envs = num_envs
 
         self._override_art_controller = override_art_controller
@@ -289,12 +292,14 @@ class IsaacTask(BaseTask):
                     throw_when_excep = True)
                             
             for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
-                                
-        Journal.log(self.__class__.__name__,
-                    "update_root_offsets",
-                    f"updating root offsets " + for_robots,
-                    LogType.STAT,
-                    throw_when_excep = True)
+        
+        if self._verbose:
+
+            Journal.log(self.__class__.__name__,
+                        "update_root_offsets",
+                        f"updating root offsets " + for_robots,
+                        LogType.STAT,
+                        throw_when_excep = True)
 
         # only planar position used
         if env_indxs is None:
@@ -323,12 +328,14 @@ class IsaacTask(BaseTask):
                     throw_when_excep = True)
                                 
             for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
-                                
-        Journal.log(self.__class__.__name__,
-                    "synch_default_root_states",
-                    f"updating default root states " + for_robots,
-                    LogType.STAT,
-                    throw_when_excep = True)
+        
+        if self._verbose:
+
+            Journal.log(self.__class__.__name__,
+                        "synch_default_root_states",
+                        f"updating default root states " + for_robots,
+                        LogType.STAT,
+                        throw_when_excep = True)
 
         if env_indxs is None:
 
@@ -410,12 +417,13 @@ class IsaacTask(BaseTask):
                     throw_when_excep = True)
                                 
             for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
-                                
-        Journal.log(self.__class__.__name__,
-                    "update_jnt_imp_control_gains",
-                    f"updating joint impedances " + for_robots,
-                    LogType.STAT,
-                    throw_when_excep = True)
+        
+        if self._verbose:
+            Journal.log(self.__class__.__name__,
+                        "update_jnt_imp_control_gains",
+                        f"updating joint impedances " + for_robots,
+                        LogType.STAT,
+                        throw_when_excep = True)
         
         wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(
                                 name_pattern="wheel")
@@ -494,12 +502,13 @@ class IsaacTask(BaseTask):
                     f"impedance controller could not set wheel gains " + for_robots,
                     LogType.WARN,
                     throw_when_excep = True)
-                
-        Journal.log(self.__class__.__name__,
-                    "update_jnt_imp_control_gains",
-                    f"joint impedances updated " + for_robots,
-                    LogType.STAT,
-                    throw_when_excep = True)
+
+        if self._verbose:
+            Journal.log(self.__class__.__name__,
+                        "update_jnt_imp_control_gains",
+                        f"joint impedances updated " + for_robots,
+                        LogType.STAT,
+                        throw_when_excep = True)
     
     def reset_jnt_imp_control(self, 
                 robot_name: str,
@@ -517,12 +526,13 @@ class IsaacTask(BaseTask):
                     throw_when_excep = True)
                 
             for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs)
-                                
-        Journal.log(self.__class__.__name__,
-                    "reset_jnt_imp_control",
-                    f"resetting joint impedances " + for_robots,
-                    LogType.STAT,
-                    throw_when_excep = True)
+                            
+        if self._verbose:
+            Journal.log(self.__class__.__name__,
+                        "reset_jnt_imp_control",
+                        f"resetting joint impedances " + for_robots,
+                        LogType.STAT,
+                        throw_when_excep = True)
 
         # resets all internal data, refs to defaults
         self.jnt_imp_controllers[robot_name].reset(robot_indxs = env_indxs)
