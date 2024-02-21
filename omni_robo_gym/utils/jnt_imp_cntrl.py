@@ -153,48 +153,31 @@ class JntSafety:
 
     def saturate_tensor(self, tensor, position=False, velocity=False, effort=False):
 
-        if position:
+        if self.has_nan(tensor):
 
+            exception = f"Found nan elements in provided tensor!!"
+
+            Journal.log(self.__class__.__name__,
+                "saturate_tensor",
+                exception,
+                LogType.EXCEP,
+                throw_when_excep = False)
+            
+            # Replace NaN values with infinity, so that we can clamp it
+            tensor[tensor != tensor] = torch.inf
+
+        if position:
+            
             tensor[:, :] = torch.clamp(tensor[:, :], min=self.limit_matrix[:, 0], max=self.limit_matrix[:, 3])
 
-            if self.has_nan(tensor):
-
-                exception = f"Found nan elements in provided position tensor!!"
-
-                Journal.log(self.__class__.__name__,
-                    "saturate_tensor",
-                    exception,
-                    LogType.EXCEP,
-                    throw_when_excep = True)
-            
         elif velocity:
-
+            
             tensor[:, :] = torch.clamp(tensor[:, :], min=self.limit_matrix[:, 1], max=self.limit_matrix[:, 4])
-
-            if self.has_nan(tensor):
-
-                exception = f"Found nan elements in provided velocity tensor!!"
-
-                Journal.log(self.__class__.__name__,
-                    "saturate_tensor",
-                    exception,
-                    LogType.EXCEP,
-                    throw_when_excep = True)
                 
         elif effort:
-
+            
             tensor[:, :] = torch.clamp(tensor[:, :], min=self.limit_matrix[:, 2], max=self.limit_matrix[:, 5])               
             
-            if self.has_nan(tensor):
-
-                exception = f"Found nan elements in provided effort tensor!!"
-
-                Journal.log(self.__class__.__name__,
-                    "saturate_tensor",
-                    exception,
-                    LogType.EXCEP,
-                    throw_when_excep = True)
-                
 class OmniJntImpCntrl:
 
     # Exploits IsaacSim's low level articulation joint impedance controller
