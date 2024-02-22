@@ -414,8 +414,9 @@ class IsaacSimEnv():
         """ Closes simulation.
         """
 
-        # bypass USD warnings on stage close
-        self._simulation_app.close()
+        if self._simulation_app.is_running():
+            
+            self._simulation_app.close()
         
         return
 
