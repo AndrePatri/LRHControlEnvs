@@ -1057,7 +1057,7 @@ class OmniJntImpCntrl:
                                             torch.mul(self._vel_gains,
                                                     self._vel_err)))
 
-                torch.cuda.synchronize()
+                # torch.cuda.synchronize()
                 
                 # we also make the resulting imp eff safe
                 if self.limiter is not None:
@@ -1096,7 +1096,7 @@ class OmniJntImpCntrl:
                                             torch.mul(self._vel_gains,
                                                     self._vel_err)))
 
-                torch.cuda.synchronize()
+                # torch.cuda.synchronize()
 
                 # we also make the resulting imp eff safe
                 if self.limiter is not None:
