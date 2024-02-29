@@ -763,12 +763,6 @@ class IsaacTask(BaseTask):
             for i in range(len(rob_names)):
 
                 robot_name = rob_names[i]
-
-                print('resettting tooooo')
-                print(self._root_p_default[robot_name][env_indxs, :])
-                print(self._root_q_default[robot_name][env_indxs, :])
-                print(self._root_v_default[robot_name][env_indxs, :])
-                print(self._root_omega_default[robot_name][env_indxs, :])
                 
                 # root q
                 self._robots_art_views[robot_name].set_world_poses(positions = self._root_p_default[robot_name][env_indxs, :],
