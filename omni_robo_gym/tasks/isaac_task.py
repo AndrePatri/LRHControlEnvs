@@ -43,7 +43,7 @@ from omni_robo_gym.utils.homing import OmniRobotHomer
 from omni_robo_gym.utils.contact_sensor import OmniContactSensors
 
 from omni_robo_gym.utils.terrains import RlTerrains
-from omni_robo_gym.utils.math_utils import quat_to_omega
+from omni_robo_gym.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
 
 from abc import abstractmethod
 from typing import List, Dict
@@ -208,7 +208,8 @@ class IsaacTask(BaseTask):
 
         self._jnts_eff_default = {}
 
-        self._root_abs_offsets = {} 
+        self._root_pos_offsets = {} 
+        self._root_q_offsets = {} 
 
         self.distr_offset = {} # decribed how robots within each env are distributed
  
@@ -252,7 +253,9 @@ class IsaacTask(BaseTask):
         self._ground_plane_prim_path = "/World/terrain"
 
         self._world = None
-        
+        self._world_scene = None
+        self._world_physics_context = None
+
         self.omni_contact_sensors = {}
         self.contact_prims = contact_prims
         for robot_name in contact_prims:
@@ -304,11 +307,15 @@ class IsaacTask(BaseTask):
         # only planar position used
         if env_indxs is None:
 
-            self._root_abs_offsets[robot_name][:, 0:2]  = self._root_p[robot_name][:, 0:2]
+            self._root_pos_offsets[robot_name][:, 0:2]  = self._root_p[robot_name][:, 0:2]
+
+            self._root_q_offsets[robot_name][:, :]  = self._root_q[robot_name]
         
         else:
 
-            self._root_abs_offsets[robot_name][env_indxs, 0:2]  = self._root_p[robot_name][env_indxs, 0:2]
+            self._root_pos_offsets[robot_name][env_indxs, 0:2]  = self._root_p[robot_name][env_indxs, 0:2]
+                                  
+            self._root_q_offsets[robot_name][env_indxs, :]  = self._root_q[robot_name][env_indxs, :]
 
     def synch_default_root_states(self,
             robot_name: str = None,
@@ -560,7 +567,7 @@ class IsaacTask(BaseTask):
                                 wheel_damping = self.default_wheel_damping,
                                 env_indxs = env_indxs)
         
-        # restore jnt imp refs to homing
+        #restore jnt imp refs to homing
         try:
             
             if env_indxs is None:
@@ -584,112 +591,154 @@ class IsaacTask(BaseTask):
             pass      
 
         # actually applies reset commands to the articulation
-        self.jnt_imp_controllers[robot_name].apply_cmds()          
+        # self.jnt_imp_controllers[robot_name].apply_cmds()          
 
     def set_world(self,
                 world: World):
         
-        self._world = world
+        if not isinstance(world, World):
+            
+            Journal.log(self.__class__.__name__,
+                    "configure_scene",
+                    "world should be an instance of omni.isaac.core.world.World!",
+                    LogType.EXCEP,
+                    throw_when_excep = True)
         
+        self._world = world
+
+        self._world_scene = self._world.scene
+
+        self._world_physics_context = self._world.get_physics_context()
+
     def set_up_scene(self, 
-                    scene: Scene) -> None:
+                    scene: Scene):
+        
+        super().set_up_scene(scene)
+
+    def configure_scene(self) -> None:
 
         # this is called automatically by the environment BEFORE
         # initializing the simulation
 
-        for i in range(len(self.robot_names)):
-            
-            robot_name = self.robot_names[i]
-            robot_pkg_name = self.robot_pkg_names[i]
+        if self._world is None:
 
-            fix_base = self._fix_base[i]
-            self_collide = self._self_collide[i]
-            merge_fixed = self._merge_fixed[i]
+            Journal.log(self.__class__.__name__,
+                "configure_scene",
+                "Did you call the set_world() method??",
+                LogType.EXCEP,
+                throw_when_excep = True)
 
-            self._generate_rob_descriptions(robot_name=robot_name, 
-                                    robot_pkg_name=robot_pkg_name)
+        if not self.scene_setup_completed:
 
-            self._import_urdf(robot_name, 
-                            fix_base=fix_base, 
-                            self_collide=self_collide, 
-                            merge_fixed=merge_fixed)
-        
-        # init contact sensors
-        self._init_contact_sensors() # IMPORTANT: this has to be called
-        # before calling the clone() method!!! 
-
-        Journal.log(self.__class__.__name__,
-                    "set_up_scene",
-                    "cloning environments...",
-                    LogType.STAT,
-                    throw_when_excep = True)
-        
-        self._cloner.clone(
-            source_prim_path=self._template_env_ns,
-            prim_paths=self._envs_prim_paths,
-            replicate_physics=self._replicate_physics,
-            position_offsets = self._cloning_offset
-        ) # we can clone the environment in which all the robos are
-
-        Journal.log(self.__class__.__name__,
-                    "set_up_scene",
-                    "finishing scene setup...",
-                    LogType.STAT,
-                    throw_when_excep = True)
+            for i in range(len(self.robot_names)):
                 
-        for i in range(len(self.robot_names)):
+                robot_name = self.robot_names[i]
+                robot_pkg_name = self.robot_pkg_names[i]
+
+                fix_base = self._fix_base[i]
+                self_collide = self._self_collide[i]
+                merge_fixed = self._merge_fixed[i]
+
+                self._generate_rob_descriptions(robot_name=robot_name, 
+                                        robot_pkg_name=robot_pkg_name)
+
+                self._import_urdf(robot_name, 
+                                fix_base=fix_base, 
+                                self_collide=self_collide, 
+                                merge_fixed=merge_fixed)
+
+            Journal.log(self.__class__.__name__,
+                        "set_up_scene",
+                        "cloning environments...",
+                        LogType.STAT,
+                        throw_when_excep = True)
             
-            robot_name = self.robot_names[i]
+            self._cloner.clone(
+                source_prim_path=self._template_env_ns,
+                prim_paths=self._envs_prim_paths,
+                replicate_physics=self._replicate_physics,
+                position_offsets = self._cloning_offset
+            ) # we can clone the environment in which all the robos are
 
-            self._robots_art_views[robot_name] = ArticulationView(name = robot_name + "ArtView",
-                                                        prim_paths_expr = self._env_ns + "/env*"+ "/" + robot_name + "/base_link", 
-                                                        reset_xform_properties=False)
+            Journal.log(self.__class__.__name__,
+                        "set_up_scene",
+                        "finishing scene setup...",
+                        LogType.STAT,
+                        throw_when_excep = True)
+                    
+            for i in range(len(self.robot_names)):
+                
+                robot_name = self.robot_names[i]
 
-            self._robots_articulations[robot_name] = scene.add(self._robots_art_views[robot_name])
+                self._robots_art_views[robot_name] = ArticulationView(name = robot_name + "ArtView",
+                                                            prim_paths_expr = self._env_ns + "/env_.*"+ "/" + robot_name + "/base_link", 
+                                                            reset_xform_properties=False)
+
+                self._robots_articulations[robot_name] = self._world_scene.add(self._robots_art_views[robot_name])
+                
+                # self._robots_geom_prim_views[robot_name] = GeometryPrimView(name = robot_name + "GeomView",
+                #                                                 prim_paths_expr = self._env_ns + "/env*"+ "/" + robot_name,
+                #                                                 # prepare_contact_sensors = True
+                #                                             )
+
+                # self._robots_geom_prim_views[robot_name].apply_collision_apis() # to be able to apply contact sensors
             
-            # self._robots_geom_prim_views[robot_name] = GeometryPrimView(name = robot_name + "GeomView",
-            #                                                 prim_paths_expr = self._env_ns + "/env*"+ "/" + robot_name,
-            #                                                 # prepare_contact_sensors = True
-            #                                             )
+            if self.use_flat_ground:
 
-            # self._robots_geom_prim_views[robot_name].apply_collision_apis() # to be able to apply contact sensors
+                self._world_scene.add_default_ground_plane(z_position=0, 
+                            name="terrain", 
+                            prim_path= self._ground_plane_prim_path, 
+                            static_friction=0.5, 
+                            dynamic_friction=0.5, 
+                            restitution=0.8)
+            else:
+                
+                self.terrains = RlTerrains(get_current_stage())
 
-        if self.use_flat_ground:
-
-            scene.add_default_ground_plane(z_position=0, 
-                        name="terrain", 
-                        prim_path= self._ground_plane_prim_path, 
-                        static_friction=0.5, 
-                        dynamic_friction=0.5, 
-                        restitution=0.8)
-        else:
+                self.terrains.get_obstacles_terrain(terrain_size=40, 
+                                            num_obs=100, 
+                                            max_height=0.4, 
+                                            min_size=0.5,
+                                            max_size=5.0)
+            # delete_prim(self._ground_plane_prim_path + "/SphereLight") # we remove the default spherical light
             
-            self.terrains = RlTerrains(get_current_stage())
+            # set default camera viewport position and target
+            self._set_initial_camera_params()
+            
+            self.apply_collision_filters(self._world_physics_context.prim_path, 
+                                "/World/collisions")
+            
+            # init contact sensors
+            self._init_contact_sensors() # IMPORTANT: this has to be called
+            # after calling the clone() method and initializing articulation views!!! 
 
-            self.terrains.get_obstacles_terrain(terrain_size=40, 
-                                        num_obs=100, 
-                                        max_height=0.4, 
-                                        min_size=0.5,
-                                        max_size=5.0)
-        # delete_prim(self._ground_plane_prim_path + "/SphereLight") # we remove the default spherical light
-        
-        # set default camera viewport position and target
-        self._set_initial_camera_params()
-        
-        self.scene_setup_completed = True
+            self._world.reset() # reset world to make art views available
+
+            self.post_initialization_steps()
+
+            self.scene_setup_completed = True
     
     def post_reset(self):
-        
-        # post reset operations
-            
-        # for i in range(len(self.robot_names)):
-            
-        #     robot_name = self.robot_names[i]
-
-        #     # resets articulations to their default state
-        #     self._robots_art_views[robot_name].post_reset()
-    
+                   
         pass
+        
+    def after_reset(self,
+            env_indxs: torch.Tensor = None,
+            robot_names: List[str] =None):
+        
+        rob_names = robot_names if (robot_names is not None) else self.robot_names
+
+        # we update the robots state 
+        # self._get_robots_state(dt = self._integration_dt, 
+        #                 env_indxs=env_indxs, 
+        #                 robot_names=rob_names,
+        #                 reset = True)
+
+        # and, based on that, we reset the jnt imp. controller
+        for i in range(len(rob_names)):
+            
+            self.reset_jnt_imp_control(robot_name=rob_names[i],
+                                env_indxs=env_indxs)
 
     def reset(self,
             env_indxs: torch.Tensor = None,
@@ -702,18 +751,6 @@ class IsaacTask(BaseTask):
         # resets the state of target robot and env to the defaults
         self.reset_state(env_indxs=env_indxs, 
                     robot_names=rob_names)
-        
-        # we then update the robots state 
-        self._get_robots_state(dt = self._integration_dt, 
-                        env_indxs=env_indxs, 
-                        robot_names=rob_names,
-                        reset = True)
-
-        # and, based on that, we reset the jnt imp. controller
-        for i in range(len(rob_names)):
-            
-            self.reset_jnt_imp_control(robot_name=rob_names[i],
-                                env_indxs=env_indxs)
 
     def reset_state(self,
             env_indxs: torch.Tensor = None,
@@ -726,7 +763,13 @@ class IsaacTask(BaseTask):
             for i in range(len(rob_names)):
 
                 robot_name = rob_names[i]
-        
+
+                print('resettting tooooo')
+                print(self._root_p_default[robot_name][env_indxs, :])
+                print(self._root_q_default[robot_name][env_indxs, :])
+                print(self._root_v_default[robot_name][env_indxs, :])
+                print(self._root_omega_default[robot_name][env_indxs, :])
+                
                 # root q
                 self._robots_art_views[robot_name].set_world_poses(positions = self._root_p_default[robot_name][env_indxs, :],
                                                     orientations=self._root_q_default[robot_name][env_indxs, :],
@@ -783,17 +826,29 @@ class IsaacTask(BaseTask):
 
         pass
 
-    def root_offsets(self,
+    def root_pos_offsets(self,
             robot_name: str,
             env_idxs: torch.Tensor = None):
 
         if env_idxs is None:
 
-            return self._root_abs_offsets[robot_name]
+            return self._root_pos_offsets[robot_name]
         
         else:
             
-            return self._root_abs_offsets[robot_name][env_idxs, :]
+            return self._root_pos_offsets[robot_name][env_idxs, :]
+    
+    def root_q_offsets(self,
+            robot_name: str,
+            env_idxs: torch.Tensor = None):
+
+        if env_idxs is None:
+
+            return self._root_q_offsets[robot_name]
+        
+        else:
+            
+            return self._root_q_offsets[robot_name][env_idxs, :]
     
     def root_p(self,
             robot_name: str,
@@ -807,6 +862,17 @@ class IsaacTask(BaseTask):
 
             return self._root_p[robot_name][env_idxs, :]
 
+    def root_p_rel(self,
+            robot_name: str,
+            env_idxs: torch.Tensor = None):
+
+        rel_pos = torch.sub(self.root_p(robot_name=robot_name,
+                                            env_idxs=env_idxs), 
+                                self.root_pos_offsets(robot_name=robot_name, 
+                                                        env_idxs=env_idxs))
+        
+        return rel_pos
+    
     def root_q(self,
             robot_name: str,
             env_idxs: torch.Tensor = None):
@@ -818,7 +884,18 @@ class IsaacTask(BaseTask):
         else:
             
             return self._root_q[robot_name][env_idxs, :]
+    
+    def root_q_rel(self,
+            robot_name: str,
+            env_idxs: torch.Tensor = None):
 
+        rel_q = quaternion_difference(self.root_q_offsets(robot_name=robot_name, 
+                                                        env_idxs=env_idxs), 
+                            self.root_q(robot_name=robot_name,
+                                            env_idxs=env_idxs))
+        
+        return rel_q
+    
     def root_v(self,
             robot_name: str,
             env_idxs: torch.Tensor = None):
@@ -831,6 +908,16 @@ class IsaacTask(BaseTask):
             
             return self._root_v[robot_name][env_idxs, :]
 
+    def root_v_rel(self,
+            robot_name: str,
+            env_idxs: torch.Tensor = None):
+        
+        v_rel = rel_vel(offset_q0_q1=self.root_q_offsets(robot_name=robot_name, 
+                                                        env_idxs=env_idxs),
+                        v0=self.root_v(robot_name=robot_name, env_idxs=env_idxs))
+    
+        return v_rel
+            
     def root_omega(self,
             robot_name: str,
             env_idxs: torch.Tensor = None):
@@ -842,6 +929,16 @@ class IsaacTask(BaseTask):
         else:
 
             return self._root_omega[robot_name][env_idxs, :]
+    
+    def root_omega_rel(self,
+            robot_name: str,
+            env_idxs: torch.Tensor = None):
+        
+        omega_rel = rel_vel(offset_q0_q1=self.root_q_offsets(robot_name=robot_name, 
+                                                        env_idxs=env_idxs),
+                        v0=self.root_omega(robot_name=robot_name, env_idxs=env_idxs))
+    
+        return omega_rel
 
     def jnts_q(self,
             robot_name: str,
@@ -1070,8 +1167,9 @@ class IsaacTask(BaseTask):
     
     def _init_contact_sensors(self):
         
-        for robot_name in self.contact_prims:
+        for i in range(0, len(self.robot_names)):
             
+            robot_name = self.robot_names[i]
             # creates base contact sensor (which is then cloned)
             self.omni_contact_sensors[robot_name].create_contact_sensors(
                                                     self._world, 
@@ -1133,10 +1231,12 @@ class IsaacTask(BaseTask):
                                                         dtype=self.torch_dtype, 
                                                         device=self.torch_device)
             
-            self._root_abs_offsets[robot_name] = torch.zeros((self.num_envs, 3), 
-                                device=self.torch_device) # reference clone positions
-            # on the ground plane (init to 0)
-
+            self._root_pos_offsets[robot_name] = torch.zeros((self.num_envs, 3), 
+                                device=self.torch_device) # reference position offses
+            
+            self._root_q_offsets[robot_name] = torch.zeros((self.num_envs, 4), 
+                                device=self.torch_device)
+            self._root_q_offsets[robot_name][:, 0] = 1.0 # init to valid identity quaternion
             self.update_root_offsets(robot_name)
             
     def _calc_robot_distrib(self):

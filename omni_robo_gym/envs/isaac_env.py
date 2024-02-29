@@ -333,14 +333,12 @@ class IsaacSimEnv():
         distantLight.CreateIntensityAttr(500)
 
         self._world._current_tasks = dict() # resets registered tasks
-        self._world.add_task(task)
         self._task = task
         self._task.set_world(self._world)
-        self._num_envs = self._task.num_envs
+        self._task.configure_scene()
+        self._world.add_task(self._task)
 
-        # filter collisions between envs
-        self._task.apply_collision_filters(self._physics_scene_path, 
-                                "/World/collisions")
+        self._num_envs = self._task.num_envs
         
         if sim_params and "enable_viewport" in sim_params:
             self._render = sim_params["enable_viewport"]
@@ -351,13 +349,13 @@ class IsaacSimEnv():
             LogType.STAT,
             throw_when_excep = True)
 
-        if init_sim:
+        # if init_sim:
 
-            self._world.reset() # after the first reset we get get all quantities 
-            # from the scene 
+        #     self._world.reset() # after the first reset we get get all quantities 
+        #     # from the scene 
 
-            self._task.post_initialization_steps() # performs initializations 
-            # steps after the fisrt world reset was called
+        #     self._task.post_initialization_steps() # performs initializations 
+        #     # steps after the fisrt world reset was called
 
     def render(self, mode="human") -> None:
         """ Step the renderer.

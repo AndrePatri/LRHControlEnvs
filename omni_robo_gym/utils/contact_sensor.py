@@ -158,19 +158,21 @@ class OmniContactSensors:
         for sensor_idx in range(0, self.n_sensors): 
             
             # we create views of the contact links for all envs
-        
-            self.contact_geom_prim_views[sensor_idx] = RigidPrimView(prim_paths_expr=envs_namespace + "/env_*/" + robot_name + \
-                                                        "/" + contact_link_names[sensor_idx],
-                                                name= self.name + "RigidPrimView" + contact_link_names[sensor_idx], 
-                                                contact_filter_prim_paths_expr= [self.filter_path],
-                                                prepare_contact_sensors=True, 
-                                                track_contact_forces = True,
-                                                disable_stablization = False, 
-                                                reset_xform_properties=False,
-                                                max_contact_count = self.n_envs
-                                                )
-        
-            world.scene.add(self.contact_geom_prim_views[sensor_idx])   
+
+            if self.contact_geom_prim_views[sensor_idx] is None:
+                                                                     
+                self.contact_geom_prim_views[sensor_idx] = RigidPrimView(prim_paths_expr=envs_namespace + "/env_.*/" + robot_name + \
+                                                            "/" + contact_link_names[sensor_idx],
+                                                    name= self.name + "RigidPrimView" + contact_link_names[sensor_idx], 
+                                                    contact_filter_prim_paths_expr= [self.filter_path],
+                                                    prepare_contact_sensors=True, 
+                                                    track_contact_forces = True,
+                                                    disable_stablization = False, 
+                                                    reset_xform_properties=False,
+                                                    max_contact_count = self.n_envs
+                                                    )
+            
+                world.scene.add(self.contact_geom_prim_views[sensor_idx])   
         
         # for env_idx in range(0, self.n_envs):
         # # env_idx = 0 # create contact sensors for base env only 

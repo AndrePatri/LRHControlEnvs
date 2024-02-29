@@ -1,5 +1,6 @@
 import torch
 import time
+import torch.nn.functional as F
 
 def normalize_quaternion(q):
     # Normalizes the quaternion
@@ -49,6 +50,29 @@ def quat_to_omega(q0, q1, dt):
     q_diff = quaternion_difference(q0_normalized, q1_normalized)
 
     return quaternion_to_angular_velocity(q_diff, dt)
+
+def rel_vel(offset_q0_q1, 
+        v0):
+    
+    # Calculate relative linear velocity in frame q1 from linear velocity in frame q0 using quaternions.
+
+    # Ensure the quaternion is normalized
+    offset_q0_q1 = F.normalize(offset_q0_q1, p=2, dim=0)
+
+    # Convert the linear velocity vector to a quaternion
+    v0_q = torch.cat([torch.tensor([0]), v0])
+
+    # Rotate the linear velocity quaternion using the orientation offset quaternion
+    rotated_velocity_quaternion = quaternion_multiply(offset_q0_q1, v0_q)
+    offset_q0_q1_inverse = torch.cat([offset_q0_q1[0:1], -offset_q0_q1[1:]])
+
+    # Multiply by the conjugate of the orientation offset quaternion to obtain the result in frame f1
+    v1_q = quaternion_multiply(rotated_velocity_quaternion, offset_q0_q1_inverse)
+
+    # Extract the linear velocity vector from the quaternion result
+    v1 = v1_q[1:]
+
+    return v1
 
 # Example usage
 n_envs = 100  # Number of environments
