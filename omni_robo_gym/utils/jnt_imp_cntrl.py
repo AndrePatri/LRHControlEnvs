@@ -386,7 +386,6 @@ class OmniJntImpCntrl:
 
             if (not (len(robot_indxs_shape) == 1 and \
                 robot_indxs.dtype == torch.int64 and \
-                robot_indxs.device.type == self._device.type and \
                 bool(torch.min(robot_indxs) >= 0) and \
                 bool(torch.max(robot_indxs) < self.num_robots))): # sanity checks 
 
@@ -395,7 +394,6 @@ class OmniJntImpCntrl:
                 big_warning = "Mismatch in provided selector \n" + \
                     "robot_indxs_shape -> " + f"{len(robot_indxs_shape)}" + " VS" + " expected -> " + f"{1}" + "\n" + \
                     "robot_indxs.dtype -> " + f"{robot_indxs.dtype}" + " VS" + " expected -> " + f"{torch.int64}" + "\n" + \
-                    "robot_indxs.device -> " + f"{robot_indxs.device.type}" + " VS" + " expected -> " + f"{self._device.type}" + "\n" + \
                     "torch.min(robot_indxs) >= 0) -> " + f"{bool(torch.min(robot_indxs) >= 0)}" + " VS" + f" {True}" + "\n" + \
                     "torch.max(robot_indxs) < self.n_dofs -> " + f"{torch.max(robot_indxs)}" + " VS" + f" {self.num_robots}"
                     
@@ -419,7 +417,6 @@ class OmniJntImpCntrl:
 
             if (not (len(jnt_indxs_shape) == 1 and \
                 jnt_indxs.dtype == torch.int64 and \
-                jnt_indxs.device.type == self._device.type and \
                 bool(torch.min(jnt_indxs) >= 0) and \
                 bool(torch.max(jnt_indxs) < self.n_dofs))): # sanity checks 
 
@@ -428,7 +425,6 @@ class OmniJntImpCntrl:
                 big_warning = "Mismatch in provided selector \n" + \
                     "jnt_indxs_shape -> " + f"{len(jnt_indxs_shape)}" + " VS" + " expected -> " + f"{1}" + "\n" + \
                     "jnt_indxs.dtype -> " + f"{jnt_indxs.dtype}" + " VS" + " expected -> " + f"{torch.int64}" + "\n" + \
-                    "jnt_indxs.device -> " + f"{jnt_indxs.device.type}" + " VS" + " expected -> " + f"{self._device.type}" + "\n" + \
                     "torch.min(jnt_indxs) >= 0) -> " + f"{bool(torch.min(jnt_indxs) >= 0)}" + " VS" + f" {True}" + "\n" + \
                     "torch.max(jnt_indxs) < self.n_dofs -> " + f"{torch.max(jnt_indxs)}" + " VS" + f" {self.num_robots}"
                     
@@ -468,7 +464,6 @@ class OmniJntImpCntrl:
             
             selector = torch.meshgrid((robot_indxs, 
                                        torch.tensor([i for i in range(0, self.n_dofs)], 
-                                                    device = self._device, 
                                                     dtype=torch.int64)), 
                                     indexing="ij")
         
@@ -476,7 +471,6 @@ class OmniJntImpCntrl:
            indxs_check[1] == OmniJntImpCntrl.IndxState.VALID):
             
             selector = torch.meshgrid((torch.tensor([i for i in range(0, self.num_robots)], 
-                                                    device = self._device, 
                                                     dtype=torch.int64)), 
                                         jnt_indxs, 
                                     indexing="ij")
@@ -1124,7 +1118,6 @@ class OmniJntImpCntrl:
         jnt_idxs = [self.jnts_names.index(jnt) for jnt in jnts_names]
 
         return torch.tensor(jnt_idxs, 
-                            device=self._device, 
                             dtype=torch.int64)
     
     def pos_gains(self):
