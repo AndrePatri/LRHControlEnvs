@@ -89,7 +89,7 @@ def reset_state(art_view,
 
     # root q
     art_view.set_world_poses(positions = root_p_default[idxs, :],
-                    orientations=root_q_default,
+                    orientations=root_q_default[idxs, :],
                     indices = idxs)
     # jnts q
     art_view.set_joint_positions(positions = jnts_q_default[idxs, :],
@@ -138,11 +138,6 @@ def get_robot_state(
     # joints v (measured, default)
     jnts_v = art_view.get_joint_velocities( 
                         clone = True) # joint velocities
-
-    print("Root p")
-    print(root_p)
-    print("Jnts q")
-    print(jnts_q)
 
     return root_p, root_q, jnts_q, root_v, root_omega, jnts_v
 
@@ -220,6 +215,7 @@ position_offsets = np.array([[0.0, 0.0, 0.6]] * num_envs)
 cloner.clone(
     source_prim_path=base_env,
     prim_paths=_envs_prim_paths,
+    base_env_path=base_env,
     position_offsets=position_offsets,
     replicate_physics=True
 )
@@ -253,16 +249,16 @@ cloner.filter_collisions(physicsscene_path = my_world.get_physics_context().prim
 my_world.reset()
 
 # init default state from measurements
-root_p, root_q, jnts_q, jnts_v, \
-    root_omega, root_v, jnts_eff = get_robot_state(art_view)
+root_p, root_q, jnts_q, root_v, \
+    root_omega, jnts_v = get_robot_state(art_view)
 
 root_p_default = torch.clone(root_p)
-root_q_default = torch.clone(root_omega)
+root_q_default = torch.clone(root_q)
 jnts_q_default = torch.clone(jnts_q)
 jnts_v_default = torch.clone(jnts_v)
 root_omega_default = torch.clone(root_omega)
 root_v_default = torch.clone(root_v)
-jnts_eff_default = torch.clone(jnts_eff)
+jnts_eff_default = torch.clone(jnts_v_default).zero_()
 
 print("Extension path: " + str(extension_path))
 print("Prim paths: " + str(art_view.prim_paths))
