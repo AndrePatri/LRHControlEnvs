@@ -138,8 +138,10 @@ def get_robot_state(
     # joints v (measured, default)
     jnts_v = art_view.get_joint_velocities( 
                         clone = True) # joint velocities
+    
+    jnts_eff = art_view.get_measured_joint_efforts(clone = True)
 
-    return root_p, root_q, jnts_q, root_v, root_omega, jnts_v
+    return root_p, root_q, jnts_q, root_v, root_omega, jnts_v, jnts_eff
 
 from omni.isaac.kit import SimulationApp
 import carb
@@ -250,7 +252,7 @@ my_world.reset()
 
 # init default state from measurements
 root_p, root_q, jnts_q, root_v, \
-    root_omega, jnts_v = get_robot_state(art_view)
+    root_omega, jnts_v, jnts_eff = get_robot_state(art_view)
 
 root_p_default = torch.clone(root_p)
 root_q_default = torch.clone(root_q)
@@ -258,22 +260,57 @@ jnts_q_default = torch.clone(jnts_q)
 jnts_v_default = torch.clone(jnts_v)
 root_omega_default = torch.clone(root_omega)
 root_v_default = torch.clone(root_v)
-jnts_eff_default = torch.clone(jnts_v_default).zero_()
+jnts_eff_default = torch.clone(jnts_eff).zero_()
+
+# default values
+root_p_default[:, 0] = 0
+root_p_default[:, 1] = 0
+root_p_default[:, 2] = 0.5
+root_q_default[:, 0] = 0.0
+root_q_default[:, 1] = 0.0
+root_q_default[:, 2] = 0.0
+root_q_default[:, 3] = 1.0
+jnts_q_default[:, :] = 1.0
+jnts_v_default[:, :] = 0.0
+root_omega_default[:, :] = 0.0
+root_v_default[:, :] = 0.0
+
+no_gains = torch.zeros((num_envs, jnts_eff_default.shape[1]), device = get_device(sim_params), 
+                            dtype=torch.float32)
+                                                  
+art_view.set_gains(kps = no_gains, 
+                    kds = no_gains)
 
 print("Extension path: " + str(extension_path))
 print("Prim paths: " + str(art_view.prim_paths))
 
 reset_ever_n_steps = 100
 
+just_reset = False
 for i in range(0, 1000):
-
-    my_world.step()
-
-    print(get_robot_state(art_view))
 
     if ((i + 1) % reset_ever_n_steps) == 0:
 
+        print("resetting to default")
+
         reset_state(art_view,
                 torch.tensor([0], dtype=torch.int))
+
+        just_reset = True
+        
+    my_world.step()
+    
+    # retrieve state
+    root_p, root_q, jnts_q, root_v, \
+        root_omega, jnts_v, jnts_eff = get_robot_state(art_view)
+    
+    # if just_reset:
+
+    # check we hace reset correcty
+
+    print("measured")
+    print(jnts_q)
+    print("default")
+    print(jnts_q_default)
 
 simulation_app.close()
