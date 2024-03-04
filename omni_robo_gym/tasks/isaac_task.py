@@ -721,24 +721,6 @@ class IsaacTask(BaseTask):
     def post_reset(self):
                    
         pass
-        
-    def after_reset(self,
-            env_indxs: torch.Tensor = None,
-            robot_names: List[str] =None):
-        
-        rob_names = robot_names if (robot_names is not None) else self.robot_names
-
-        # we update the robots state 
-        # self._get_robots_state(dt = self._integration_dt, 
-        #                 env_indxs=env_indxs, 
-        #                 robot_names=rob_names,
-        #                 reset = True)
-
-        # and, based on that, we reset the jnt imp. controller
-        for i in range(len(rob_names)):
-            
-            self.reset_jnt_imp_control(robot_name=rob_names[i],
-                                env_indxs=env_indxs)
 
     def reset(self,
             env_indxs: torch.Tensor = None,
@@ -751,6 +733,12 @@ class IsaacTask(BaseTask):
         # resets the state of target robot and env to the defaults
         self.reset_state(env_indxs=env_indxs, 
                     robot_names=rob_names)
+
+        #and jnt imp. controllers
+        for i in range(len(rob_names)):
+            
+            self.reset_jnt_imp_control(robot_name=rob_names[i],
+                                env_indxs=env_indxs)
 
     def reset_state(self,
             env_indxs: torch.Tensor = None,
@@ -815,6 +803,10 @@ class IsaacTask(BaseTask):
                 # jnts eff
                 self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][:, :],
                                                         indices = None)
+
+        # we update the robots state 
+        self.get_states(env_indxs=env_indxs, 
+                        robot_names=rob_names)
 
     def close(self):
 
