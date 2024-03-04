@@ -1,0 +1,22 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        
+
+
+        
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "docs/sim_substepping_reset_issue/test_substepping_when_reset.py",
+            "console": "integratedTerminal",
+            "pythonPath": "/home/andreap/mambaforge/envs/KyonRLSteppingIsaac2023.1.0/bin/python",  // Update this path
+            "justMyCode": false
+        },
+    ]
+  }
+  
