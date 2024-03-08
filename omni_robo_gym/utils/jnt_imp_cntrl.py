@@ -164,7 +164,7 @@ class JntSafety:
                 throw_when_excep = False)
             
             # Replace NaN values with infinity, so that we can clamp it
-            tensor[tensor != tensor] = torch.inf
+            tensor[:, :] = torch.nan_to_num(tensor, nan=torch.inf)
 
         if position:
             
