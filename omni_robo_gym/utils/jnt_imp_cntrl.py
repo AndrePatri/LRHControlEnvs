@@ -1122,44 +1122,44 @@ class OmniJntImpCntrl:
     
     def pos_gains(self):
 
-        return self._pos_gains[:, :]
+        return self._pos_gains
     
     def vel_gains(self):
 
-        return self._vel_gains[:, :]
+        return self._vel_gains
     
     def eff_ref(self):
 
-        return self._eff_ref[:, :]
+        return self._eff_ref
     
     def pos_ref(self):
 
-        return self._pos_ref[:, :]
+        return self._pos_ref
 
     def vel_ref(self):
 
-        return self._vel_ref[:, :]
+        return self._vel_ref
 
     def pos_err(self):
 
-        return self._pos_err[:, :]
+        return self._pos_err
 
     def vel_err(self):
 
-        return self._vel_err[:, :]
+        return self._vel_err
 
     def pos(self):
 
-        return self._pos[:, :]
+        return self._pos
     
     def vel(self):
 
-        return self._vel[:, :]
+        return self._vel
 
     def eff(self):
 
-        return self._eff[:, :]
+        return self._eff
 
     def imp_eff(self):
 
-        return self._imp_eff[:, :]
+        return self._imp_eff
