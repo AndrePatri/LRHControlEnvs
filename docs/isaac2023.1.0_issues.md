@@ -5,7 +5,7 @@ Easy temporary fix: modify /home/username/.local/share/ov/pkg/isaac_sim-2023.1.0
 
 Change lines 178 to 198 which is the check server function to below:
 ```python
-def check_server(server: str, path: str) -> bool:
+def check_server(server: str, path: str, timeout: float = 10.0) -> bool:
     """Check a specific server for a path
 
     Args:
