@@ -38,12 +38,12 @@ class FirstOrderFilter:
             filter_BW: float = 0.1, 
             rows: int = 1, 
             cols: int = 1, 
-            device = "cuda",
+            device: torch.device = torch.device("cpu"),
             dtype = torch.double):
         
-        self.torch_dtype = dtype
+        self._torch_dtype = dtype
 
-        self._device = device
+        self._torch_device = device
 
         self._dt = dt
 
@@ -55,15 +55,15 @@ class FirstOrderFilter:
         import math 
         self._gain = 2 * math.pi * self._filter_BW
 
-        self.yk = torch.zeros((self._rows, self._cols), device = self._device, 
-                                dtype=self.torch_dtype)
-        self.ykm1 = torch.zeros((self._rows, self._cols), device = self._device, 
-                                dtype=self.torch_dtype)
+        self.yk = torch.zeros((self._rows, self._cols), device = self._torch_device, 
+                                dtype=self._torch_dtype)
+        self.ykm1 = torch.zeros((self._rows, self._cols), device = self._torch_device, 
+                                dtype=self._torch_dtype)
         
-        self.refk = torch.zeros((self._rows, self._cols), device = self._device, 
-                                dtype=self.torch_dtype)
-        self.refkm1 = torch.zeros((self._rows, self._cols), device = self._device, 
-                                dtype=self.torch_dtype)
+        self.refk = torch.zeros((self._rows, self._cols), device = self._torch_device, 
+                                dtype=self._torch_dtype)
+        self.refkm1 = torch.zeros((self._rows, self._cols), device = self._torch_device, 
+                                dtype=self._torch_dtype)
         
         self._kh2 = self._gain * self._dt / 2.0
         self._coeff_ref = self._kh2 * 1/ (1 + self._kh2)
@@ -89,38 +89,38 @@ class FirstOrderFilter:
         if idxs is not None:
 
             self.yk[:, :] = torch.zeros((self._rows, self._cols), 
-                                device = self._device, 
-                                dtype=self.torch_dtype)
+                                device = self._torch_device, 
+                                dtype=self._torch_dtype)
             
             self.ykm1[:, :] = torch.zeros((self._rows, self._cols), 
-                                device = self._device, 
-                                dtype=self.torch_dtype)
+                                device = self._torch_device, 
+                                dtype=self._torch_dtype)
             
             self.refk[:, :] = torch.zeros((self._rows, self._cols), 
-                                device = self._device, 
-                                dtype=self.torch_dtype)
+                                device = self._torch_device, 
+                                dtype=self._torch_dtype)
             
             self.refkm1[:, :] = torch.zeros((self._rows, self._cols), 
-                                device = self._device, 
-                                dtype=self.torch_dtype)
+                                device = self._torch_device, 
+                                dtype=self._torch_dtype)
 
         else:
             
             self.yk[idxs, :] = torch.zeros((idxs.shape[0], self._cols), 
-                                device = self._device, 
-                                dtype=self.torch_dtype)
+                                device = self._torch_device, 
+                                dtype=self._torch_dtype)
             
             self.ykm1[idxs, :] = torch.zeros((idxs.shape[0], self._cols), 
-                                device = self._device, 
-                                dtype=self.torch_dtype)
+                                device = self._torch_device, 
+                                dtype=self._torch_dtype)
             
             self.refk[idxs, :] = torch.zeros((idxs.shape[0], self._cols), 
-                                device = self._device, 
-                                dtype=self.torch_dtype)
+                                device = self._torch_device, 
+                                dtype=self._torch_dtype)
             
             self.refkm1[idxs, :] = torch.zeros((idxs.shape[0], self._cols), 
-                                device = self._device, 
-                                dtype=self.torch_dtype)
+                                device = self._torch_device, 
+                                dtype=self._torch_dtype)
             
     def get(self):
 
@@ -180,8 +180,6 @@ class JntSafety:
             
 class OmniJntImpCntrl:
 
-    # Exploits IsaacSim's low level articulation joint impedance controller
-
     class IndxState(Enum):
 
         NONE = -1 
@@ -201,18 +199,21 @@ class OmniJntImpCntrl:
                 dtype = torch.double,
                 enable_safety = True,
                 urdf_path: str = None,
-                debug: bool = False): # [s]
+                enable_profiling: bool = False,
+                debug_checks: bool = False): # [s]
         
-        self.torch_dtype = dtype
+        self._torch_dtype = dtype
+        self._torch_device = device
 
-        self.debug = debug
+        self.enable_profiling = enable_profiling
+        self._debug_checks = debug_checks
         # debug data
-        self.debug_data = {}
-        self.debug_data["time_to_update_state"] = -1.0
-        self.debug_data["time_to_set_refs"] = -1.0
-        self.debug_data["time_to_apply_cmds"] = -1.0
+        self.profiling_data = {}
+        self.profiling_data["time_to_update_state"] = -1.0
+        self.profiling_data["time_to_set_refs"] = -1.0
+        self.profiling_data["time_to_apply_cmds"] = -1.0
         self.start_time = None
-        if self.debug:
+        if self.enable_profiling:
             self.start_time = time.perf_counter()
 
         self.enable_safety = enable_safety
@@ -223,7 +224,7 @@ class OmniJntImpCntrl:
         self.override_art_controller = override_art_controller # whether to override Isaac's internal joint
         # articulation PD controller or not
 
-        self.init_on_creation = init_on_creation # init. articulation's gains and refs as soon as the controller
+        self.init_art_on_creation = init_on_creation # init. articulation's gains and refs as soon as the controller
         # is created
 
         self.gains_initialized = False
@@ -237,11 +238,8 @@ class OmniJntImpCntrl:
                 
         self._articulation_view = articulation # used to actually apply control
         # signals to the robot
-
         if not self._articulation_view.initialized:
-
             exception = f"the provided articulation_view is not initialized properly!"
-
             Journal.log(self.__class__.__name__,
                 "__init__",
                 exception,
@@ -250,530 +248,77 @@ class OmniJntImpCntrl:
         
         self._valid_signal_types = ["pos_ref", "vel_ref", "eff_ref", # references 
                                     "pos", "vel", "eff", # measurements (necessary if overriding Isaac's art. controller)
-                                    "pgain", "vgain"] 
-        
-        self._device = device
+                                    "pgain", "vgain"]
 
         self.num_robots = self._articulation_view.count
         self.n_dofs = self._articulation_view.num_dof
         self.jnts_names = self._articulation_view.dof_names
 
-        self.jnt_idxs = torch.tensor([i for i in range(0, self.n_dofs)], 
-                                    device = self._device, 
-                                    dtype=torch.int64)
-
         if (backend != "torch"):
-
-            warning = f"the provided articulation_view is not initialized properly!"
-
+            warning = f"Only supported backend is torch!!!"
             Journal.log(self.__class__.__name__,
                 "__init__",
                 warning,
                 LogType.WARN,
                 throw_when_excep = True)
-        
         self._backend = "torch"
 
         if self.enable_safety:
-            
             if self.urdf_path is None:
-
-                raise Exception("If enable_safety is set to True, a urdf_path should be provided too!")
-
+                exception = "If enable_safety is set to True, a urdf_path should be provided too!"
+                Journal.log(self.__class__.__name__,
+                    "__init__",
+                    exception,
+                    LogType.EXCEP,
+                    throw_when_excep = True)
             self.robot_limits = UrdfLimitsParser(urdf_path=self.urdf_path, 
                                         joint_names=self.jnts_names,
                                         backend=self._backend, 
-                                        device=self._device)
+                                        device=self._torch_device)
             self.limiter = JntSafety(urdf_parser=self.robot_limits)
             
         self._pos_err = None
         self._vel_err = None
-        
         self._pos = None
         self._vel = None
         self._eff = None
-        
         self._imp_eff = None
 
         self._filter_available = False
-
         if filter_dt is not None:
-
             self._filter_BW = filter_BW
             self._filter_dt = filter_dt
-
             self._pos_ref_filter = FirstOrderFilter(dt=self._filter_dt, 
                                     filter_BW=self._filter_BW, 
                                     rows=self.num_robots, 
                                     cols=self.n_dofs, 
-                                    device=self._device, 
-                                    dtype=self.torch_dtype)
+                                    device=self._torch_device, 
+                                    dtype=self._torch_dtype)
             self._vel_ref_filter = FirstOrderFilter(dt=self._filter_dt, 
                                     filter_BW=self._filter_BW, 
                                     rows=self.num_robots, 
                                     cols=self.n_dofs, 
-                                    device=self._device, 
-                                    dtype=self.torch_dtype)
+                                    device=self._torch_device, 
+                                    dtype=self._torch_dtype)
             self._eff_ref_filter = FirstOrderFilter(dt=self._filter_dt, 
                                     filter_BW=self._filter_BW, 
                                     rows=self.num_robots, 
                                     cols=self.n_dofs, 
-                                    device=self._device, 
-                                    dtype=self.torch_dtype)
-            
+                                    device=self._torch_device, 
+                                    dtype=self._torch_dtype)
             self._filter_available = True
 
         else:
 
-            warning = f"No filter dt provided -> reference filter will not be available"
-
+            warning = f"No filter dt provided -> reference filter will not be used!"
             Journal.log(self.__class__.__name__,
                 "__init__",
                 warning,
                 LogType.WARN,
                 throw_when_excep = True)
-                                      
-        self.reset()
-                
-    def _apply_init_gains(self):
-        
-        if not self.gains_initialized:
-            
-            if not self.override_art_controller:
-        
-                self._articulation_view.set_gains(kps = self._pos_gains, 
-                                        kds = self._vel_gains)
+                            
+        self.reset() # initialize data
 
-            else:
-                
-                # settings Isaac's PD controller gains to 0
-
-                no_gains = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                    dtype=self.torch_dtype)
-                                                  
-                self._articulation_view.set_gains(kps = no_gains, 
-                                    kds = no_gains)
-            
-            self.gains_initialized = True
-
-    def _apply_init_refs(self):
-
-        if not self.refs_initialized: 
-            
-            if not self.override_art_controller:
-        
-                self._articulation_view.set_joint_efforts(self._eff_ref)
-                
-                self._articulation_view.set_joint_position_targets(self._pos_ref)
-
-                self._articulation_view.set_joint_velocity_targets(self._vel_ref)
-
-            else:
-                
-                self._articulation_view.set_joint_efforts(self._eff_ref)
-    
-            self.refs_initialized = True
-    
-    def _validate_selectors(self, 
-                robot_indxs: torch.Tensor = None, 
-                jnt_indxs: torch.Tensor = None):
-
-        check = [None] * 2 
-
-        if robot_indxs is not None:
-
-            robot_indxs_shape = robot_indxs.shape
-
-            if (not (len(robot_indxs_shape) == 1 and \
-                robot_indxs.dtype == torch.int64 and \
-                bool(torch.min(robot_indxs) >= 0) and \
-                bool(torch.max(robot_indxs) < self.num_robots))): # sanity checks 
-
-                check[0] = OmniJntImpCntrl.IndxState.INVALID
-                
-                big_warning = "Mismatch in provided selector \n" + \
-                    "robot_indxs_shape -> " + f"{len(robot_indxs_shape)}" + " VS" + " expected -> " + f"{1}" + "\n" + \
-                    "robot_indxs.dtype -> " + f"{robot_indxs.dtype}" + " VS" + " expected -> " + f"{torch.int64}" + "\n" + \
-                    "torch.min(robot_indxs) >= 0) -> " + f"{bool(torch.min(robot_indxs) >= 0)}" + " VS" + f" {True}" + "\n" + \
-                    "torch.max(robot_indxs) < self.n_dofs -> " + f"{torch.max(robot_indxs)}" + " VS" + f" {self.num_robots}"
-                    
-                Journal.log(self.__class__.__name__,
-                    "_validate_selectors",
-                    big_warning,
-                    LogType.WARN,
-                    throw_when_excep = True)
-        
-            else:
-
-                check[0] = OmniJntImpCntrl.IndxState.VALID
-
-        else:
-
-            check[0] = OmniJntImpCntrl.IndxState.NONE
-
-        if jnt_indxs is not None:
-
-            jnt_indxs_shape = jnt_indxs.shape
-
-            if (not (len(jnt_indxs_shape) == 1 and \
-                jnt_indxs.dtype == torch.int64 and \
-                bool(torch.min(jnt_indxs) >= 0) and \
-                bool(torch.max(jnt_indxs) < self.n_dofs))): # sanity checks 
-
-                check[1] = OmniJntImpCntrl.IndxState.INVALID
-
-                big_warning = "Mismatch in provided selector \n" + \
-                    "jnt_indxs_shape -> " + f"{len(jnt_indxs_shape)}" + " VS" + " expected -> " + f"{1}" + "\n" + \
-                    "jnt_indxs.dtype -> " + f"{jnt_indxs.dtype}" + " VS" + " expected -> " + f"{torch.int64}" + "\n" + \
-                    "torch.min(jnt_indxs) >= 0) -> " + f"{bool(torch.min(jnt_indxs) >= 0)}" + " VS" + f" {True}" + "\n" + \
-                    "torch.max(jnt_indxs) < self.n_dofs -> " + f"{torch.max(jnt_indxs)}" + " VS" + f" {self.num_robots}"
-                    
-                Journal.log(self.__class__.__name__,
-                    "_validate_selectors",
-                    big_warning,
-                    LogType.WARN,
-                    throw_when_excep = True)
-
-            else:
-
-                check[1] = OmniJntImpCntrl.IndxState.VALID
-
-        else:
-
-            check[1] = OmniJntImpCntrl.IndxState.NONE
-
-        return check
-    
-    def _gen_selector(self, 
-                robot_indxs: torch.Tensor, 
-                jnt_indxs: torch.Tensor):
-        
-        selector = None
-
-        indxs_check = self._validate_selectors(robot_indxs=robot_indxs, 
-                            jnt_indxs=jnt_indxs)         
-
-        if (indxs_check[0] == OmniJntImpCntrl.IndxState.VALID and \
-            indxs_check[1] == OmniJntImpCntrl.IndxState.VALID):
-
-            selector = torch.meshgrid((robot_indxs, jnt_indxs), 
-                                    indexing="ij")
-        
-        if(indxs_check[0] == OmniJntImpCntrl.IndxState.VALID and \
-           indxs_check[1] == OmniJntImpCntrl.IndxState.NONE):
-            
-            selector = torch.meshgrid((robot_indxs, 
-                                       torch.tensor([i for i in range(0, self.n_dofs)], 
-                                                    dtype=torch.int64)), 
-                                    indexing="ij")
-        
-        if(indxs_check[0] == OmniJntImpCntrl.IndxState.NONE and \
-           indxs_check[1] == OmniJntImpCntrl.IndxState.VALID):
-            
-            selector = torch.meshgrid((torch.tensor([i for i in range(0, self.num_robots)], 
-                                                    dtype=torch.int64)), 
-                                        jnt_indxs, 
-                                    indexing="ij")
-        
-        return selector
-            
-    def _validate_signal(self, 
-                        signal: torch.Tensor, 
-                        selector: torch.Tensor = None):
-        
-        signal_shape = signal.shape
-        if selector is None:
-
-            if signal_shape[0] == self.num_robots and \
-                signal_shape[1] == self.n_dofs and \
-                signal.device.type == self._device.type:
-                
-                return True
-            
-            else:
-                
-                big_warning = "Mismatch in provided signal \n" + \
-                    "signal rows -> " + f"{signal_shape[0]}" + " VS" + " expected rows -> " + f"{self.num_robots}" + "\n" + \
-                    "jnt_indxs.dtype -> " + f"{signal.dtype}" + " VS" + " expected -> " + f"{torch.int64}" + "\n" + \
-                    "signal cols -> " + f"{signal_shape[1]}" + " VS" + " expected cols -> " + f"{self.n_dofs}" + "\n" + \
-                    "signal device -> " + f"{signal.device.type}" + " VS" + " expected type -> " + f"{self._device.type}"
-
-                Journal.log(self.__class__.__name__,
-                    "_validate_signal",
-                    big_warning,
-                    LogType.WARN,
-                    throw_when_excep = True)
-                
-                return False
-            
-        else:
-            
-            selector_shape = selector[0].shape
-
-            if signal_shape[0] == selector_shape[0] and \
-                signal_shape[1] == selector_shape[1] and \
-                signal.device.type == self._device.type:
-
-                return True
-            
-            else:
-                
-                big_warning = "Mismatch in provided signal  and/or selector \n" + \
-                    "signal rows -> " + f"{signal_shape[0]}" + " VS" + " expected rows -> " + f"{self.num_robots}" + "\n" + \
-                    "jnt_indxs.dtype -> " + f"{signal.dtype}" + " VS" + " expected -> " + f"{torch.int64}" + "\n" + \
-                    "signal cols -> " + f"{signal_shape[1]}" + " VS" + " expected cols -> " + f"{self.n_dofs}" + "\n" + \
-                    "signal device -> " + f"{signal.device.type}" + " VS" + " expected type -> " + f"{self._device.type}"
-
-                Journal.log(self.__class__.__name__,
-                    "_validate_signal",
-                    big_warning,
-                    LogType.WARN,
-                    throw_when_excep = True)
-
-                return False
-    
-    def _check_index(self, robot_indxs):
-                       
-        if not isinstance(robot_indxs, torch.Tensor) == 1:
-            
-            Journal.log(self.__class__.__name__,
-                    "_check_index",
-                    "the provided robot_indxs should be a torch tensor",
-                    LogType.EXCEP,
-                    throw_when_excep = True)
-            
-        if not len(robot_indxs.shape) == 1:
-            
-            Journal.log(self.__class__.__name__,
-                    "_check_index",
-                    "the provided robot_indxs should be a 1D torch tensorr",
-                    LogType.EXCEP,
-                    throw_when_excep = True)
-                    
-    def _assign_signal(self, 
-                    signal_type: str,
-                    signal: torch.Tensor = None, 
-                    selector: torch.Tensor = None):
-
-        if signal_type in self._valid_signal_types: 
-
-            if signal_type == self._valid_signal_types[0]: # "pos_ref"
-                
-                if selector is not None:
-
-                    self._pos_ref[selector] = signal
-
-                else:
-                    
-                    self._pos_ref[:, :] = signal
-
-                return True
-
-            if signal_type == self._valid_signal_types[1]: # "vel_ref"
-                
-                if selector is not None:
-
-                    self._vel_ref[selector] = signal
-
-                else:
-                    
-                    self._vel_ref[:, :] = signal
-
-                return True
-
-            if signal_type == self._valid_signal_types[2]: # "eff_ref"
-
-                if selector is not None:
-
-                    self._eff_ref[selector] = signal
-
-                else:
-                    
-                    self._eff_ref[:, :] = signal
-                
-                return True
-
-            if signal_type == self._valid_signal_types[3]: # "pos"
-                
-                if selector is not None:
-
-                    self._pos[selector] = signal
-
-                else:
-                    
-                    self._pos[:, :] = signal
-
-                return True
-            
-            if signal_type == self._valid_signal_types[4]: # "vel"
-                
-                if selector is not None:
-
-                    self._vel[selector] = signal
-
-                else:
-                    
-                    self._vel[:, :] = signal
-
-                return True
-            
-            if signal_type == self._valid_signal_types[5]: # "eff"
-                
-                if selector is not None:
-
-                    self._eff[selector] = signal
-
-                else:
-                    
-                    self._eff[:, :] = signal
-
-                return True
-            
-            if signal_type == self._valid_signal_types[6]: # "pgain"
-                
-                if selector is not None:
-                    
-                    self._pos_gains[selector] = signal
-
-                else:
-                    
-                    self._pos_gains[:, :] = signal
-
-                return True
-
-            if signal_type == self._valid_signal_types[7]: # "vgain"
-                
-                if selector is not None:
-
-                    self._vel_gains[selector] = signal
-
-                else:
-                    
-                    self._vel_gains[:, :] = signal
-
-                return True
-
-        else:
-
-            return False
-    
-    def reset(self,
-            robot_indxs: torch.Tensor = None):
-        
-        if robot_indxs is None:
-
-            self.gains_initialized = False
-            self.refs_initialized = False
-            
-            # we assume diagonal joint impedance gain matrices, so we can save on memory and only store the diagonal
-            
-            self._pos_gains =  torch.full((self.num_robots, self.n_dofs), 
-                                        self._default_pgain, 
-                                        device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._vel_gains = torch.full((self.num_robots, self.n_dofs), 
-                                        self._default_vgain,
-                                        device = self._device, 
-                                        dtype=self.torch_dtype)
-            
-            self._eff_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._pos_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._vel_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-                
-            # if self.override_art_controller:
-                
-            # saving memory (these are not necessary if not overriding Isaac's art. controller)
-                                        
-            self._pos_err = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._vel_err = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            
-            self._pos = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._vel = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._eff = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            
-            self._imp_eff = torch.zeros((self.num_robots, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            
-            if self._filter_available:
-            
-                self._pos_ref_filter.reset()
-                self._vel_ref_filter.reset()
-                self._eff_ref_filter.reset()
-
-            if self.init_on_creation:
-            
-                self._apply_init_gains()
-
-                self._apply_init_refs()
-        
-        else:
-            
-            self._check_index(robot_indxs)
-                        
-            n_envs = robot_indxs.shape[0]
-
-            self.gains_initialized = False
-            self.refs_initialized = False
-            
-            # we assume diagonal joint impedance gain matrices, so we can save on memory and only store the diagonal
-            
-            self._pos_gains[robot_indxs, :] =  torch.full((n_envs, self.n_dofs), 
-                                        self._default_pgain, 
-                                        device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._vel_gains[robot_indxs, :] = torch.full((n_envs, self.n_dofs), 
-                                        self._default_vgain,
-                                        device = self._device, 
-                                        dtype=self.torch_dtype)
-            
-            self._eff_ref[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._pos_ref[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._vel_ref[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-                
-            # if self.override_art_controller:
-                
-            # saving memory (these are not necessary if not overriding Isaac's art. controller)
-                                        
-            self._pos_err[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._vel_err[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            
-            self._pos[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._vel[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            self._eff[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-            
-            self._imp_eff[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._device, 
-                                        dtype=self.torch_dtype)
-
-            if self._filter_available:
-            
-                self._pos_ref_filter.reset(idxs = robot_indxs)
-                self._vel_ref_filter.reset(idxs = robot_indxs)
-                self._eff_ref_filter.reset(idxs = robot_indxs)
-
-            if self.init_on_creation:
-                
-                # will use updated gains/refs based on reset (non updated gains/refs will be the same)
-
-                self._apply_init_gains()
-
-                self._apply_init_refs()
-        
     def update_state(self, 
         pos: torch.Tensor = None, 
         vel: torch.Tensor = None, 
@@ -781,139 +326,61 @@ class OmniJntImpCntrl:
         robot_indxs: torch.Tensor = None, 
         jnt_indxs: torch.Tensor = None):
 
-        if self.debug:
-            
+        if self.enable_profiling:
             self.start_time = time.perf_counter()
-            
-        success = [True] * 4 # error codes:
-        # success[0] == False -> pos error
-        # success[1] == False -> vel error
-        # success[2] == False -> eff error
-        # success[3] == False -> assign error
-
-        # if self.override_art_controller:
                                       
         selector = self._gen_selector(robot_indxs=robot_indxs, 
-                        jnt_indxs=jnt_indxs)
+                        jnt_indxs=jnt_indxs) # only checks and throws
+        # if debug_checks
         
         if pos is not None:
-
-            valid = self._validate_signal(signal = pos, 
-                                        selector = selector) 
-            
-            if (valid):
-                
-                if(not self._assign_signal(signal_type = "pos", 
-                                    signal = pos, 
-                                    selector = selector)):
-                    
-                    success[3] = False
-            
-            else:
-
-                success[0] = False 
+            self._validate_signal(signal = pos, 
+                    selector = selector,
+                    name="pos") # does nothing if not debug_checks
+            self._pos[selector] = pos
 
         if vel is not None:
-
-            valid = self._validate_signal(signal = vel, 
-                                        selector = selector) 
-            
-            if (valid):
-                
-                if(not self._assign_signal(signal_type = "vel", 
-                                    signal = vel, 
-                                    selector = selector)):
-                    
-                    success[3] = False
-        
-            else:
-
-                success[1] = False
+            self._validate_signal(signal = vel, 
+                    selector = selector,
+                    name="vel") 
+            self._vel[selector] = vel
 
         if eff is not None:
+            self._validate_signal(signal = eff, 
+                    selector = selector,
+                    name="eff") 
+            self._eff[selector] = eff
 
-            valid = self._validate_signal(signal = eff, 
-                                        selector = selector) 
-            
-            if (valid):
+        if self.enable_profiling:
+            self.profiling_data["time_to_update_state"] = \
+                time.perf_counter() - self.start_time
                 
-                if(not self._assign_signal(signal_type = "eff", 
-                                    signal = eff, 
-                                    selector = selector)):
-                    
-                    success[3] = False
-            
-            else:
-
-                success[2] = False
-        
-        if self.debug:
-                
-                self.debug_data["time_to_update_state"] = \
-                    time.perf_counter() - self.start_time
-                
-        return success
-
     def set_gains(self, 
                 pos_gains: torch.Tensor = None, 
                 vel_gains: torch.Tensor = None, 
                 robot_indxs: torch.Tensor = None, 
                 jnt_indxs: torch.Tensor = None):
         
-        success = [True] * 3 # error codes:
-        # success[0] == False -> pos_gains error
-        # success[1] == False -> vel_gains error
-        # success[2] == False -> assign error
-        
         selector = self._gen_selector(robot_indxs=robot_indxs, 
-                           jnt_indxs=jnt_indxs)
+                           jnt_indxs=jnt_indxs) # only checks and throws
+        # if debug_checks
         
         if pos_gains is not None:
-
-            pos_gains_valid = self._validate_signal(signal = pos_gains, 
-                                                    selector = selector) 
-            
-            if (pos_gains_valid):
-                
-                if(not self._assign_signal(signal_type = "pgain", 
-                                    signal = pos_gains, 
-                                    selector=selector)):
-                    
-                    success[2] = False
-                
-                else:
-                    
-                    if not self.override_art_controller:
-                                        
-                        self._articulation_view.set_gains(kps = self._pos_gains)
-            else:
-
-                success[0] = False 
+            self._validate_signal(signal = pos_gains, 
+                selector = selector,
+                name="pos_gains") 
+            self._pos_gains[selector] = pos_gains
+            if not self.override_art_controller:                
+                self._articulation_view.set_gains(kps = self._pos_gains)
 
         if vel_gains is not None:
 
-            vel_gains_valid = self._validate_signal(signal = pos_gains, 
-                                                    selector = selector) 
-            
-            if (vel_gains_valid):
-                
-                if (not self._assign_signal(signal_type = "vgain", 
-                                    signal = vel_gains, 
-                                    selector=selector)):
-                    
-                    success[2] = False
-                    
-                else:
-                    
-                    if not self.override_art_controller:
-
-                        self._articulation_view.set_gains(kds = self._vel_gains)
-            
-            else:
-
-                success[1] = False 
-
-        return success
+            self._validate_signal(signal = vel_gains, 
+                selector = selector,
+                name="vel_gains") 
+            self._vel_gains[selector] = vel_gains
+            if not self.override_art_controller:
+                self._articulation_view.set_gains(kds = self._vel_gains)
     
     def set_refs(self, 
             eff_ref: torch.Tensor = None, 
@@ -922,92 +389,46 @@ class OmniJntImpCntrl:
             robot_indxs: torch.Tensor = None, 
             jnt_indxs: torch.Tensor = None):
         
-        if self.debug:
-        
+        if self.enable_profiling:
             self.start_time = time.perf_counter()
-        
-        success = [True] * 4 # error codes:
-        # success[0] == False -> eff_ref error
-        # success[1] == False -> pos_ref error
-        # success[2] == False -> vel_ref error
-        # success[3] == False -> assign error
 
         selector = self._gen_selector(robot_indxs=robot_indxs, 
-                           jnt_indxs=jnt_indxs)
+                           jnt_indxs=jnt_indxs) # only checks and throws
+        # if debug_checks
         
         if eff_ref is not None:
-
-            valid = self._validate_signal(signal = eff_ref, 
-                                        selector = selector) 
-            
-            if (valid):
-                
-                if(not self._assign_signal(signal_type = "eff_ref", 
-                                    signal = eff_ref, 
-                                    selector = selector)):
-                    
-                    success[3] = False
-                    
-            else:
-
-                success[0] = False 
+            self._validate_signal(signal = eff_ref, 
+                selector = selector,
+                name="eff_ref") 
+            self._eff_ref[selector] = eff_ref
 
         if pos_ref is not None:
-
-            valid = self._validate_signal(signal = pos_ref, 
-                                        selector = selector) 
-            
-            if (valid):
-                
-                if(not self._assign_signal(signal_type = "pos_ref", 
-                                    signal = pos_ref, 
-                                    selector = selector)):
-                    
-                    success[3] = False
-                
-            else:
-
-                success[1] = False 
+            self._validate_signal(signal = pos_ref, 
+                selector = selector,
+                name="pos_ref") 
+            self._pos_ref[selector] = pos_ref
             
         if vel_ref is not None:
+            self._validate_signal(signal = vel_ref, 
+                    selector = selector,
+                    name="vel_ref") 
+            self._vel_ref[selector] = vel_ref
 
-            valid = self._validate_signal(signal = vel_ref, 
-                                        selector = selector) 
-            
-            if (valid):
+        if self.enable_profiling:
+            self.profiling_data["time_to_set_refs"] = time.perf_counter() - self.start_time
                 
-                if(not self._assign_signal(signal_type = "vel_ref", 
-                                    signal = vel_ref, 
-                                    selector = selector)):
-                
-                    success[3] = False
-
-            else:
-
-                success[2] = False
-
-        if self.debug:
-        
-            self.debug_data["time_to_set_refs"] = time.perf_counter() - self.start_time
-        
-        return success
-        
     def apply_cmds(self, 
             filter = False):
 
         # initialize gains and refs if not done previously 
         
-        if self.debug:
-
+        if self.enable_profiling:
             self.start_time = time.perf_counter()
 
         if not self.gains_initialized:
-            
-            self._apply_init_gains()
-        
+            self._apply_init_gains_to_art()
         if not self.refs_initialized:
-            
-            self._apply_init_refs()
+            self._apply_init_refs_to_art()
                 
         if filter and self._filter_available:
             
@@ -1021,29 +442,21 @@ class OmniJntImpCntrl:
             vel_ref_filt = self._vel_ref_filter.get()
 
             if self.limiter is not None:
-                
                 # saturating ref cmds
-
                 self.limiter.apply(q_cmd=pos_ref_filt,
                                 v_cmd=vel_ref_filt,
                                 eff_cmd=eff_ref_filt)
-                    
+                
             if not self.override_art_controller:
-                
-                # using articulation PD controller
-                
+                # using omniverse's articulation PD controller
                 self._articulation_view.set_joint_efforts(eff_ref_filt)
                 self._articulation_view.set_joint_position_targets(pos_ref_filt)
                 self._articulation_view.set_joint_velocity_targets(vel_ref_filt)
 
             else:
-                
                 # impedance torque computed explicitly
-
                 self._pos_err  = torch.sub(self._pos_ref_filter.get(), self._pos)
-
                 self._vel_err = torch.sub(self._vel_ref_filter.get(), self._vel)
-
                 self._imp_eff = torch.add(self._eff_ref_filter.get(), 
                                         torch.add(
                                             torch.mul(self._pos_gains, 
@@ -1052,10 +465,8 @@ class OmniJntImpCntrl:
                                                     self._vel_err)))
 
                 # torch.cuda.synchronize()
-                
                 # we also make the resulting imp eff safe
                 if self.limiter is not None:
-                    
                     self.limiter.apply(eff_cmd=eff_ref_filt)
                     
                 # apply only effort (comprehensive of all imp. terms)
@@ -1064,25 +475,21 @@ class OmniJntImpCntrl:
         else:
             
             # we first apply safety to reference joint cmds
-
             if self.limiter is not None:
-                    
-                    self.limiter.apply(q_cmd=self._pos_ref,
-                                    v_cmd=self._vel_ref,
-                                    eff_cmd=self._eff_ref)
+                self.limiter.apply(q_cmd=self._pos_ref,
+                                v_cmd=self._vel_ref,
+                                eff_cmd=self._eff_ref)
                     
             if not self.override_art_controller:
-                    
+                # using omniverse's articulation PD controller
                 self._articulation_view.set_joint_efforts(self._eff_ref)
                 self._articulation_view.set_joint_position_targets(self._pos_ref)
                 self._articulation_view.set_joint_velocity_targets(self._vel_ref)
         
             else:
-                
+                # impedance torque computed explicitly
                 self._pos_err  = torch.sub(self._pos_ref, self._pos)
-
                 self._vel_err = torch.sub(self._vel_ref, self._vel)
-
                 self._imp_eff = torch.add(self._eff_ref, 
                                         torch.add(
                                             torch.mul(self._pos_gains, 
@@ -1094,15 +501,13 @@ class OmniJntImpCntrl:
 
                 # we also make the resulting imp eff safe
                 if self.limiter is not None:
-                    
                     self.limiter.apply(eff_cmd=self._imp_eff)
 
                 # apply only effort (comprehensive of all imp. terms)
                 self._articulation_view.set_joint_efforts(self._imp_eff)
         
-        if self.debug:
-                               
-            self.debug_data["time_to_apply_cmds"] = \
+        if self.enable_profiling:
+            self.profiling_data["time_to_apply_cmds"] = \
                 time.perf_counter() - self.start_time 
     
     def get_jnt_names_matching(self, 
@@ -1118,7 +523,8 @@ class OmniJntImpCntrl:
         jnt_idxs = [self.jnts_names.index(jnt) for jnt in jnts_names]
 
         return torch.tensor(jnt_idxs, 
-                            dtype=torch.int64)
+                        dtype=torch.int64,
+                        device=self._torch_device)
     
     def pos_gains(self):
 
@@ -1163,3 +569,233 @@ class OmniJntImpCntrl:
     def imp_eff(self):
 
         return self._imp_eff
+    
+    def reset(self,
+            robot_indxs: torch.Tensor = None):
+        
+        self.gains_initialized = False
+        self.refs_initialized = False
+        
+        self._all_dofs_idxs = torch.tensor([i for i in range(0, self.n_dofs)], 
+                                        dtype=torch.int64,
+                                        device=self._torch_device)
+        self._all_robots_idxs = torch.tensor([i for i in range(0, self.num_robots)], 
+                                        dtype=torch.int64,
+                                        device=self._torch_device)
+        
+        if robot_indxs is None: # reset all data
+
+            # we assume diagonal joint impedance gain matrices, so we can save on memory and only store the diagonal
+            
+            self._pos_gains =  torch.full((self.num_robots, self.n_dofs), 
+                                        self._default_pgain, 
+                                        device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            self._vel_gains = torch.full((self.num_robots, self.n_dofs), 
+                                        self._default_vgain,
+                                        device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            self._eff_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            self._pos_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            self._vel_ref = torch.zeros((self.num_robots, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)                
+            self._pos_err = torch.zeros((self.num_robots, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            self._vel_err = torch.zeros((self.num_robots, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            self._pos = torch.zeros((self.num_robots, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            self._vel = torch.zeros((self.num_robots, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            self._eff = torch.zeros((self.num_robots, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            self._imp_eff = torch.zeros((self.num_robots, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            
+            if self._filter_available:
+                self._pos_ref_filter.reset()
+                self._vel_ref_filter.reset()
+                self._eff_ref_filter.reset()
+        
+        else: # only reset some robots
+            
+            if self._debug_checks:
+                self._validate_selectors(robot_indxs=robot_indxs) # throws if checks not satisfied
+
+            n_envs = robot_indxs.shape[0]
+
+            # we assume diagonal joint impedance gain matrices, so we can save on memory and only store the diagonal
+            
+            self._pos_gains[robot_indxs, :] =  torch.full((n_envs, self.n_dofs), 
+                                        self._default_pgain, 
+                                        device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            self._vel_gains[robot_indxs, :] = torch.full((n_envs, self.n_dofs), 
+                                        self._default_vgain,
+                                        device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            
+            self._eff_ref[robot_indxs, :] = 0
+            self._pos_ref[robot_indxs, :] = 0
+            self._vel_ref[robot_indxs, :] = 0
+                
+            # if self.override_art_controller:
+                
+            # saving memory (these are not necessary if not overriding Isaac's art. controller)
+                                        
+            self._pos_err[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            self._vel_err[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            
+            self._pos[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            self._vel[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            self._eff[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+            
+            self._imp_eff[robot_indxs, :] = torch.zeros((n_envs, self.n_dofs), device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+
+            if self._filter_available:
+                self._pos_ref_filter.reset(idxs = robot_indxs)
+                self._vel_ref_filter.reset(idxs = robot_indxs)
+                self._eff_ref_filter.reset(idxs = robot_indxs)
+
+        if self.init_art_on_creation:
+            
+            # will use updated gains/refs based on reset (non updated gains/refs will be the same)
+            self._apply_init_gains_to_art()
+            self._apply_init_refs_to_art()
+     
+    def _apply_init_gains_to_art(self):
+        
+        if not self.gains_initialized:
+            
+            if not self.override_art_controller:
+
+                self._articulation_view.set_gains(kps = self._pos_gains, 
+                                        kds = self._vel_gains)
+
+            else:
+                
+                # settings Isaac's PD controller gains to 0
+                no_gains = torch.zeros((self.num_robots, self.n_dofs), device = self._torch_device, 
+                                    dtype=self._torch_dtype)        
+                self._articulation_view.set_gains(kps = no_gains, 
+                                    kds = no_gains)
+            
+            self.gains_initialized = True
+
+    def _apply_init_refs_to_art(self):
+
+        if not self.refs_initialized: 
+            
+            if not self.override_art_controller:
+        
+                self._articulation_view.set_joint_efforts(self._eff_ref)
+                self._articulation_view.set_joint_position_targets(self._pos_ref)
+                self._articulation_view.set_joint_velocity_targets(self._vel_ref)
+
+            else:
+                
+                self._articulation_view.set_joint_efforts(self._eff_ref)
+    
+            self.refs_initialized = True
+    
+    def _validate_selectors(self, 
+                robot_indxs: torch.Tensor = None, 
+                jnt_indxs: torch.Tensor = None):
+
+        if robot_indxs is not None:
+
+            robot_indxs_shape = robot_indxs.shape
+
+            if (not (len(robot_indxs_shape) == 1 and \
+                robot_indxs.dtype == torch.int64 and \
+                bool(torch.min(robot_indxs) >= 0) and \
+                bool(torch.max(robot_indxs) < self.num_robots)) and \
+                robot_indxs.device.type == self._torch_device.type): # sanity checks 
+                
+                error = "Mismatch in provided selector \n" + \
+                    "robot_indxs_shape -> " + f"{len(robot_indxs_shape)}" + " VS" + " expected -> " + f"{1}" + "\n" + \
+                    "robot_indxs.dtype -> " + f"{robot_indxs.dtype}" + " VS" + " expected -> " + f"{torch.int64}" + "\n" + \
+                    "torch.min(robot_indxs) >= 0) -> " + f"{bool(torch.min(robot_indxs) >= 0)}" + " VS" + f" {True}" + "\n" + \
+                    "torch.max(robot_indxs) < self.n_dofs -> " + f"{torch.max(robot_indxs)}" + " VS" + f" {self.num_robots}\n" + \
+                    "robot_indxs.device -> " + f"{robot_indxs.device.type}" + " VS" + " expected -> " + f"{self._torch_device.type}" + "\n"
+                Journal.log(self.__class__.__name__,
+                    "_validate_selectors",
+                    error,
+                    LogType.EXCEP,
+                    throw_when_excep = True)
+
+        if jnt_indxs is not None:
+
+            jnt_indxs_shape = jnt_indxs.shape
+
+            if (not (len(jnt_indxs_shape) == 1 and \
+                jnt_indxs.dtype == torch.int64 and \
+                bool(torch.min(jnt_indxs) >= 0) and \
+                bool(torch.max(jnt_indxs) < self.n_dofs)) and \
+                jnt_indxs.device.type == self._torch_device.type): # sanity checks 
+
+                error = "Mismatch in provided selector \n" + \
+                    "jnt_indxs_shape -> " + f"{len(jnt_indxs_shape)}" + " VS" + " expected -> " + f"{1}" + "\n" + \
+                    "jnt_indxs.dtype -> " + f"{jnt_indxs.dtype}" + " VS" + " expected -> " + f"{torch.int64}" + "\n" + \
+                    "torch.min(jnt_indxs) >= 0) -> " + f"{bool(torch.min(jnt_indxs) >= 0)}" + " VS" + f" {True}" + "\n" + \
+                    "torch.max(jnt_indxs) < self.n_dofs -> " + f"{torch.max(jnt_indxs)}" + " VS" + f" {self.num_robots}" + \
+                    "robot_indxs.device -> " + f"{jnt_indxs.device.type}" + " VS" + " expected -> " + f"{self._torch_device.type}" + "\n"
+                Journal.log(self.__class__.__name__,
+                    "_validate_selectors",
+                    error,
+                    LogType.EXCEP,
+                    throw_when_excep = True)
+    
+    def _validate_signal(self, 
+                    signal: torch.Tensor, 
+                    selector: torch.Tensor = None,
+                    name: str = "signal"):
+        
+        if self._debug_checks:
+
+            signal_shape = signal.shape
+            selector_shape = selector[0].shape
+
+            if not (signal_shape[0] == selector_shape[0] and \
+                signal_shape[1] == selector_shape[1] and \
+                signal.device.type == self._torch_device.type and \
+                signal.dtype == self._torch_dtype):
+
+                big_error = f"Mismatch in provided signal [{name}" + "] and/or selector \n" + \
+                    "signal rows -> " + f"{signal_shape[0]}" + " VS" + " expected rows -> " + f"{selector_shape[0]}" + "\n" + \
+                    "signal cols -> " + f"{signal_shape[1]}" + " VS" + " expected cols -> " + f"{selector_shape[1]}" + "\n" + \
+                    "signal dtype -> " + f"{signal.dtype}" + " VS" + " expected -> " + f"{self._torch_dtype}" + "\n" + \
+                    "signal device -> " + f"{signal.device.type}" + " VS" + " expected type -> " + f"{self._torch_device.type}"
+                Journal.log(self.__class__.__name__,
+                    "_validate_signal",
+                    big_error,
+                    LogType.EXCEP,
+                    throw_when_excep = True)
+    
+    def _gen_selector(self, 
+                robot_indxs: torch.Tensor = None, 
+                jnt_indxs: torch.Tensor = None):
+        
+        if self._debug_checks:
+            self._validate_selectors(robot_indxs=robot_indxs, 
+                            jnt_indxs=jnt_indxs) # throws if not valid     
+        
+        if robot_indxs is None:
+            robot_indxs = self._all_robots_idxs
+        if jnt_indxs is None:
+            jnt_indxs = self._all_dofs_idxs
+
+        print("AAAAAAAAa")
+        print(robot_indxs.device)
+        print(jnt_indxs.device)
+        return torch.meshgrid((robot_indxs, jnt_indxs), 
+                            indexing="ij")
+                    

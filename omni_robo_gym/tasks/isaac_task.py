@@ -81,7 +81,8 @@ class IsaacTask(BaseTask):
                 default_wheel_damping = 10.0,
                 override_art_controller = False,
                 dtype = torch.float64,
-                debug_mode_jnt_imp = False,
+                enable_jnt_imp_cntrl_profiling = False,
+                enable_jnt_imp_db_mode = False,
                 verbose = False) -> None:
 
         self.torch_dtype = dtype
@@ -91,8 +92,9 @@ class IsaacTask(BaseTask):
         self.num_envs = num_envs
 
         self._override_art_controller = override_art_controller
-        self._debug_mode_jnt_imp = debug_mode_jnt_imp
-
+        self._enable_jnt_imp_cntrl_profiling = enable_jnt_imp_cntrl_profiling
+        self._enable_jnt_imp_db_mode = enable_jnt_imp_db_mode
+        
         self._integration_dt = integration_dt # just used for contact reporting
         
         self.torch_device = torch.device(device) # defaults to "cuda" ("cpu" also valid)
@@ -483,32 +485,16 @@ class IsaacTask(BaseTask):
                                         device = self.torch_device, 
                                         dtype=self.torch_dtype)
             
-        success = self.jnt_imp_controllers[robot_name].set_gains(
-                                    pos_gains = gains_pos,
-                                    vel_gains = gains_vel,
-                                    robot_indxs = env_indxs)
-            
-        if not all(success):
-            
-            Journal.log(self.__class__.__name__,
-                    "update_jnt_imp_control_gains",
-                    f"impedance controller could not set gains.",
-                    LogType.WARN,
-                    throw_when_excep = True)
+        self.jnt_imp_controllers[robot_name].set_gains(
+                pos_gains = gains_pos,
+                vel_gains = gains_vel,
+                robot_indxs = env_indxs)
                         
-        success_wheels = self.jnt_imp_controllers[robot_name].set_gains(
-                                pos_gains = wheels_pos_gains,
-                                vel_gains = wheels_vel_gains,
-                                jnt_indxs=wheels_indxs,
-                                robot_indxs = env_indxs)
-
-        if not all(success_wheels):
-                    
-            Journal.log(self.__class__.__name__,
-                    "update_jnt_imp_control_gains",
-                    f"impedance controller could not set wheel gains " + for_robots,
-                    LogType.WARN,
-                    throw_when_excep = True)
+        self.jnt_imp_controllers[robot_name].set_gains(
+                pos_gains = wheels_pos_gains,
+                vel_gains = wheels_vel_gains,
+                jnt_indxs=wheels_indxs,
+                robot_indxs = env_indxs)
 
         if self._verbose:
             Journal.log(self.__class__.__name__,
@@ -523,15 +509,12 @@ class IsaacTask(BaseTask):
         
         for_robots = ""
         if env_indxs is not None:
-            
             if not isinstance(env_indxs, torch.Tensor):
-                
                 Journal.log(self.__class__.__name__,
                     "reset_jnt_imp_control",
                     "Provided env_indxs should be a torch tensor of indexes!",
                     LogType.EXCEP,
                     throw_when_excep = True)
-                
             for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs)
                             
         if self._verbose:
@@ -546,14 +529,11 @@ class IsaacTask(BaseTask):
 
         # restore current state
         if env_indxs is None:
-            
             self.jnt_imp_controllers[robot_name].update_state(pos = self._jnts_q[robot_name][:, :], 
                 vel = self._jnts_v[robot_name][:, :],
                 eff = None,
                 robot_indxs = None)
-        
         else:
-        
             self.jnt_imp_controllers[robot_name].update_state(pos = self._jnts_q[robot_name][env_indxs, :], 
                 vel = self._jnts_v[robot_name][env_indxs, :],
                 eff = None,
@@ -567,28 +547,13 @@ class IsaacTask(BaseTask):
                                 wheel_damping = self.default_wheel_damping,
                                 env_indxs = env_indxs)
         
-        #restore jnt imp refs to homing
-        try:
-            
-            if env_indxs is None:
-                                                          
-                self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing()[:, :],
-                                                        robot_indxs = None)
-
-            else:
-                
-                self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing()[env_indxs, :],
-                                                                robot_indxs = env_indxs)
-        
-        except Exception:
-            
-            Journal.log(self.__class__.__name__,
-                    "reset_jnt_imp_control",
-                    "cannot set imp. controller reference to homing. Did you call the \"init_homing_managers\" method ?",
-                    LogType.EXCEP,
-                    throw_when_excep = True)
-
-            pass      
+        #restore jnt imp refs to homing            
+        if env_indxs is None:                               
+            self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing()[:, :],
+                                                    robot_indxs = None)
+        else:
+            self.jnt_imp_controllers[robot_name].set_refs(pos_ref=self.homers[robot_name].get_homing()[env_indxs, :],
+                                                            robot_indxs = env_indxs)
 
         # actually applies reset commands to the articulation
         # self.jnt_imp_controllers[robot_name].apply_cmds()          
@@ -1613,9 +1578,10 @@ class IsaacTask(BaseTask):
                                             filter_BW = 50,
                                             device= self.torch_device, 
                                             dtype=self.torch_dtype,
-                                            enable_safety=True, 
+                                            enable_safety=True,
+                                            enable_profiling=self._enable_jnt_imp_cntrl_profiling,
                                             urdf_path=self._urdf_paths[robot_name],
-                                            debug = self._debug_mode_jnt_imp)
+                                            debug_checks = self._enable_jnt_imp_db_mode)
 
                 self.reset_jnt_imp_control(robot_name)
                 
