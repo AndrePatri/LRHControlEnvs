@@ -793,9 +793,6 @@ class OmniJntImpCntrl:
         if jnt_indxs is None:
             jnt_indxs = self._all_dofs_idxs
 
-        print("AAAAAAAAa")
-        print(robot_indxs.device)
-        print(jnt_indxs.device)
         return torch.meshgrid((robot_indxs, jnt_indxs), 
                             indexing="ij")
                     
