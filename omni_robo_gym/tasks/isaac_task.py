@@ -701,7 +701,6 @@ class IsaacTask(BaseTask):
 
         #and jnt imp. controllers
         for i in range(len(rob_names)):
-            
             self.reset_jnt_imp_control(robot_name=rob_names[i],
                                 env_indxs=env_indxs)
 
