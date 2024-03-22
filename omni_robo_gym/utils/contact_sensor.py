@@ -20,16 +20,25 @@ class OmniContactSensors:
             contact_offsets: Dict[str, Dict[str, np.ndarray]] = None,
             sensor_radii: Dict[str, Dict[str, np.ndarray]] = None,
             device = "cuda",
-            dtype = torch.float64):
+            dtype = torch.float64,
+            enable_debug: bool = False,
+            filter_paths: List[str] = ["/World/terrain/GroundPlane/CollisionPlane"]):
 
         # contact sensors abstraction for a single robot
         # over multiple environments
 
-        self.filter_path = "/World/terrain/GroundPlane/CollisionPlane"
+        self._filter_paths = filter_paths
+
+        self._enable_debug = enable_debug
 
         self.n_envs = n_envs
 
         self.device = device
+        if self.device == "cuda"
+            self.using_gpu = True
+        else:
+            self.using_gpu = False
+            
         self.dtype = dtype
 
         self.name = name
@@ -70,82 +79,57 @@ class OmniContactSensors:
                             contact_prims: Dict[str, List],
                             contact_offsets: Dict[str, Dict[str, np.ndarray]],
                             sensor_radii: Dict[str, Dict[str, np.ndarray]]):
-        
+    
         try:
-
             self.contact_prims = contact_prims[name]
-
         except:
-            
             Journal.log(self.__class__.__name__,
                 "_parse_contact_dicts",
                 f"Could not find key {name} in contact_prims dictionary.",
                 LogType.EXCEP,
-                throw_when_excep = True)                
-            
-            raise Exception(exception)
-        
+                throw_when_excep = True)                        
         try:
-
             self.contact_offsets = contact_offsets[name]
-
         except:
-            
             Journal.log(self.__class__.__name__,
                 "_parse_contact_dicts",
                 f"Could not find key {name} in contact_offsets dictionary.",
                 LogType.EXCEP,
-                throw_when_excep = True)
-            
-            raise Exception(exception)
-        
+                throw_when_excep = True)        
         try:
-
             self.sensor_radii = sensor_radii[name]
-
         except:
-            
             Journal.log(self.__class__.__name__,
                 "_parse_contact_dicts",
                 f"Could not find key {name} in sensor_radii dictionary.",
                 LogType.EXCEP,
                 throw_when_excep = True)
-            
-            raise Exception(exception)
-        
+                    
         contact_offsets_ok = all(item in self.contact_offsets for item in self.contact_prims)
         sensor_radii_ok = all(item in self.sensor_radii for item in self.contact_prims)
 
         if not contact_offsets_ok:
-            
             warning = f"Provided contact_offsets dictionary does not posses all the necessary keys. " + \
                 f"It should contain all of [{' '.join(self.contact_prims)}]. \n" + \
                 f"Resetting all offsets to zero..."
-            
             Journal.log(self.__class__.__name__,
                 "_parse_contact_dicts",
                 warning,
                 LogType.WARN,
                 throw_when_excep = True)
-            
             for i in range(0, len(self.contact_prims)):
-
                 self.contact_offsets[self.contact_prims[i]] = np.array([0.0, 0.0, 0.0])
 
         if not sensor_radii_ok:
-            
             warning = f"Provided sensor_radii dictionary does not posses all the necessary keys. " + \
                 f"It should contain all of [{' '.join(self.contact_prims)}]. \n" + \
                 f"Resetting all radii to {self.contact_radius_default} ..."
-            
             Journal.log(self.__class__.__name__,
                 "_parse_contact_dicts",
                 warning,
                 LogType.WARN,
                 throw_when_excep = True)
-
             for i in range(0, len(self.contact_prims)):
-
                 self.sensor_radii[self.contact_prims[i]] = self.contact_radius_default
 
     def create_contact_sensors(self, 
@@ -156,11 +140,8 @@ class OmniContactSensors:
         contact_link_names = self.contact_prims
 
         for sensor_idx in range(0, self.n_sensors): 
-            
             # we create views of the contact links for all envs
-
-            if self.contact_geom_prim_views[sensor_idx] is None:
-                                                                     
+            if self.contact_geom_prim_views[sensor_idx] is None:                             
                 self.contact_geom_prim_views[sensor_idx] = RigidPrimView(prim_paths_expr=envs_namespace + "/env_.*/" + robot_name + \
                                                             "/" + contact_link_names[sensor_idx],
                                                     name= self.name + "RigidPrimView" + contact_link_names[sensor_idx], 
@@ -171,7 +152,6 @@ class OmniContactSensors:
                                                     reset_xform_properties=False,
                                                     max_contact_count = self.n_envs
                                                     )
-            
                 world.scene.add(self.contact_geom_prim_views[sensor_idx])   
         
         # for env_idx in range(0, self.n_envs):
@@ -213,34 +193,51 @@ class OmniContactSensors:
         
         index = -1
         try:
-        
             index = self.contact_prims.index(contact_link)
-    
         except:
-            
             exception = f"[{self.__class__.__name__}]" + f"[{self.journal.exception}]" + \
                 f"could not find contact link {contact_link} in contact list {' '.join(self.contact_prims)}." 
-        
-            raise Exception(exception)
+            Journal.log(self.__class__.__name__,
+                "get",
+                exception,
+                LogType.EXCEP,
+                throw_when_excep = True)
 
         if env_indxs is None:
-            
             return self.contact_geom_prim_views[index].get_net_contact_forces(clone = clone, 
                                             dt = dt).view(self.n_envs, 3)
-        
         else:
-            
-            if not isinstance(env_indxs, torch.Tensor):
-                
-                msg = "Provided env_indxs should be a torch tensor of indexes!"
-            
-                raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]: " + msg)
-            
-            if not len(env_indxs.shape) == 1:
-
-                msg = "Provided robot_indxs should be a 1D torch tensor!"
-            
-                raise Exception(f"[{self.__class__.__name__}]" + f"[{self._journal.exception}]: " + msg)
-
+            if self._enable_debug:
+                if env_indxs is not None:
+                    if not isinstance(env_indxs, torch.Tensor):
+                        msg = "Provided env_indxs should be a torch tensor of indexes!"
+                        Journal.log(self.__class__.__name__,
+                            "get",
+                            msg,
+                            LogType.EXCEP,
+                            throw_when_excep = True)
+                if not len(env_indxs.shape) == 1:
+                    msg = "Provided robot_indxs should be a 1D torch tensor!"
+                    Journal.log(self.__class__.__name__,
+                        "get",
+                        msg,
+                        LogType.EXCEP,
+                        throw_when_excep = True)
+                if self.using_gpu:
+                    if not env_indxs.device.type == "cuda":
+                            error = "Provided env_indxs should be on GPU!"
+                            Journal.log(self.__class__.__name__,
+                            "_step_jnt_imp_control",
+                            error,
+                            LogType.EXCEP,
+                            True)
+                else:
+                    if not env_indxs.device.type == "cpu":
+                        error = "Provided env_indxs should be on CPU!"
+                        Journal.log(self.__class__.__name__,
+                            "_step_jnt_imp_control",
+                            error,
+                            LogType.EXCEP,
+                            True)
             return self.contact_geom_prim_views[index].get_net_contact_forces(clone = clone, 
                                             dt = dt).view(self.n_envs, 3)[env_indxs, :]

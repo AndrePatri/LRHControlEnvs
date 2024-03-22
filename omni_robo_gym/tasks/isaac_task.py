@@ -81,19 +81,21 @@ class IsaacTask(BaseTask):
                 default_wheel_damping = 10.0,
                 override_art_controller = False,
                 dtype = torch.float64,
-                enable_jnt_imp_cntrl_profiling = False,
-                enable_jnt_imp_db_mode = False,
-                verbose = False) -> None:
+                debug_enabled: bool = False,
+                verbose = False,
+                use_diff_velocities = False) -> None:
 
         self.torch_dtype = dtype
         
+        self._debug_enabled = debug_enabled
+
         self._verbose = verbose
+
+        self.use_diff_velocities = use_diff_velocities
 
         self.num_envs = num_envs
 
         self._override_art_controller = override_art_controller
-        self._enable_jnt_imp_cntrl_profiling = enable_jnt_imp_cntrl_profiling
-        self._enable_jnt_imp_db_mode = enable_jnt_imp_db_mode
         
         self._integration_dt = integration_dt # just used for contact reporting
         
@@ -109,63 +111,40 @@ class IsaacTask(BaseTask):
         self.scene_setup_completed = False
 
         if self.robot_pkg_names is None:
-            
             self.robot_pkg_names = self.robot_names # if not provided, robot_names are the same as robot_pkg_names
-        
         else:
-            
             # check dimension consistency
             if len(robot_names) != len(robot_pkg_names):
-
                 exception = "The provided robot names list must match the length " + \
                     "of the provided robot package names"
-                
                 raise Exception(exception)
-        
         if fix_base is None:
-
             self._fix_base = [False] * len(self.robot_names)
-        
         else:
-
             # check dimension consistency
             if len(fix_base) != len(robot_pkg_names):
-
                 exception = "The provided fix_base list of boolean must match the length " + \
                     "of the provided robot package names"
-                
                 raise Exception(exception)
-            
             self._fix_base = fix_base 
         
         if self_collide is None:
-
             self._self_collide = [False] * len(self.robot_names)
-        
         else:
-
             # check dimension consistency
             if len(self_collide) != len(robot_pkg_names):
-
                 exception = "The provided self_collide list of boolean must match the length " + \
                     "of the provided robot package names"
-                
                 raise Exception(exception)
-            
             self._self_collide = self_collide 
         
         if merge_fixed is None:
-
             self._merge_fixed = [False] * len(self.robot_names)
-        
         else:
-
             # check dimension consistency
             if len(merge_fixed) != len(robot_pkg_names):
-
                 exception = "The provided merge_fixed list of boolean must match the length " + \
                     "of the provided robot package names"
-                
                 raise Exception(exception)
             
             self._merge_fixed = merge_fixed 
@@ -237,15 +216,11 @@ class IsaacTask(BaseTask):
 
         self._cloner = GridCloner(spacing=self._env_spacing)
         self._cloner.define_base_env(self._env_ns)
-
         prim_utils.define_prim(self._template_env_ns)
         self._envs_prim_paths = self._cloner.generate_paths(self._env_ns + "/env", 
                                                 self.num_envs)
-   
         self._cloning_offset = cloning_offset
-            
         if self._cloning_offset is None:
-            
             self._cloning_offset = np.array([[0, 0, 0]] * self.num_envs)
 
         self._replicate_physics = replicate_physics
@@ -261,7 +236,6 @@ class IsaacTask(BaseTask):
         self.omni_contact_sensors = {}
         self.contact_prims = contact_prims
         for robot_name in contact_prims:
-            
             self.omni_contact_sensors[robot_name] = OmniContactSensors(
                                 name = robot_name, 
                                 n_envs = self.num_envs, 
@@ -269,7 +243,8 @@ class IsaacTask(BaseTask):
                                 contact_offsets = contact_offsets, 
                                 sensor_radii = sensor_radii,
                                 device = self.torch_device, 
-                                dtype = self.torch_dtype)
+                                dtype = self.torch_dtype,
+                                enable_debug=self._debug_enabled)
 
         # trigger __init__ of parent class
         BaseTask.__init__(self,
@@ -279,83 +254,193 @@ class IsaacTask(BaseTask):
         self.xrdf_cmd_vals = [] # by default empty, needs to be overriden by
         # child class
 
+    def update_jnt_imp_control_gains(self, 
+                    robot_name: str,
+                    jnt_stiffness: float, 
+                    jnt_damping: float, 
+                    wheel_stiffness: float, 
+                    wheel_damping: float,
+                    env_indxs: torch.Tensor = None):
+
+        # updates joint imp. controller with new impedance values
+        
+        if self._debug_enabled:
+            for_robots = ""
+            if env_indxs is not None:
+                if not isinstance(env_indxs, torch.Tensor):
+                    msg = "Provided env_indxs should be a torch tensor of indexes!"
+                    Journal.log(self.__class__.__name__,
+                        "update_jnt_imp_control_gains",
+                        msg,
+                        LogType.EXCEP,
+                        throw_when_excep = True)
+                if self.using_gpu:
+                    if not env_indxs.device.type == "cuda":
+                            error = "Provided env_indxs should be on GPU!"
+                            Journal.log(self.__class__.__name__,
+                            "_step_jnt_imp_control",
+                            error,
+                            LogType.EXCEP,
+                            True)
+                else:
+                    if not env_indxs.device.type == "cpu":
+                        error = "Provided env_indxs should be on CPU!"
+                        Journal.log(self.__class__.__name__,
+                            "_step_jnt_imp_control",
+                            error,
+                            LogType.EXCEP,
+                            True)
+                for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
+            if self._verbose:
+                Journal.log(self.__class__.__name__,
+                            "update_jnt_imp_control_gains",
+                            f"updating joint impedances " + for_robots,
+                            LogType.STAT,
+                            throw_when_excep = True)
+        
+        wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(
+                                name_pattern="wheel")
+        if env_indxs is None:           
+            gains_pos = torch.full((self.num_envs, \
+                                    self.jnt_imp_controllers[robot_name].n_dofs), 
+                        jnt_stiffness, 
+                        device = self.torch_device, 
+                        dtype=self.torch_dtype)
+            gains_vel = torch.full((self.num_envs, \
+                                    self.jnt_imp_controllers[robot_name].n_dofs), 
+                        jnt_damping, 
+                        device = self.torch_device, 
+                        dtype=self.torch_dtype)
+            # wheels are velocity-controlled
+            wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                        wheel_stiffness, 
+                                        device = self.torch_device, 
+                                        dtype=self.torch_dtype)
+            wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                        wheel_damping, 
+                                        device = self.torch_device, 
+                                        dtype=self.torch_dtype)
+        else:
+            gains_pos = torch.full((env_indxs.shape[0], \
+                                    self.jnt_imp_controllers[robot_name].n_dofs), 
+                        jnt_stiffness, 
+                        device = self.torch_device, 
+                        dtype=self.torch_dtype)
+            gains_vel = torch.full((env_indxs.shape[0], \
+                                    self.jnt_imp_controllers[robot_name].n_dofs), 
+                        jnt_damping, 
+                        device = self.torch_device, 
+                        dtype=self.torch_dtype)
+            # wheels are velocity-controlled
+            wheels_pos_gains = torch.full((env_indxs.shape[0], len(wheels_indxs)), 
+                                        wheel_stiffness, 
+                                        device = self.torch_device, 
+                                        dtype=self.torch_dtype)
+            
+            wheels_vel_gains = torch.full((env_indxs.shape[0], len(wheels_indxs)), 
+                                        wheel_damping, 
+                                        device = self.torch_device, 
+                                        dtype=self.torch_dtype)
+            
+        self.jnt_imp_controllers[robot_name].set_gains(
+                pos_gains = gains_pos,
+                vel_gains = gains_vel,
+                robot_indxs = env_indxs)
+        self.jnt_imp_controllers[robot_name].set_gains(
+                pos_gains = wheels_pos_gains,
+                vel_gains = wheels_vel_gains,
+                jnt_indxs=wheels_indxs,
+                robot_indxs = env_indxs)
+        
     def update_root_offsets(self, 
                     robot_name: str,
                     env_indxs: torch.Tensor = None):
         
-        for_robots = ""
-        if env_indxs is not None:
-            
-            if not isinstance(env_indxs, torch.Tensor):
-                
-                msg = "Provided env_indxs should be a torch tensor of indexes!"
-
+        if self._debug_enabled:
+            for_robots = ""
+            if env_indxs is not None:
+                if not isinstance(env_indxs, torch.Tensor):                
+                    msg = "Provided env_indxs should be a torch tensor of indexes!"
+                    Journal.log(self.__class__.__name__,
+                        "update_root_offsets",
+                        msg,
+                        LogType.EXCEP,
+                        throw_when_excep = True)    
+                if self.using_gpu:
+                    if not env_indxs.device.type == "cuda":
+                            error = "Provided env_indxs should be on GPU!"
+                            Journal.log(self.__class__.__name__,
+                            "_step_jnt_imp_control",
+                            error,
+                            LogType.EXCEP,
+                            True)
+                else:
+                    if not env_indxs.device.type == "cpu":
+                        error = "Provided env_indxs should be on CPU!"
+                        Journal.log(self.__class__.__name__,
+                            "_step_jnt_imp_control",
+                            error,
+                            LogType.EXCEP,
+                            True)
+                for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
+            if self._verbose:
                 Journal.log(self.__class__.__name__,
                     "update_root_offsets",
-                    msg,
-                    LogType.EXCEP,
+                    f"updating root offsets " + for_robots,
+                    LogType.STAT,
                     throw_when_excep = True)
-                            
-            for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
-        
-        if self._verbose:
-
-            Journal.log(self.__class__.__name__,
-                        "update_root_offsets",
-                        f"updating root offsets " + for_robots,
-                        LogType.STAT,
-                        throw_when_excep = True)
 
         # only planar position used
         if env_indxs is None:
-
             self._root_pos_offsets[robot_name][:, 0:2]  = self._root_p[robot_name][:, 0:2]
-
             self._root_q_offsets[robot_name][:, :]  = self._root_q[robot_name]
-        
         else:
-
             self._root_pos_offsets[robot_name][env_indxs, 0:2]  = self._root_p[robot_name][env_indxs, 0:2]
-                                  
             self._root_q_offsets[robot_name][env_indxs, :]  = self._root_q[robot_name][env_indxs, :]
 
     def synch_default_root_states(self,
             robot_name: str = None,
             env_indxs: torch.Tensor = None):
 
-        for_robots = ""
-        if env_indxs is not None:
-            
-            if not isinstance(env_indxs, torch.Tensor):
-                
-                msg = "Provided env_indxs should be a torch tensor of indexes!"
-                
-                Journal.log(self.__class__.__name__,
-                    "synch_default_root_states",
-                    msg,
-                    LogType.EXCEP,
-                    throw_when_excep = True)
-                                
-            for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
-        
-        if self._verbose:
-
-            Journal.log(self.__class__.__name__,
+        if self._debug_enabled:
+            for_robots = ""
+            if env_indxs is not None:
+                if not isinstance(env_indxs, torch.Tensor):
+                    msg = "Provided env_indxs should be a torch tensor of indexes!"
+                    Journal.log(self.__class__.__name__,
                         "synch_default_root_states",
-                        f"updating default root states " + for_robots,
-                        LogType.STAT,
-                        throw_when_excep = True)
+                        msg,
+                        LogType.EXCEP,
+                        throw_when_excep = True)  
+                if self.using_gpu:
+                    if not env_indxs.device.type == "cuda":
+                            error = "Provided env_indxs should be on GPU!"
+                            Journal.log(self.__class__.__name__,
+                            "_step_jnt_imp_control",
+                            error,
+                            LogType.EXCEP,
+                            True)
+                else:
+                    if not env_indxs.device.type == "cpu":
+                        error = "Provided env_indxs should be on CPU!"
+                        Journal.log(self.__class__.__name__,
+                            "_step_jnt_imp_control",
+                            error,
+                            LogType.EXCEP,
+                            True)  
+                for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
+            if self._verbose:
+                Journal.log(self.__class__.__name__,
+                            "synch_default_root_states",
+                            f"updating default root states " + for_robots,
+                            LogType.STAT,
+                            throw_when_excep = True)
 
         if env_indxs is None:
-
             self._root_p_default[robot_name][:, :] = self._root_p[robot_name]
-
             self._root_q_default[robot_name][:, :] = self._root_q[robot_name]
-        
         else:
-            
             self._root_p_default[robot_name][env_indxs, :] = self._root_p[robot_name][env_indxs, :]
-
             self._root_q_default[robot_name][env_indxs, :] = self._root_q[robot_name][env_indxs, :]
 
     def post_initialization_steps(self):
@@ -400,129 +485,45 @@ class IsaacTask(BaseTask):
                                 collision_root_path = coll_root_path, 
                                 prim_paths=self._envs_prim_paths, 
                                 global_paths=[self._ground_plane_prim_path] # can collide with these prims
-                            )
+                    )
 
-    def update_jnt_imp_control_gains(self, 
-                    robot_name: str,
-                    jnt_stiffness: float, 
-                    jnt_damping: float, 
-                    wheel_stiffness: float, 
-                    wheel_damping: float,
-                    env_indxs: torch.Tensor = None):
-
-        # updates joint imp. controller with new impedance values
-        
-        for_robots = ""
-        if env_indxs is not None:
-            
-            if not isinstance(env_indxs, torch.Tensor):
-                
-                msg = "Provided env_indxs should be a torch tensor of indexes!"
-                
-                Journal.log(self.__class__.__name__,
-                    "update_jnt_imp_control_gains",
-                    msg,
-                    LogType.EXCEP,
-                    throw_when_excep = True)
-                                
-            for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs.tolist())
-        
-        if self._verbose:
-            Journal.log(self.__class__.__name__,
-                        "update_jnt_imp_control_gains",
-                        f"updating joint impedances " + for_robots,
-                        LogType.STAT,
-                        throw_when_excep = True)
-        
-        wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(
-                                name_pattern="wheel")
-            
-        if env_indxs is None:
-                                
-            gains_pos = torch.full((self.num_envs, \
-                                    self.jnt_imp_controllers[robot_name].n_dofs), 
-                        jnt_stiffness, 
-                        device = self.torch_device, 
-                        dtype=self.torch_dtype)
-            gains_vel = torch.full((self.num_envs, \
-                                    self.jnt_imp_controllers[robot_name].n_dofs), 
-                        jnt_damping, 
-                        device = self.torch_device, 
-                        dtype=self.torch_dtype)
-
-            # wheels are velocity-controlled
-            wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                        wheel_stiffness, 
-                                        device = self.torch_device, 
-                                        dtype=self.torch_dtype)
-            
-            wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                        wheel_damping, 
-                                        device = self.torch_device, 
-                                        dtype=self.torch_dtype)
-
-        else:
-
-            gains_pos = torch.full((env_indxs.shape[0], \
-                                    self.jnt_imp_controllers[robot_name].n_dofs), 
-                        jnt_stiffness, 
-                        device = self.torch_device, 
-                        dtype=self.torch_dtype)
-            gains_vel = torch.full((env_indxs.shape[0], \
-                                    self.jnt_imp_controllers[robot_name].n_dofs), 
-                        jnt_damping, 
-                        device = self.torch_device, 
-                        dtype=self.torch_dtype)
-
-            # wheels are velocity-controlled
-            wheels_pos_gains = torch.full((env_indxs.shape[0], len(wheels_indxs)), 
-                                        wheel_stiffness, 
-                                        device = self.torch_device, 
-                                        dtype=self.torch_dtype)
-            
-            wheels_vel_gains = torch.full((env_indxs.shape[0], len(wheels_indxs)), 
-                                        wheel_damping, 
-                                        device = self.torch_device, 
-                                        dtype=self.torch_dtype)
-            
-        self.jnt_imp_controllers[robot_name].set_gains(
-                pos_gains = gains_pos,
-                vel_gains = gains_vel,
-                robot_indxs = env_indxs)
-                        
-        self.jnt_imp_controllers[robot_name].set_gains(
-                pos_gains = wheels_pos_gains,
-                vel_gains = wheels_vel_gains,
-                jnt_indxs=wheels_indxs,
-                robot_indxs = env_indxs)
-
-        if self._verbose:
-            Journal.log(self.__class__.__name__,
-                        "update_jnt_imp_control_gains",
-                        f"joint impedances updated " + for_robots,
-                        LogType.STAT,
-                        throw_when_excep = True)
-    
     def reset_jnt_imp_control(self, 
                 robot_name: str,
                 env_indxs: torch.Tensor = None):
         
-        for_robots = ""
-        if env_indxs is not None:
-            if not isinstance(env_indxs, torch.Tensor):
+        if self._debug_enabled:
+            for_robots = ""
+            if env_indxs is not None:
+                if not isinstance(env_indxs, torch.Tensor):
+                    Journal.log(self.__class__.__name__,
+                        "reset_jnt_imp_control",
+                        "Provided env_indxs should be a torch tensor of indexes!",
+                        LogType.EXCEP,
+                        throw_when_excep = True)
+                if self.using_gpu:
+                    if not env_indxs.device.type == "cuda":
+                            error = "Provided env_indxs should be on GPU!"
+                            Journal.log(self.__class__.__name__,
+                            "_step_jnt_imp_control",
+                            error,
+                            LogType.EXCEP,
+                            True)
+                else:
+                    if not env_indxs.device.type == "cpu":
+                        error = "Provided env_indxs should be on CPU!"
+                        Journal.log(self.__class__.__name__,
+                            "_step_jnt_imp_control",
+                            error,
+                            LogType.EXCEP,
+                            True)
+                for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs)
+                                
+            if self._verbose:
                 Journal.log(self.__class__.__name__,
                     "reset_jnt_imp_control",
-                    "Provided env_indxs should be a torch tensor of indexes!",
-                    LogType.EXCEP,
+                    f"resetting joint impedances " + for_robots,
+                    LogType.STAT,
                     throw_when_excep = True)
-            for_robots = f"for robot {robot_name}, indexes: " + str(env_indxs)
-                            
-        if self._verbose:
-            Journal.log(self.__class__.__name__,
-                        "reset_jnt_imp_control",
-                        f"resetting joint impedances " + for_robots,
-                        LogType.STAT,
-                        throw_when_excep = True)
 
         # resets all internal data, refs to defaults
         self.jnt_imp_controllers[robot_name].reset(robot_indxs = env_indxs)
@@ -562,7 +563,6 @@ class IsaacTask(BaseTask):
                 world: World):
         
         if not isinstance(world, World):
-            
             Journal.log(self.__class__.__name__,
                     "configure_scene",
                     "world should be an instance of omni.isaac.core.world.World!",
@@ -570,9 +570,7 @@ class IsaacTask(BaseTask):
                     throw_when_excep = True)
         
         self._world = world
-
         self._world_scene = self._world.scene
-
         self._world_physics_context = self._world.get_physics_context()
 
     def set_up_scene(self, 
@@ -586,7 +584,6 @@ class IsaacTask(BaseTask):
         # initializing the simulation
 
         if self._world is None:
-
             Journal.log(self.__class__.__name__,
                 "configure_scene",
                 "Did you call the set_world() method??",
@@ -594,62 +591,47 @@ class IsaacTask(BaseTask):
                 throw_when_excep = True)
 
         if not self.scene_setup_completed:
-
             for i in range(len(self.robot_names)):
-                
                 robot_name = self.robot_names[i]
                 robot_pkg_name = self.robot_pkg_names[i]
-
                 fix_base = self._fix_base[i]
                 self_collide = self._self_collide[i]
                 merge_fixed = self._merge_fixed[i]
-
                 self._generate_rob_descriptions(robot_name=robot_name, 
                                         robot_pkg_name=robot_pkg_name)
-
                 self._import_urdf(robot_name, 
                                 fix_base=fix_base, 
                                 self_collide=self_collide, 
                                 merge_fixed=merge_fixed)
-
             Journal.log(self.__class__.__name__,
                         "set_up_scene",
                         "cloning environments...",
                         LogType.STAT,
                         throw_when_excep = True)
-            
             self._cloner.clone(
                 source_prim_path=self._template_env_ns,
                 prim_paths=self._envs_prim_paths,
                 replicate_physics=self._replicate_physics,
                 position_offsets = self._cloning_offset
             ) # we can clone the environment in which all the robos are
-
             Journal.log(self.__class__.__name__,
                         "set_up_scene",
                         "finishing scene setup...",
                         LogType.STAT,
                         throw_when_excep = True)
-                    
             for i in range(len(self.robot_names)):
-                
                 robot_name = self.robot_names[i]
-
                 self._robots_art_views[robot_name] = ArticulationView(name = robot_name + "ArtView",
                                                             prim_paths_expr = self._env_ns + "/env_.*"+ "/" + robot_name + "/base_link", 
                                                             reset_xform_properties=False)
-
                 self._robots_articulations[robot_name] = self._world_scene.add(self._robots_art_views[robot_name])
-                
                 # self._robots_geom_prim_views[robot_name] = GeometryPrimView(name = robot_name + "GeomView",
                 #                                                 prim_paths_expr = self._env_ns + "/env*"+ "/" + robot_name,
                 #                                                 # prepare_contact_sensors = True
                 #                                             )
-
                 # self._robots_geom_prim_views[robot_name].apply_collision_apis() # to be able to apply contact sensors
             
             if self.use_flat_ground:
-
                 self._world_scene.add_default_ground_plane(z_position=0, 
                             name="terrain", 
                             prim_path= self._ground_plane_prim_path, 
@@ -657,9 +639,7 @@ class IsaacTask(BaseTask):
                             dynamic_friction=0.5, 
                             restitution=0.8)
             else:
-                
                 self.terrains = RlTerrains(get_current_stage())
-
                 self.terrains.get_obstacles_terrain(terrain_size=40, 
                                             num_obs=100, 
                                             max_height=0.4, 
@@ -669,22 +649,17 @@ class IsaacTask(BaseTask):
             
             # set default camera viewport position and target
             self._set_initial_camera_params()
-            
             self.apply_collision_filters(self._world_physics_context.prim_path, 
                                 "/World/collisions")
-            
             # init contact sensors
             self._init_contact_sensors() # IMPORTANT: this has to be called
             # after calling the clone() method and initializing articulation views!!! 
-
             self._world.reset() # reset world to make art views available
-
             self.post_initialization_steps()
 
             self.scene_setup_completed = True
     
     def post_reset(self):
-                   
         pass
 
     def reset(self,
@@ -692,14 +667,11 @@ class IsaacTask(BaseTask):
             robot_names: List[str] =None):
 
         # we first reset all target articulations to their default state
-
         rob_names = robot_names if (robot_names is not None) else self.robot_names
-
         # resets the state of target robot and env to the defaults
         self.reset_state(env_indxs=env_indxs, 
                     robot_names=rob_names)
-
-        #and jnt imp. controllers
+        # and jnt imp. controllers
         for i in range(len(rob_names)):
             self.reset_jnt_imp_control(robot_name=rob_names[i],
                                 env_indxs=env_indxs)
@@ -709,13 +681,26 @@ class IsaacTask(BaseTask):
             robot_names: List[str] =None):
 
         rob_names = robot_names if (robot_names is not None) else self.robot_names
-
         if env_indxs is not None:
-
+            if self._debug_enabled:
+                if self.using_gpu:
+                    if not env_indxs.device.type == "cuda":
+                            error = "Provided env_indxs should be on GPU!"
+                            Journal.log(self.__class__.__name__,
+                            "_step_jnt_imp_control",
+                            error,
+                            LogType.EXCEP,
+                            True)
+                else:
+                    if not env_indxs.device.type == "cpu":
+                        error = "Provided env_indxs should be on CPU!"
+                        Journal.log(self.__class__.__name__,
+                            "_step_jnt_imp_control",
+                            error,
+                            LogType.EXCEP,
+                            True)
             for i in range(len(rob_names)):
-
                 robot_name = rob_names[i]
-                
                 # root q
                 self._robots_art_views[robot_name].set_world_poses(positions = self._root_p_default[robot_name][env_indxs, :],
                                                     orientations=self._root_q_default[robot_name][env_indxs, :],
@@ -723,28 +708,20 @@ class IsaacTask(BaseTask):
                 # jnts q
                 self._robots_art_views[robot_name].set_joint_positions(positions = self._jnts_q_default[robot_name][env_indxs, :],
                                                         indices = env_indxs)
-                
                 # root v and omega
                 self._robots_art_views[robot_name].set_joint_velocities(velocities = self._jnts_v_default[robot_name][env_indxs, :],
                                                         indices = env_indxs)
-                
                 # jnts v
                 concatenated_vel = torch.cat((self._root_v_default[robot_name][env_indxs, :], 
                                                 self._root_omega_default[robot_name][env_indxs, :]), dim=1)
-            
                 self._robots_art_views[robot_name].set_velocities(velocities = concatenated_vel,
                                                         indices = env_indxs)
-                
                 # jnts eff
                 self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][env_indxs, :],
                                                         indices = env_indxs)
-        
         else:
-
             for i in range(len(rob_names)):
-
                 robot_name = rob_names[i]
-        
                 # root q
                 self._robots_art_views[robot_name].set_world_poses(positions = self._root_p_default[robot_name][:, :],
                                                     orientations=self._root_q_default[robot_name][:, :],
@@ -752,18 +729,14 @@ class IsaacTask(BaseTask):
                 # jnts q
                 self._robots_art_views[robot_name].set_joint_positions(positions = self._jnts_q_default[robot_name][:, :],
                                                         indices = None)
-                
                 # root v and omega
                 self._robots_art_views[robot_name].set_joint_velocities(velocities = self._jnts_v_default[robot_name][:, :],
                                                         indices = None)
-                
                 # jnts v
                 concatenated_vel = torch.cat((self._root_v_default[robot_name][:, :], 
                                                 self._root_omega_default[robot_name][:, :]), dim=1)
-
                 self._robots_art_views[robot_name].set_velocities(velocities = concatenated_vel,
                                                         indices = None)
-                
                 # jnts eff
                 self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][:, :],
                                                         indices = None)
@@ -773,7 +746,6 @@ class IsaacTask(BaseTask):
                         robot_names=rob_names)
 
     def close(self):
-
         pass
 
     def root_pos_offsets(self,
@@ -781,11 +753,8 @@ class IsaacTask(BaseTask):
             env_idxs: torch.Tensor = None):
 
         if env_idxs is None:
-
             return self._root_pos_offsets[robot_name]
-        
         else:
-            
             return self._root_pos_offsets[robot_name][env_idxs, :]
     
     def root_q_offsets(self,
@@ -793,11 +762,8 @@ class IsaacTask(BaseTask):
             env_idxs: torch.Tensor = None):
 
         if env_idxs is None:
-
             return self._root_q_offsets[robot_name]
-        
         else:
-            
             return self._root_q_offsets[robot_name][env_idxs, :]
     
     def root_p(self,
@@ -805,11 +771,8 @@ class IsaacTask(BaseTask):
             env_idxs: torch.Tensor = None):
 
         if env_idxs is None:
-            
             return self._root_p[robot_name]
-
         else:
-
             return self._root_p[robot_name][env_idxs, :]
 
     def root_p_rel(self,
@@ -820,7 +783,6 @@ class IsaacTask(BaseTask):
                                             env_idxs=env_idxs), 
                                 self.root_pos_offsets(robot_name=robot_name, 
                                                         env_idxs=env_idxs))
-        
         return rel_pos
     
     def root_q(self,
@@ -828,11 +790,8 @@ class IsaacTask(BaseTask):
             env_idxs: torch.Tensor = None):
 
         if env_idxs is None:
-
             return self._root_q[robot_name]
-            
         else:
-            
             return self._root_q[robot_name][env_idxs, :]
     
     def root_q_rel(self,
@@ -843,7 +802,6 @@ class IsaacTask(BaseTask):
                                                         env_idxs=env_idxs), 
                             self.root_q(robot_name=robot_name,
                                             env_idxs=env_idxs))
-        
         return rel_q
     
     def root_v(self,
@@ -851,11 +809,8 @@ class IsaacTask(BaseTask):
             env_idxs: torch.Tensor = None):
 
         if env_idxs is None:
-
             return self._root_v[robot_name]
-            
         else:
-            
             return self._root_v[robot_name][env_idxs, :]
 
     def root_v_rel(self,
@@ -865,7 +820,6 @@ class IsaacTask(BaseTask):
         v_rel = rel_vel(offset_q0_q1=self.root_q_offsets(robot_name=robot_name, 
                                                         env_idxs=env_idxs),
                         v0=self.root_v(robot_name=robot_name, env_idxs=env_idxs))
-    
         return v_rel
             
     def root_omega(self,
@@ -873,11 +827,8 @@ class IsaacTask(BaseTask):
             env_idxs: torch.Tensor = None):
 
         if env_idxs is None:
-
             return self._root_omega[robot_name]
-            
         else:
-
             return self._root_omega[robot_name][env_idxs, :]
     
     def root_omega_rel(self,
@@ -887,7 +838,6 @@ class IsaacTask(BaseTask):
         omega_rel = rel_vel(offset_q0_q1=self.root_q_offsets(robot_name=robot_name, 
                                                         env_idxs=env_idxs),
                         v0=self.root_omega(robot_name=robot_name, env_idxs=env_idxs))
-    
         return omega_rel
 
     def jnts_q(self,
@@ -895,11 +845,8 @@ class IsaacTask(BaseTask):
             env_idxs: torch.Tensor = None):
         
         if env_idxs is None:
-
             return self._jnts_q[robot_name]
-                
         else:
-            
             return self._jnts_q[robot_name][env_idxs, :]
 
     def jnts_v(self,
@@ -907,15 +854,11 @@ class IsaacTask(BaseTask):
             env_idxs: torch.Tensor = None):
 
         if env_idxs is None:
-
             return self._jnts_v[robot_name]
-                
         else:
-            
             return self._jnts_v[robot_name][env_idxs, :]
 
     def integration_dt(self):
-
         return self._integration_dt
 
     @abstractmethod
@@ -958,7 +901,6 @@ class IsaacTask(BaseTask):
         # apply actions to simulated robot
         # to be overriden by child class depending
         # on specific needs
-
         pass
 
     def _generate_srdf(self, 
@@ -975,27 +917,19 @@ class IsaacTask(BaseTask):
         self._srdf_paths[robot_name] = self._descr_dump_path + "/" + robot_name + ".srdf"
 
         if self._xrdf_cmds() is not None:
-
             cmds = self._xrdf_cmds()[robot_name]
             if cmds is None:
-                
                 xacro_cmd = ["xacro"] + [xacro_path] + ["-o"] + [self._srdf_paths[robot_name]]
-
             else:
-                
                 xacro_cmd = ["xacro"] + [xacro_path] + cmds + ["-o"] + [self._srdf_paths[robot_name]]
 
         if self._xrdf_cmds() is None:
-
             xacro_cmd = ["xacro"] + [xacro_path] + ["-o"] + [self._srdf_paths[robot_name]]
 
         import subprocess
         try:
-            
             xacro_gen = subprocess.check_call(xacro_cmd)
-
         except:
-            
             Journal.log(self.__class__.__name__,
                 "_generate_urdf",
                 "failed to generate " + robot_name + "\'S SRDF!!!",
@@ -1016,30 +950,19 @@ class IsaacTask(BaseTask):
         self._urdf_paths[robot_name] = self._descr_dump_path + "/" + robot_name + ".urdf"
         
         if self._xrdf_cmds() is not None:
-            
             cmds = self._xrdf_cmds()[robot_name]
-
             if cmds is None:
-                
                 xacro_cmd = ["xacro"] + [xacro_path] + ["-o"] + [self._urdf_paths[robot_name]]
-
             else:
-
                 xacro_cmd = ["xacro"] + [xacro_path] + cmds + ["-o"] + [self._urdf_paths[robot_name]]
-
         if self._xrdf_cmds() is None:
-
             xacro_cmd = ["xacro"] + [xacro_path] + ["-o"] + [self._urdf_paths[robot_name]]
 
         import subprocess
         try:
-
             xacro_gen = subprocess.check_call(xacro_cmd)
-            
-            # we also generate an updated SRDF (used by controllers)
-
+            # we also generate an updated SRDF
         except:
-
             Journal.log(self.__class__.__name__,
                 "_generate_urdf",
                 "Failed to generate " + robot_name + "\'s URDF!!!",
@@ -1051,22 +974,18 @@ class IsaacTask(BaseTask):
                     robot_pkg_name: str):
         
         self._descr_dump_path = "/tmp/" + f"{self.__class__.__name__}"
-
         Journal.log(self.__class__.__name__,
                     "update_root_offsets",
                     "generating URDF for robot "+ f"{robot_name}, of type {robot_pkg_name}...",
                     LogType.STAT,
                     throw_when_excep = True)
-        
         self._generate_urdf(robot_name=robot_name, 
                         robot_pkg_name=robot_pkg_name)
-
         Journal.log(self.__class__.__name__,
                     "update_root_offsets",
                     "generating SRDF for robot "+ f"{robot_name}, of type {robot_pkg_name}...",
                     LogType.STAT,
                     throw_when_excep = True)
-
         # we also generate SRDF files, which are useful for control
         self._generate_srdf(robot_name=robot_name, 
                         robot_pkg_name=robot_pkg_name)
@@ -1083,9 +1002,7 @@ class IsaacTask(BaseTask):
             "importing robot URDF",
             LogType.STAT,
             throw_when_excep = True)
-
         _urdf.acquire_urdf_interface()  
-
         # we overwrite some settings which are bound to be fixed
         import_config.merge_fixed_joints = merge_fixed # makes sim more stable
         # in case of fixed joints with light objects
@@ -1099,16 +1016,13 @@ class IsaacTask(BaseTask):
         # import_config.default_drive_strength = 1047.19751
         # import_config.default_position_drive_damping = 52.35988
         # import_config.default_drive_type = _urdf.UrdfJointTargetType.JOINT_DRIVE_POSITION
-        
         # import URDF
         success, robot_prim_path_default = omni.kit.commands.execute(
             "URDFParseAndImportFile",
             urdf_path=self._urdf_paths[robot_name],
             import_config=import_config, 
         )
-
         robot_base_prim_path = self._template_env_ns + "/" + robot_name
-
         # moving default prim to base prim path for cloning
         move_prim(robot_prim_path_default, # from
                 robot_base_prim_path) # to
@@ -1116,9 +1030,7 @@ class IsaacTask(BaseTask):
         return success
     
     def _init_contact_sensors(self):
-        
         for i in range(0, len(self.robot_names)):
-            
             robot_name = self.robot_names[i]
             # creates base contact sensor (which is then cloned)
             self.omni_contact_sensors[robot_name].create_contact_sensors(
@@ -1131,7 +1043,6 @@ class IsaacTask(BaseTask):
         for i in range(0, len(self.robot_names)):
 
             robot_name = self.robot_names[i]
-
             pose = self._robots_art_views[robot_name].get_world_poses( 
                                 clone = True) # tuple: (pos, quat)
 
@@ -1139,19 +1050,16 @@ class IsaacTask(BaseTask):
             self._root_p[robot_name] = pose[0]  
             self._root_p_prev[robot_name] = torch.clone(pose[0])
             self._root_p_default[robot_name] = torch.clone(pose[0]) + self.distr_offset[robot_name]
-
             # root q (measured, previous, default)
             self._root_q[robot_name] = pose[1] # root orientation
             self._root_q_prev[robot_name] = torch.clone(pose[1])
             self._root_q_default[robot_name] = torch.clone(pose[1])
-
             # jnt q (measured, previous, default)
             self._jnts_q[robot_name] = self._robots_art_views[robot_name].get_joint_positions(
                                             clone = True) # joint positions 
             self._jnts_q_prev[robot_name] = self._robots_art_views[robot_name].get_joint_positions(
                                             clone = True) 
             self._jnts_q_default[robot_name] = self.homers[robot_name].get_homing(clone=True)
-
             # root v (measured, default)
             self._root_v[robot_name] = self._robots_art_views[robot_name].get_linear_velocities(
                                             clone = True) # root lin. velocity
@@ -1159,7 +1067,6 @@ class IsaacTask(BaseTask):
                                                         0.0, 
                                                         dtype=self.torch_dtype, 
                                                         device=self.torch_device)
-            
             # root omega (measured, default)
             self._root_omega[robot_name] = self._robots_art_views[robot_name].get_angular_velocities(
                                             clone = True) # root ang. velocity
@@ -1167,7 +1074,6 @@ class IsaacTask(BaseTask):
                                                         0.0, 
                                                         dtype=self.torch_dtype, 
                                                         device=self.torch_device)
-            
             # joints v (measured, default)
             self._jnts_v[robot_name] = self._robots_art_views[robot_name].get_joint_velocities( 
                                             clone = True) # joint velocities
@@ -1175,12 +1081,10 @@ class IsaacTask(BaseTask):
                                                         0.0, 
                                                         dtype=self.torch_dtype, 
                                                         device=self.torch_device)
-            
             self._jnts_eff_default[robot_name] = torch.full((self._jnts_v[robot_name].shape[0], self._jnts_v[robot_name].shape[1]), 
                                                         0.0, 
                                                         dtype=self.torch_dtype, 
                                                         device=self.torch_device)
-            
             self._root_pos_offsets[robot_name] = torch.zeros((self.num_envs, 3), 
                                 device=self.torch_device) # reference position offses
             
@@ -1192,25 +1096,18 @@ class IsaacTask(BaseTask):
     def _calc_robot_distrib(self):
 
         import math
-
         # we distribute robots in a single env. along the 
         # circumference of a circle of given radius
-
         n_robots = len(self.robot_names)
         offset_baseangle = 2 * math.pi / n_robots
-
         for i in range(n_robots):
-
             offset_angle = offset_baseangle * (i + 1) 
-
             robot_offset_wrt_center = torch.tensor([self.spawning_radius * math.cos(offset_angle), 
                                             self.spawning_radius * math.sin(offset_angle), 0], 
                     device=self.torch_device, 
                     dtype=self.torch_dtype)
-            
             # list with n references to the original tensor
             tensor_list = [robot_offset_wrt_center] * self.num_envs
-
             self.distr_offset[self.robot_names[i]] = torch.stack(tensor_list, dim=0)
 
     def _get_robots_state(self, 
@@ -1220,13 +1117,9 @@ class IsaacTask(BaseTask):
                 reset: bool = False):
         
         rob_names = robot_names if (robot_names is not None) else self.robot_names
-
         if env_indxs is not None:
-
             for i in range(0, len(rob_names)):
-
                 robot_name = rob_names[i]
-
                 pose = self._robots_art_views[robot_name].get_world_poses( 
                                                 clone = True,
                                                 indices=env_indxs) # tuple: (pos, quat)
@@ -1236,120 +1129,75 @@ class IsaacTask(BaseTask):
                 self._jnts_q[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_joint_positions(
                                                 clone = True,
                                                 indices=env_indxs) # joint positions 
-
                 if dt is None:
-                    
                     # we get velocities from the simulation. This is not good since 
                     # these can actually represent artifacts which do not have physical meaning.
                     # It's better to obtain them by differentiation to avoid issues with controllers, etc...
-
                     self._root_v[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_linear_velocities(
                                                 clone = True,
-                                                indices=env_indxs) # root lin. velocity 
-                                                
+                                                indices=env_indxs) # root lin. velocity               
                     self._root_omega[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_angular_velocities(
                                                 clone = True,
                                                 indices=env_indxs) # root ang. velocity
-                    
                     self._jnts_v[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_joint_velocities( 
                                                 clone = True,
                                                 indices=env_indxs) # joint velocities
-                
-                else: 
-
+                else:
                     # differentiate numerically
-                    
-                    if not reset: 
-                                                    
+                    if not reset:                    
                         self._root_v[robot_name][env_indxs, :] = (self._root_p[robot_name][env_indxs, :] - \
                                                         self._root_p_prev[robot_name][env_indxs, :]) / dt 
-
                         self._root_omega[robot_name][env_indxs, :] = quat_to_omega(self._root_q[robot_name][env_indxs, :], 
                                                                     self._root_q_prev[robot_name][env_indxs, :], 
                                                                     dt)
-                        
                         self._jnts_v[robot_name][env_indxs, :] = (self._jnts_q[robot_name][env_indxs, :] - \
                                                         self._jnts_q_prev[robot_name][env_indxs, :]) / dt
-                        
-                        # self._jnts_v[robot_name][:, :].zero_()
-
                     else:
-                        
                         # to avoid issues when differentiating numerically
-
                         self._root_v[robot_name][env_indxs, :].zero_()
-
                         self._root_omega[robot_name][env_indxs, :].zero_()
-                        
                         self._jnts_v[robot_name][env_indxs, :].zero_()
-            
                     # update "previous" data for numerical differentiation
-
                     self._root_p_prev[robot_name][env_indxs, :] = self._root_p[robot_name][env_indxs, :] 
                     self._root_q_prev[robot_name][env_indxs, :] = self._root_q[robot_name][env_indxs, :]
                     self._jnts_q_prev[robot_name][env_indxs, :] = self._jnts_q[robot_name][env_indxs, :]
-
         else:
-            
             # updating data for all environments
-
             for i in range(0, len(rob_names)):
-
                 robot_name = rob_names[i]
-
                 pose = self._robots_art_views[robot_name].get_world_poses( 
                                                 clone = True) # tuple: (pos, quat)
-                
                 self._root_p[robot_name][:, :] = pose[0]  
                 self._root_q[robot_name][:, :] = pose[1] # root orientation
                 self._jnts_q[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_positions(
                                                 clone = True) # joint positions 
-
                 if dt is None:
-                    
                     # we get velocities from the simulation. This is not good since 
                     # these can actually represent artifacts which do not have physical meaning.
                     # It's better to obtain them by differentiation to avoid issues with controllers, etc...
-
                     self._root_v[robot_name][:, :] = self._robots_art_views[robot_name].get_linear_velocities(
                                                 clone = True) # root lin. velocity 
-                                                
                     self._root_omega[robot_name][:, :] = self._robots_art_views[robot_name].get_angular_velocities(
                                                     clone = True) # root ang. velocity
-                    
                     self._jnts_v[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_velocities( 
                                                     clone = True) # joint velocities
-                
                 else: 
-
                     # differentiate numerically
-                    
-                    if not reset: 
-                                                    
+                    if not reset:        
                         self._root_v[robot_name][:, :] = (self._root_p[robot_name][:, :] - \
                                                         self._root_p_prev[robot_name][:, :]) / dt 
-
                         self._root_omega[robot_name][:, :] = quat_to_omega(self._root_q[robot_name][:, :], 
                                                                     self._root_q_prev[robot_name][:, :], 
                                                                     dt)
-                        
                         self._jnts_v[robot_name][:, :] = (self._jnts_q[robot_name][:, :] - \
                                                         self._jnts_q_prev[robot_name][:, :]) / dt
-                        
                         # self._jnts_v[robot_name][:, :].zero_()
-
                     else:
-                        
                         # to avoid issues when differentiating numerically
-
                         self._root_v[robot_name][:, :].zero_()
-
                         self._root_omega[robot_name][:, :].zero_()
-                        
                         self._jnts_v[robot_name][:, :].zero_()
-            
                     # update "previous" data for numerical differentiation
-
                     self._root_p_prev[robot_name][:, :] = self._root_p[robot_name][:, :] 
                     self._root_q_prev[robot_name][:, :] = self._root_q[robot_name][:, :]
                     self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name][:, :]
@@ -1359,47 +1207,34 @@ class IsaacTask(BaseTask):
                 robot_names: List[str] = None):
         
         if self.use_diff_velocities:
-            
             self._get_robots_state(dt = self.integration_dt(),
                             env_indxs = env_indxs,
                             robot_names = robot_names) # updates robot states
             # but velocities are obtained via num. differentiation
-        
         else:
-
             self._get_robots_state(env_indxs = env_indxs,
                             robot_names = robot_names) # velocities directly from simulator (can 
             # introduce relevant artifacts, making them unrealistic)
 
     def _custom_post_init(self):
-
         # can be overridden by child class
-
         pass
 
     def _set_robots_default_jnt_config(self):
-        
         # setting Isaac's internal defaults. Useful is resetting
         # whole scenes or views, but single env reset has to be implemented
         # manueally
-
         # we use the homing of the robots
         if (self._world_initialized):
-
             for i in range(0, len(self.robot_names)):
-
                 robot_name = self.robot_names[i]
-
                 homing = self.homers[robot_name].get_homing()
-
                 self._robots_art_views[robot_name].set_joints_default_state(positions= homing, 
                                 velocities = torch.zeros((homing.shape[0], homing.shape[1]), \
                                                     dtype=self.torch_dtype, device=self.torch_device), 
                                 efforts = torch.zeros((homing.shape[0], homing.shape[1]), \
                                                     dtype=self.torch_dtype, device=self.torch_device))
-            
         else:
-
             Journal.log(self.__class__.__name__,
                 "_set_robots_default_jnt_config",
                 "Before calling __set_robots_default_jnt_config(), you need to reset the World" + \
@@ -1408,18 +1243,12 @@ class IsaacTask(BaseTask):
                 throw_when_excep = True)
 
     def _set_robots_root_default_config(self):
-        
         if (self._world_initialized):
-
             for i in range(0, len(self.robot_names)):
-
                 robot_name = self.robot_names[i]
-
                 self._robots_art_views[robot_name].set_default_state(positions = self._root_p_default[robot_name], 
                             orientations = self._root_q_default[robot_name])
-            
         else:
-            
             Journal.log(self.__class__.__name__,
                 "_generate_urdf",
                 "Before calling _set_robots_root_default_config(), you need to reset the World" + \
@@ -1430,11 +1259,8 @@ class IsaacTask(BaseTask):
         return True
         
     def _get_solver_info(self):
-
         for i in range(0, len(self.robot_names)):
-
             robot_name = self.robot_names[i]
-
             self._solver_position_iteration_counts[robot_name] = self._robots_art_views[robot_name].get_solver_position_iteration_counts()
             self._solver_velocity_iteration_counts[robot_name] = self._robots_art_views[robot_name].get_solver_velocity_iteration_counts()
             self._solver_stabilization_threshs[robot_name] = self._robots_art_views[robot_name].get_stabilization_thresholds()
@@ -1442,30 +1268,22 @@ class IsaacTask(BaseTask):
     def _update_art_solver_options(self):
         
         # sets new solver iteration options for specifc articulations
-        
         self._get_solver_info() # gets current solver info for the articulations of the 
         # environments, so that dictionaries are filled properly
         
         if (self._world_initialized):
-
             for i in range(0, len(self.robot_names)):
-
                 robot_name = self.robot_names[i]
-
                 # increase by a factor
                 self._solver_position_iteration_counts[robot_name] = torch.full((self.num_envs,), self._solver_position_iteration_count)
                 self._solver_velocity_iteration_counts[robot_name] = torch.full((self.num_envs,), self._solver_velocity_iteration_count)
                 self._solver_stabilization_threshs[robot_name] = torch.full((self.num_envs,), self._solver_stabilization_thresh)
-
                 self._robots_art_views[robot_name].set_solver_position_iteration_counts(self._solver_position_iteration_counts[robot_name])
                 self._robots_art_views[robot_name].set_solver_velocity_iteration_counts(self._solver_velocity_iteration_counts[robot_name])
                 self._robots_art_views[robot_name].set_stabilization_thresholds(self._solver_stabilization_threshs[robot_name])
-
                 self._get_solver_info() # gets again solver info for articulation, so that it's possible to debug if
                 # the operation was successful
-        
         else:
-
             Journal.log(self.__class__.__name__,
                 "_set_robots_default_jnt_config",
                 "Before calling update_art_solver_options(), you need to reset the World at least once!",
@@ -1473,15 +1291,10 @@ class IsaacTask(BaseTask):
                 throw_when_excep = True)                    
         
     def _print_envs_info(self):
-        
         if (self._world_initialized):
-            
             print("TASK INFO:")
-
             for i in range(0, len(self.robot_names)):
-
                 robot_name = self.robot_names[i]
-                
                 task_info = f"[{robot_name}]" + "\n" + \
                     "bodies: " + str(self._robots_art_views[robot_name].body_names) + "\n" + \
                     "n. prims: " + str(self._robots_art_views[robot_name].count) + "\n" + \
@@ -1492,22 +1305,18 @@ class IsaacTask(BaseTask):
                     "solver_position_iteration_counts: " + str(self._solver_position_iteration_counts[robot_name]) + "\n" + \
                     "solver_velocity_iteration_counts: " + str(self._solver_velocity_iteration_counts[robot_name]) + "\n" + \
                     "stabiliz. thresholds: " + str(self._solver_stabilization_threshs[robot_name])
-                
                 # print("dof limits: " + str(self._robots_art_views[robot_name].get_dof_limits()))
                 # print("effort modes: " + str(self._robots_art_views[robot_name].get_effort_modes()))
                 # print("dof gains: " + str(self._robots_art_views[robot_name].get_gains()))
                 # print("dof max efforts: " + str(self._robots_art_views[robot_name].get_max_efforts()))
                 # print("dof gains: " + str(self._robots_art_views[robot_name].get_gains()))
-                # print("physics handle valid: " + str(self._robots_art_views[robot_name].is_physics_handle_valid()))
-
+                # print("physics handle valid: " + str(self._robots_art_views[robot_name].is_physics_handle_valid())
                 Journal.log(self.__class__.__name__,
                     "_print_envs_info",
                     task_info,
                     LogType.STAT,
                     throw_when_excep = True)
-
         else:
-
             Journal.log(self.__class__.__name__,
                         "_set_robots_default_jnt_config",
                         "Before calling __print_envs_info(), you need to reset the World at least once!",
@@ -1517,18 +1326,13 @@ class IsaacTask(BaseTask):
     def _fill_robot_info_from_world(self):
 
         if self._world_initialized:
-            
             for i in range(0, len(self.robot_names)):
-
                 robot_name = self.robot_names[i]
-
                 self.robot_bodynames[robot_name] = self._robots_art_views[robot_name].body_names
                 self.robot_n_links[robot_name] = self._robots_art_views[robot_name].num_bodies
                 self.robot_n_dofs[robot_name] = self._robots_art_views[robot_name].num_dof
                 self.robot_dof_names[robot_name] = self._robots_art_views[robot_name].dof_names
-        
         else:
-
             Journal.log(self.__class__.__name__,
                 "_fill_robot_info_from_world",
                 "Before calling _fill_robot_info_from_world(), you need to reset the World at least once!",
@@ -1538,22 +1342,16 @@ class IsaacTask(BaseTask):
     def _init_homing_managers(self):
         
         if self._world_initialized:
-
             for i in range(0, len(self.robot_names)):
-
                 robot_name = self.robot_names[i]
-
                 self.homers[robot_name] = OmniRobotHomer(articulation=self._robots_art_views[robot_name], 
                                     srdf_path=self._srdf_paths[robot_name], 
                                     device=self.torch_device, 
                                     dtype=self.torch_dtype)
-                    
         else:
-            
             exception = "you should reset the World at least once and call the " + \
                             "post_initialization_steps() method before initializing the " + \
                             "homing manager."
-                        
             Journal.log(self.__class__.__name__,
                 "_init_homing_managers",
                 exception,
@@ -1563,11 +1361,8 @@ class IsaacTask(BaseTask):
     def _init_jnt_imp_control(self):
     
         if self._world_initialized:
-            
             for i in range(0, len(self.robot_names)):
-
                 robot_name = self.robot_names[i]
-                
                 # creates impedance controller
                 self.jnt_imp_controllers[robot_name] = OmniJntImpCntrl(articulation=self._robots_art_views[robot_name],
                                             default_pgain = self.default_jnt_stiffness, # defaults
@@ -1578,18 +1373,15 @@ class IsaacTask(BaseTask):
                                             device= self.torch_device, 
                                             dtype=self.torch_dtype,
                                             enable_safety=True,
-                                            enable_profiling=self._enable_jnt_imp_cntrl_profiling,
+                                            enable_profiling=self._debug_enabled,
                                             urdf_path=self._urdf_paths[robot_name],
-                                            debug_checks = self._enable_jnt_imp_db_mode)
-
+                                            debug_checks = self._debug_enabled)
                 self.reset_jnt_imp_control(robot_name)
                 
         else:
-            
             exception = "you should reset the World at least once and call the " + \
                             "post_initialization_steps() method before initializing the " + \
                             "joint impedance controller."
-                        
             Journal.log(self.__class__.__name__,
                 "_init_homing_managers",
                 exception,
@@ -1599,7 +1391,6 @@ class IsaacTask(BaseTask):
     def _set_initial_camera_params(self, 
                                 camera_position=[10, 10, 3], 
                                 camera_target=[0, 0, 0]):
-        
         set_camera_view(eye=camera_position, 
                         target=camera_target, 
                         camera_prim_path="/OmniverseKit_Persp")
