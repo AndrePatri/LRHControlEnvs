@@ -297,9 +297,7 @@ class IsaacTask(BaseTask):
                             f"updating joint impedances " + for_robots,
                             LogType.STAT,
                             throw_when_excep = True)
-        
-        wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(
-                                name_pattern="wheel")
+        # set jnt imp gains for the whole robot
         if env_indxs is None:           
             gains_pos = torch.full((self.num_envs, \
                                     self.jnt_imp_controllers[robot_name].n_dofs), 
@@ -311,15 +309,6 @@ class IsaacTask(BaseTask):
                         jnt_damping, 
                         device = self.torch_device, 
                         dtype=self.torch_dtype)
-            # wheels are velocity-controlled
-            wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                        wheel_stiffness, 
-                                        device = self.torch_device, 
-                                        dtype=self.torch_dtype)
-            wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
-                                        wheel_damping, 
-                                        device = self.torch_device, 
-                                        dtype=self.torch_dtype)
         else:
             gains_pos = torch.full((env_indxs.shape[0], \
                                     self.jnt_imp_controllers[robot_name].n_dofs), 
@@ -331,26 +320,41 @@ class IsaacTask(BaseTask):
                         jnt_damping, 
                         device = self.torch_device, 
                         dtype=self.torch_dtype)
-            # wheels are velocity-controlled
-            wheels_pos_gains = torch.full((env_indxs.shape[0], len(wheels_indxs)), 
-                                        wheel_stiffness, 
-                                        device = self.torch_device, 
-                                        dtype=self.torch_dtype)
-            
-            wheels_vel_gains = torch.full((env_indxs.shape[0], len(wheels_indxs)), 
-                                        wheel_damping, 
-                                        device = self.torch_device, 
-                                        dtype=self.torch_dtype)
-            
         self.jnt_imp_controllers[robot_name].set_gains(
                 pos_gains = gains_pos,
                 vel_gains = gains_vel,
                 robot_indxs = env_indxs)
-        self.jnt_imp_controllers[robot_name].set_gains(
-                pos_gains = wheels_pos_gains,
-                vel_gains = wheels_vel_gains,
-                jnt_indxs=wheels_indxs,
-                robot_indxs = env_indxs)
+        
+        # in case of wheels
+        wheels_indxs = self.jnt_imp_controllers[robot_name].get_jnt_idxs_matching(
+                                name_pattern="wheel")
+        if wheels_indxs is not None:
+            if env_indxs is None:           
+                # wheels are velocity-controlled
+                wheels_pos_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                            wheel_stiffness, 
+                                            device = self.torch_device, 
+                                            dtype=self.torch_dtype)
+                wheels_vel_gains = torch.full((self.num_envs, len(wheels_indxs)), 
+                                            wheel_damping, 
+                                            device = self.torch_device, 
+                                            dtype=self.torch_dtype)
+            else:
+                # wheels are velocity-controlled
+                wheels_pos_gains = torch.full((env_indxs.shape[0], len(wheels_indxs)), 
+                                            wheel_stiffness, 
+                                            device = self.torch_device, 
+                                            dtype=self.torch_dtype)
+                
+                wheels_vel_gains = torch.full((env_indxs.shape[0], len(wheels_indxs)), 
+                                            wheel_damping, 
+                                            device = self.torch_device, 
+                                            dtype=self.torch_dtype)
+            self.jnt_imp_controllers[robot_name].set_gains(
+                    pos_gains = wheels_pos_gains,
+                    vel_gains = wheels_vel_gains,
+                    jnt_indxs=wheels_indxs,
+                    robot_indxs = env_indxs)
         
     def update_root_offsets(self, 
                     robot_name: str,

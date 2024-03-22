@@ -519,12 +519,13 @@ class OmniJntImpCntrl:
                         name_pattern: str):
 
         jnts_names = self.get_jnt_names_matching(name_pattern)
-
         jnt_idxs = [self.jnts_names.index(jnt) for jnt in jnts_names]
-
-        return torch.tensor(jnt_idxs, 
-                        dtype=torch.int64,
-                        device=self._torch_device)
+        if not len(jnt_idxs) == 0:
+            return torch.tensor(jnt_idxs, 
+                            dtype=torch.int64,
+                            device=self._torch_device)
+        else:
+            return None
     
     def pos_gains(self):
 
