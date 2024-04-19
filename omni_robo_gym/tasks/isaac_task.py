@@ -83,10 +83,13 @@ class IsaacTask(BaseTask):
                 dtype = torch.float64,
                 debug_enabled: bool = False,
                 verbose = False,
-                use_diff_velocities = False) -> None:
+                use_diff_velocities = False,
+                dump_basepath: str = "/tmp") -> None:
 
         self.torch_dtype = dtype
         
+        self._descr_dump_path = dump_basepath + "/" + f"{self.__class__.__name__}"
+
         self._debug_enabled = debug_enabled
 
         self._verbose = verbose
@@ -977,7 +980,6 @@ class IsaacTask(BaseTask):
                     robot_name: str, 
                     robot_pkg_name: str):
         
-        self._descr_dump_path = "/tmp/" + f"{self.__class__.__name__}"
         Journal.log(self.__class__.__name__,
                     "update_root_offsets",
                     "generating URDF for robot "+ f"{robot_name}, of type {robot_pkg_name}...",
