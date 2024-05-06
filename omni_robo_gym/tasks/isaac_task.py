@@ -752,6 +752,16 @@ class IsaacTask(BaseTask):
         self.get_states(env_indxs=env_indxs, 
                         robot_names=rob_names)
 
+    def deactivate(self,
+            env_indxs: torch.Tensor = None,
+            robot_names: List[str] =None):
+        
+        # deactivate jnt imp controllers for given robots and envs (makes the robot fall)
+        rob_names = robot_names if (robot_names is not None) else self.robot_names
+        for i in range(len(rob_names)):
+            robot_name = rob_names[i]
+            self.jnt_imp_controllers[robot_name].deactivate(robot_indxs = env_indxs)
+                
     def close(self):
         pass
 

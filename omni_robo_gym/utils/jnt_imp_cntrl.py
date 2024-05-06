@@ -276,7 +276,12 @@ class OmniJntImpCntrl:
                                         backend=self._backend, 
                                         device=self._torch_device)
             self.limiter = JntSafety(urdf_parser=self.robot_limits)
-            
+        
+        self._null_aux_tensor = torch.full((self.num_robots, self.n_dofs), 
+                                        0, 
+                                        device = self._torch_device, 
+                                        dtype=self._torch_dtype)
+        
         self._pos_err = None
         self._vel_err = None
         self._pos = None
@@ -449,6 +454,7 @@ class OmniJntImpCntrl:
                 
             if not self.override_art_controller:
                 # using omniverse's articulation PD controller
+                self._check_activation() # processes cmds in case of deactivations
                 self._articulation_view.set_joint_efforts(eff_ref_filt)
                 self._articulation_view.set_joint_position_targets(pos_ref_filt)
                 self._articulation_view.set_joint_velocity_targets(vel_ref_filt)
@@ -468,7 +474,7 @@ class OmniJntImpCntrl:
                 # we also make the resulting imp eff safe
                 if self.limiter is not None:
                     self.limiter.apply(eff_cmd=eff_ref_filt)
-                    
+                self._check_activation() # processes cmds in case of deactivations
                 # apply only effort (comprehensive of all imp. terms)
                 self._articulation_view.set_joint_efforts(self._imp_eff)
 
@@ -482,6 +488,8 @@ class OmniJntImpCntrl:
                     
             if not self.override_art_controller:
                 # using omniverse's articulation PD controller
+                self._check_activation() # processes cmds in case of deactivations
+
                 self._articulation_view.set_joint_efforts(self._eff_ref)
                 self._articulation_view.set_joint_position_targets(self._pos_ref)
                 self._articulation_view.set_joint_velocity_targets(self._vel_ref)
@@ -504,6 +512,7 @@ class OmniJntImpCntrl:
                     self.limiter.apply(eff_cmd=self._imp_eff)
 
                 # apply only effort (comprehensive of all imp. terms)
+                self._check_activation() # processes cmds in case of deactivations
                 self._articulation_view.set_joint_efforts(self._imp_eff)
         
         if self.enable_profiling:
@@ -588,7 +597,12 @@ class OmniJntImpCntrl:
 
             # we assume diagonal joint impedance gain matrices, so we can save on memory and only store the diagonal
             
-            self._pos_gains =  torch.full((self.num_robots, self.n_dofs), 
+            self._active = torch.full((self.num_robots, 1), 
+                                    True, 
+                                    device = self._torch_device, 
+                                    dtype=torch.bool)
+            
+            self._pos_gains = torch.full((self.num_robots, self.n_dofs), 
                                         self._default_pgain, 
                                         device = self._torch_device, 
                                         dtype=self._torch_dtype)
@@ -628,6 +642,8 @@ class OmniJntImpCntrl:
             n_envs = robot_indxs.shape[0]
 
             # we assume diagonal joint impedance gain matrices, so we can save on memory and only store the diagonal
+            
+            self._active[robot_indxs, :] = True # reactivate inactive controller
             
             self._pos_gains[robot_indxs, :] =  torch.full((n_envs, self.n_dofs), 
                                         self._default_pgain, 
@@ -671,7 +687,25 @@ class OmniJntImpCntrl:
             # will use updated gains/refs based on reset (non updated gains/refs will be the same)
             self._apply_init_gains_to_art()
             self._apply_init_refs_to_art()
-     
+    
+    def deactivate(self,
+            robot_indxs: torch.Tensor = None):
+        
+        if robot_indxs is not None:
+            self._active[robot_indxs, :] = False
+        else:
+            self._active[:, :] = False
+
+    def _check_activation(self):
+        # inactive controllers have their imp effort set to 0 
+        inactive = ~self._active.flatten()
+        if not self.override_art_controller:
+            self.set_gains(pos_gains=self._null_aux_tensor,
+                    vel_gains=self._null_aux_tensor,
+                    robot_indxs=inactive)
+        self._eff_ref[inactive, :] = 0.0
+        self._imp_eff[inactive, :] = 0.0
+
     def _apply_init_gains_to_art(self):
         
         if not self.gains_initialized:
