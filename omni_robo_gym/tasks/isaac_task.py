@@ -1195,8 +1195,8 @@ class IsaacTask(BaseTask):
 
                 self._jnts_eff[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_measured_joint_efforts( 
                                                 clone = True,
-                                                joint_indices=env_indxs,
-                                                indices=None) # measured joint efforts (computed by joint force solver)
+                                                joint_indices=None,
+                                                indices=env_indxs) # measured joint efforts (computed by joint force solver)
         else:
             # updating data for all environments
             for i in range(0, len(rob_names)):
