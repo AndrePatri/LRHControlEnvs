@@ -189,7 +189,7 @@ class IsaacTask(BaseTask):
         self._root_omega_default = {}
         self._jnts_v = {}
         self._jnts_v_default = {}
-
+        self._jnts_eff = {}
         self._jnts_eff_default = {}
 
         self._root_pos_offsets = {} 
@@ -874,6 +874,15 @@ class IsaacTask(BaseTask):
             return self._jnts_v[robot_name]
         else:
             return self._jnts_v[robot_name][env_idxs, :]
+    
+    def jnts_eff(self,
+            robot_name: str,
+            env_idxs: torch.Tensor = None): # (measured) efforts
+
+        if env_idxs is None:
+            return self._jnts_eff[robot_name]
+        else:
+            return self._jnts_eff[robot_name][env_idxs, :]
 
     def integration_dt(self):
         return self._integration_dt
@@ -1097,10 +1106,16 @@ class IsaacTask(BaseTask):
                                                         0.0, 
                                                         dtype=self.torch_dtype, 
                                                         device=self.torch_device)
+            
+            # joints efforts (measured, default)
+            self._jnts_eff[robot_name] = torch.full((self._jnts_v[robot_name].shape[0], self._jnts_v[robot_name].shape[1]), 
+                                                0.0, 
+                                                dtype=self.torch_dtype, 
+                                                device=self.torch_device)
             self._jnts_eff_default[robot_name] = torch.full((self._jnts_v[robot_name].shape[0], self._jnts_v[robot_name].shape[1]), 
-                                                        0.0, 
-                                                        dtype=self.torch_dtype, 
-                                                        device=self.torch_device)
+                                                    0.0, 
+                                                    dtype=self.torch_dtype, 
+                                                    device=self.torch_device)
             self._root_pos_offsets[robot_name] = torch.zeros((self.num_envs, 3), 
                                 device=self.torch_device) # reference position offses
             
@@ -1177,6 +1192,11 @@ class IsaacTask(BaseTask):
                     self._root_p_prev[robot_name][env_indxs, :] = self._root_p[robot_name][env_indxs, :] 
                     self._root_q_prev[robot_name][env_indxs, :] = self._root_q[robot_name][env_indxs, :]
                     self._jnts_q_prev[robot_name][env_indxs, :] = self._jnts_q[robot_name][env_indxs, :]
+
+                self._jnts_eff[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_measured_joint_efforts( 
+                                                clone = True,
+                                                joint_indices=env_indxs,
+                                                indices=None) # measured joint efforts (computed by joint force solver)
         else:
             # updating data for all environments
             for i in range(0, len(rob_names)):
@@ -1217,6 +1237,9 @@ class IsaacTask(BaseTask):
                     self._root_p_prev[robot_name][:, :] = self._root_p[robot_name][:, :] 
                     self._root_q_prev[robot_name][:, :] = self._root_q[robot_name][:, :]
                     self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name][:, :]
+                
+                self._jnts_eff[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_measured_joint_efforts( 
+                                                clone = True) # measured joint efforts (computed by joint force solver)
     
     def get_states(self,
                 env_indxs: torch.Tensor = None,
