@@ -642,9 +642,9 @@ class IsaacTask(BaseTask):
                 self._world_scene.add_default_ground_plane(z_position=0, 
                             name="terrain", 
                             prim_path= self._ground_plane_prim_path, 
-                            static_friction=1.0, 
-                            dynamic_friction=1.0, 
-                            restitution=0.2)
+                            static_friction=1.5, 
+                            dynamic_friction=1.5, 
+                            restitution=0.0)
             else:
                 self.terrains = RlTerrains(get_current_stage())
                 self.terrains.get_obstacles_terrain(terrain_size=40, 
