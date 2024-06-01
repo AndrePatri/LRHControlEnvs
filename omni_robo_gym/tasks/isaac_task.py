@@ -671,21 +671,45 @@ class IsaacTask(BaseTask):
 
     def reset(self,
             env_indxs: torch.Tensor = None,
-            robot_names: List[str] =None):
+            robot_names: List[str] =None,
+            randomize: bool = False):
 
         # we first reset all target articulations to their default state
         rob_names = robot_names if (robot_names is not None) else self.robot_names
         # resets the state of target robot and env to the defaults
         self.reset_state(env_indxs=env_indxs, 
-                    robot_names=rob_names)
+                    robot_names=rob_names,
+                    randomize=randomize)
         # and jnt imp. controllers
         for i in range(len(rob_names)):
             self.reset_jnt_imp_control(robot_name=rob_names[i],
                                 env_indxs=env_indxs)
 
+    def randomize_yaw(self,
+            robot_name: str,
+            env_indxs: torch.Tensor = None):
+
+        root_q_default = self._root_q_default[robot_name]
+
+        if env_indxs is None:
+            env_indxs = torch.arange(root_q_default.shape[0])
+
+        num_indices = env_indxs.shape[0]
+        yaw_angles = torch.rand((num_indices, 1), 
+                        device=root_q_default.device) * 2 * torch.pi  # uniformly distributed random angles
+        
+        # Compute cos and sin once
+        cos_half = torch.cos(yaw_angles / 2)
+        
+        root_q_default[env_indxs, :] = torch.stack((cos_half, 
+                                torch.zeros_like(cos_half),
+                                torch.zeros_like(cos_half), 
+                                torch.sin(yaw_angles / 2)), dim=1)
+        
     def reset_state(self,
             env_indxs: torch.Tensor = None,
-            robot_names: List[str] =None):
+            robot_names: List[str] =None,
+            randomize: bool = False):
 
         rob_names = robot_names if (robot_names is not None) else self.robot_names
         if env_indxs is not None:
@@ -708,6 +732,10 @@ class IsaacTask(BaseTask):
                             True)
             for i in range(len(rob_names)):
                 robot_name = rob_names[i]
+
+                if randomize:
+                    self.randomize_yaw(robot_name=robot_name,env_indxs=env_indxs)
+
                 # root q
                 self._robots_art_views[robot_name].set_world_poses(positions = self._root_p_default[robot_name][env_indxs, :],
                                                     orientations=self._root_q_default[robot_name][env_indxs, :],
@@ -727,8 +755,13 @@ class IsaacTask(BaseTask):
                 self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][env_indxs, :],
                                                         indices = env_indxs)
         else:
+
             for i in range(len(rob_names)):
                 robot_name = rob_names[i]
+
+                if randomize:
+                    self.randomize_yaw(robot_name=robot_name,env_indxs=None)
+
                 # root q
                 self._robots_art_views[robot_name].set_world_poses(positions = self._root_p_default[robot_name][:, :],
                                                     orientations=self._root_q_default[robot_name][:, :],
