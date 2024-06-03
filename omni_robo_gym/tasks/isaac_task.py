@@ -700,11 +700,11 @@ class IsaacTask(BaseTask):
         
         # Compute cos and sin once
         cos_half = torch.cos(yaw_angles / 2)
-        
+
         root_q_default[env_indxs, :] = torch.stack((cos_half, 
                                 torch.zeros_like(cos_half),
                                 torch.zeros_like(cos_half), 
-                                torch.sin(yaw_angles / 2)), dim=1)
+                                torch.sin(yaw_angles / 2)), dim=1).reshape(num_indices, 4)
         
     def reset_state(self,
             env_indxs: torch.Tensor = None,
