@@ -15,7 +15,8 @@
 # You should have received a copy of the GNU General Public License
 # along with OmniRoboGym.  If not, see <http://www.gnu.org/licenses/>.
 # 
-from omni.isaac.kit import SimulationApp
+from isaacsim import SimulationApp
+
 import os
 import signal
 
