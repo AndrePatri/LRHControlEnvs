@@ -695,7 +695,7 @@ class IsaacTask(BaseTask):
             env_indxs = torch.arange(root_q_default.shape[0])
 
         num_indices = env_indxs.shape[0]
-        yaw_angles = torch.rand((num_indices, 1), 
+        yaw_angles = torch.rand((num_indices,), 
                         device=root_q_default.device) * 2 * torch.pi  # uniformly distributed random angles
         
         # Compute cos and sin once
