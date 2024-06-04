@@ -419,6 +419,10 @@ class IsaacSimEnv():
         
         return
 
+    def get_task(self):
+         
+        return self._task
+
     @abstractmethod
     def step(self, 
             actions = None):
