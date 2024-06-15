@@ -33,6 +33,8 @@ from SharsorIPCpp.PySharsorIPC import Journal
 
 import numpy as np
 
+from omni_robo_gym.utils.sys_utils import PathsGetter
+
 # import gymnasium as gym 
     
 # class IsaacSimEnv(gym.Env):
@@ -56,13 +58,18 @@ class IsaacSimEnv():
         """
 
         self.debug = debug
-                
-        experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnirobogym.kit'
-        # experience = ""
-        if headless:
-            
-            info = f"Will run in headless mode."
+        
+        paths = PathsGetter()
+        
+        # base_isaac_exp = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.kit'
+        # base_isaac_exp_headless = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.gym.headless.kit'
+        base_isaac_exp = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnirobogym.kit'
+        base_isaac_exp_headless = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnirobogym.headless.kit'
 
+        # experience=paths.OMNIRGYM_KIT
+        experience=base_isaac_exp
+        if headless:
+            info = f"Will run in headless mode."
             Journal.log(self.__class__.__name__,
                 "__init__",
                 info,
@@ -70,23 +77,18 @@ class IsaacSimEnv():
                 throw_when_excep = True)
                             
             if enable_livestream:
-                 
                 experience = ""
-            
             elif enable_viewport:
-                
                 exception = f"Using viewport is not supported yet."
-
                 Journal.log(self.__class__.__name__,
                     "__init__",
                     exception,
                     LogType.EXCEP,
                     throw_when_excep = True)
-                
             else:
-                 
-                experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnirobogym.headless.kit'
-                # experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.gym.headless.kit'
+                
+                # experience=paths.OMNIRGYM_HEADLESS_KIT
+                experience=base_isaac_exp_headless
 
         self._simulation_app = SimulationApp({"headless": headless,
                                             "physics_gpu": sim_device}, 
