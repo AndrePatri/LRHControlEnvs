@@ -25,7 +25,6 @@ dependencies:
   - gtest
   - eigen3
   - posix_ipc=1.0.4
-  - rospkg=1.5.0
   - ros-humble-xacro
   - empy 
   - python-devtools

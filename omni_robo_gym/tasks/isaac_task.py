@@ -58,6 +58,7 @@ class IsaacTask(BaseTask):
                 integration_dt: float,
                 robot_names: List[str],
                 robot_pkg_names: List[str] = None, 
+                robot_pkg_prefix_paths: List[str] = None,
                 contact_prims: Dict[str, List] = None,
                 contact_offsets: Dict[str, Dict[str, np.ndarray]] = None,
                 sensor_radii: Dict[str, Dict[str, np.ndarray]] = None,
@@ -110,6 +111,7 @@ class IsaacTask(BaseTask):
                 
         self.robot_names = robot_names # these are (potentially) custom names to 
         self.robot_pkg_names = robot_pkg_names # will be used to search for URDF and SRDF packages
+        self.robot_pkg_prefix_path = robot_pkg_prefix_paths
 
         self.scene_setup_completed = False
 
@@ -601,11 +603,13 @@ class IsaacTask(BaseTask):
             for i in range(len(self.robot_names)):
                 robot_name = self.robot_names[i]
                 robot_pkg_name = self.robot_pkg_names[i]
+                pkg_prefix_path = self.robot_pkg_prefix_path[i]
                 fix_base = self._fix_base[i]
                 self_collide = self._self_collide[i]
                 merge_fixed = self._merge_fixed[i]
                 self._generate_rob_descriptions(robot_name=robot_name, 
-                                        robot_pkg_name=robot_pkg_name)
+                                        robot_pkg_name=robot_pkg_name,
+                                        pkg_prefix_path=pkg_prefix_path)
                 self._import_urdf(robot_name, 
                                 fix_base=fix_base, 
                                 self_collide=self_collide, 
@@ -964,12 +968,11 @@ class IsaacTask(BaseTask):
 
     def _generate_srdf(self, 
                 robot_name: str, 
-                robot_pkg_name: str):
+                robot_pkg_name: str,
+                pkg_prefix_path: str):
         
         # we generate the URDF where the description package is located
-        import rospkg
-        rospackage = rospkg.RosPack()
-        descr_path = rospackage.get_path(robot_pkg_name + "_srdf")
+        descr_path = pkg_prefix_path + f"/{robot_pkg_name}_srdf"
         srdf_path = descr_path + "/srdf"
         xacro_name = robot_pkg_name
         xacro_path = srdf_path + "/" + xacro_name + ".srdf.xacro"
@@ -997,12 +1000,11 @@ class IsaacTask(BaseTask):
         
     def _generate_urdf(self, 
                 robot_name: str, 
-                robot_pkg_name: str):
+                robot_pkg_name: str,
+                pkg_prefix_path: str):
 
         # we generate the URDF where the description package is located
-        import rospkg
-        rospackage = rospkg.RosPack()
-        descr_path = rospackage.get_path(robot_pkg_name + "_urdf")
+        descr_path = pkg_prefix_path + f"/{robot_pkg_name}_urdf"
         urdf_path = descr_path + "/urdf"
         xacro_name = robot_pkg_name
         xacro_path = urdf_path + "/" + xacro_name + ".urdf.xacro"
@@ -1030,7 +1032,8 @@ class IsaacTask(BaseTask):
 
     def _generate_rob_descriptions(self, 
                     robot_name: str, 
-                    robot_pkg_name: str):
+                    robot_pkg_name: str,
+                    pkg_prefix_path: str):
         
         Journal.log(self.__class__.__name__,
                     "update_root_offsets",
@@ -1038,7 +1041,8 @@ class IsaacTask(BaseTask):
                     LogType.STAT,
                     throw_when_excep = True)
         self._generate_urdf(robot_name=robot_name, 
-                        robot_pkg_name=robot_pkg_name)
+                        robot_pkg_name=robot_pkg_name,
+                        pkg_prefix_path=pkg_prefix_path)
         Journal.log(self.__class__.__name__,
                     "update_root_offsets",
                     "generating SRDF for robot "+ f"{robot_name}, of type {robot_pkg_name}...",
@@ -1046,7 +1050,8 @@ class IsaacTask(BaseTask):
                     throw_when_excep = True)
         # we also generate SRDF files, which are useful for control
         self._generate_srdf(robot_name=robot_name, 
-                        robot_pkg_name=robot_pkg_name)
+                        robot_pkg_name=robot_pkg_name,
+                        pkg_prefix_path=pkg_prefix_path)
         
     def _import_urdf(self, 
                 robot_name: str,
