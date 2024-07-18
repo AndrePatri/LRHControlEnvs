@@ -36,9 +36,7 @@ class OmniRobotHomer:
         self.torch_dtype = dtype 
         
         if not articulation.initialized:
-            
             exception = f"the provided articulation is not initialized properly!"
-
             Journal.log(self.__class__.__name__,
                 "__init__",
                 exception,
@@ -111,17 +109,17 @@ class OmniRobotHomer:
     def _assign2homing(self):
         
         for joint in list(self._homing_map.keys()):
-            
             if joint in self.joint_idx_map:
-                
                 self._homing[:, self.joint_idx_map[joint]] = torch.full((self.num_robots, 1), 
                                                                 self._homing_map[joint],
                                                                 device = self._device, 
                                                                 dtype=self.torch_dtype).flatten()
             else:
-
-                print(f"[{self.__class__.__name__}]" + f"[{self.journal.warning}]" + f"[{self._assign2homing.__name__}]" \
-                      + ": joint " + f"{joint}" + " is not present in the articulation. It will be ignored.")
+                Journal.log(self.__class__.__name__,
+                    "_assign2homing",
+                    "Joint " + f"{joint}" + " is not present in the articulation. It will be ignored.",
+                    LogType.WARN,
+                    throw_when_excep = True)
                 
     def get_homing(self, 
                 clone: bool = False):
