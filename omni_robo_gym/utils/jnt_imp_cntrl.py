@@ -314,7 +314,6 @@ class OmniJntImpCntrl:
             self._filter_available = True
 
         else:
-
             warning = f"No filter dt provided -> reference filter will not be used!"
             Journal.log(self.__class__.__name__,
                 "__init__",
@@ -455,9 +454,9 @@ class OmniJntImpCntrl:
             if not self.override_art_controller:
                 # using omniverse's articulation PD controller
                 self._check_activation() # processes cmds in case of deactivations
-                self._articulation_view.set_joint_efforts(eff_ref_filt)
                 self._articulation_view.set_joint_position_targets(pos_ref_filt)
                 self._articulation_view.set_joint_velocity_targets(vel_ref_filt)
+                self._articulation_view.set_joint_efforts(eff_ref_filt)
 
             else:
                 # impedance torque computed explicitly
@@ -490,10 +489,10 @@ class OmniJntImpCntrl:
                 # using omniverse's articulation PD controller
                 self._check_activation() # processes cmds in case of deactivations
 
-                self._articulation_view.set_joint_efforts(self._eff_ref)
                 self._articulation_view.set_joint_position_targets(self._pos_ref)
                 self._articulation_view.set_joint_velocity_targets(self._vel_ref)
-        
+                self._articulation_view.set_joint_efforts(self._eff_ref)
+
             else:
                 # impedance torque computed explicitly
                 self._pos_err  = torch.sub(self._pos_ref, self._pos)
@@ -700,23 +699,21 @@ class OmniJntImpCntrl:
         # inactive controllers have their imp effort set to 0 
         inactive = ~self._active.flatten()
         if not self.override_art_controller:
-            self.set_gains(pos_gains=self._null_aux_tensor,
-                    vel_gains=self._null_aux_tensor,
-                    robot_indxs=inactive)
+            inactive_idxs=torch.nonzero(inactive)
+            if inactive_idxs.numel()>0:
+                self.set_gains(pos_gains=self._null_aux_tensor,
+                        vel_gains=self._null_aux_tensor,
+                        robot_indxs=inactive_idxs)
         self._eff_ref[inactive, :] = 0.0
         self._imp_eff[inactive, :] = 0.0
 
     def _apply_init_gains_to_art(self):
         
         if not self.gains_initialized:
-            
             if not self.override_art_controller:
-
                 self._articulation_view.set_gains(kps = self._pos_gains, 
                                         kds = self._vel_gains)
-
             else:
-                
                 # settings Isaac's PD controller gains to 0
                 no_gains = torch.zeros((self.num_robots, self.n_dofs), device = self._torch_device, 
                                     dtype=self._torch_dtype)        
@@ -728,17 +725,12 @@ class OmniJntImpCntrl:
     def _apply_init_refs_to_art(self):
 
         if not self.refs_initialized: 
-            
             if not self.override_art_controller:
-        
                 self._articulation_view.set_joint_efforts(self._eff_ref)
                 self._articulation_view.set_joint_position_targets(self._pos_ref)
                 self._articulation_view.set_joint_velocity_targets(self._vel_ref)
-
             else:
-                
                 self._articulation_view.set_joint_efforts(self._eff_ref)
-    
             self.refs_initialized = True
     
     def _validate_selectors(self, 
@@ -746,9 +738,7 @@ class OmniJntImpCntrl:
                 jnt_indxs: torch.Tensor = None):
 
         if robot_indxs is not None:
-
             robot_indxs_shape = robot_indxs.shape
-
             if (not (len(robot_indxs_shape) == 1 and \
                 robot_indxs.dtype == torch.int64 and \
                 bool(torch.min(robot_indxs) >= 0) and \
@@ -759,7 +749,7 @@ class OmniJntImpCntrl:
                     "robot_indxs_shape -> " + f"{len(robot_indxs_shape)}" + " VS" + " expected -> " + f"{1}" + "\n" + \
                     "robot_indxs.dtype -> " + f"{robot_indxs.dtype}" + " VS" + " expected -> " + f"{torch.int64}" + "\n" + \
                     "torch.min(robot_indxs) >= 0) -> " + f"{bool(torch.min(robot_indxs) >= 0)}" + " VS" + f" {True}" + "\n" + \
-                    "torch.max(robot_indxs) < self.n_dofs -> " + f"{torch.max(robot_indxs)}" + " VS" + f" {self.num_robots}\n" + \
+                    "torch.max(robot_indxs) < self.num_robots -> " + f"{torch.max(robot_indxs)}" + " VS" + f" {self.num_robots}\n" + \
                     "robot_indxs.device -> " + f"{robot_indxs.device.type}" + " VS" + " expected -> " + f"{self._torch_device.type}" + "\n"
                 Journal.log(self.__class__.__name__,
                     "_validate_selectors",
