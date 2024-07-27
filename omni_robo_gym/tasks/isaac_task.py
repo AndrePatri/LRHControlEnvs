@@ -239,17 +239,21 @@ class IsaacTask(BaseTask):
         self._world_physics_context = None
 
         self.omni_contact_sensors = {}
+        for robot_name in self.robot_names:
+            self.omni_contact_sensors[robot_name]=None
         self.contact_prims = contact_prims
-        for robot_name in contact_prims:
-            self.omni_contact_sensors[robot_name] = OmniContactSensors(
-                                name = robot_name, 
-                                n_envs = self.num_envs, 
-                                contact_prims = contact_prims, 
-                                contact_offsets = contact_offsets, 
-                                sensor_radii = sensor_radii,
-                                device = self.torch_device, 
-                                dtype = self.torch_dtype,
-                                enable_debug=self._debug_enabled)
+        if self.contact_prims is not None:
+            for robot_name in contact_prims:
+                if not (self.contact_prims[robot_name] is None):
+                    self.omni_contact_sensors[robot_name] = OmniContactSensors(
+                                        name = robot_name, 
+                                        n_envs = self.num_envs, 
+                                        contact_prims = contact_prims, 
+                                        contact_offsets = contact_offsets, 
+                                        sensor_radii = sensor_radii,
+                                        device = self.torch_device, 
+                                        dtype = self.torch_dtype,
+                                        enable_debug=self._debug_enabled)
 
         # trigger __init__ of parent class
         BaseTask.__init__(self,
@@ -1096,10 +1100,11 @@ class IsaacTask(BaseTask):
         for i in range(0, len(self.robot_names)):
             robot_name = self.robot_names[i]
             # creates base contact sensor (which is then cloned)
-            self.omni_contact_sensors[robot_name].create_contact_sensors(
-                                                    self._world, 
-                                                    self._env_ns
-                                                )
+            if self.omni_contact_sensors[robot_name] is not None:
+                self.omni_contact_sensors[robot_name].create_contact_sensors(
+                                                        self._world, 
+                                                        self._env_ns
+                                                    )
                             
     def _init_robots_state(self):
 
