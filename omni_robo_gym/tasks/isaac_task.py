@@ -57,8 +57,8 @@ class IsaacTask(BaseTask):
                 name: str,
                 integration_dt: float,
                 robot_names: List[str],
-                robot_pkg_names: List[str] = None, 
-                robot_pkg_prefix_paths: List[str] = None,
+                robot_urdf_paths: List[str],
+                robot_srdf_paths: List[str],
                 contact_prims: Dict[str, List] = None,
                 contact_offsets: Dict[str, Dict[str, np.ndarray]] = None,
                 sensor_radii: Dict[str, Dict[str, np.ndarray]] = None,
@@ -109,25 +109,11 @@ class IsaacTask(BaseTask):
         if self.torch_device == torch.device("cuda"):
             self.using_gpu = True
                 
-        self.robot_names = robot_names # these are (potentially) custom names to 
-        self.robot_pkg_names = robot_pkg_names # will be used to search for URDF and SRDF packages
-        self.robot_pkg_prefix_path = robot_pkg_prefix_paths
-
-        self.scene_setup_completed = False
-
-        if self.robot_pkg_names is None:
-            self.robot_pkg_names = self.robot_names # if not provided, robot_names are the same as robot_pkg_names
-        else:
-            # check dimension consistency
-            if len(robot_names) != len(robot_pkg_names):
-                exception = "The provided robot names list must match the length " + \
-                    "of the provided robot package names"
-                raise Exception(exception)
         if fix_base is None:
             self._fix_base = [False] * len(self.robot_names)
         else:
             # check dimension consistency
-            if len(fix_base) != len(robot_pkg_names):
+            if len(fix_base) != len(self._robot_names):
                 exception = "The provided fix_base list of boolean must match the length " + \
                     "of the provided robot package names"
                 raise Exception(exception)
@@ -137,7 +123,7 @@ class IsaacTask(BaseTask):
             self._self_collide = [False] * len(self.robot_names)
         else:
             # check dimension consistency
-            if len(self_collide) != len(robot_pkg_names):
+            if len(self_collide) != len(self._robot_names):
                 exception = "The provided self_collide list of boolean must match the length " + \
                     "of the provided robot package names"
                 raise Exception(exception)
@@ -147,7 +133,7 @@ class IsaacTask(BaseTask):
             self._merge_fixed = [False] * len(self.robot_names)
         else:
             # check dimension consistency
-            if len(merge_fixed) != len(robot_pkg_names):
+            if len(merge_fixed) != len(self._robot_names):
                 exception = "The provided merge_fixed list of boolean must match the length " + \
                     "of the provided robot package names"
                 raise Exception(exception)
@@ -693,7 +679,7 @@ class IsaacTask(BaseTask):
             self.reset_jnt_imp_control(robot_name=rob_names[i],
                                 env_indxs=env_indxs)
 
-    def randomize_yaw(self,
+    def _randomize_yaw(self,
             robot_name: str,
             env_indxs: torch.Tensor = None):
 
