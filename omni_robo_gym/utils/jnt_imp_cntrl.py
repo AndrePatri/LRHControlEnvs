@@ -27,19 +27,19 @@ from lrhc_control.utils.jnt_imp_control_base import JntImpCntrlBase
 class OmniJntImpCntrl(JntImpCntrlBase):
 
     def __init__(self, 
-                articulation: ArticulationView,
-                default_pgain = 300.0, 
-                default_vgain = 10.0, 
-                device: torch.device = torch.device("cpu"), 
-                filter_BW = 50.0, # [Hz]
-                filter_dt = None, # should correspond to the dt between samples
-                dtype = torch.double,
-                enable_safety = True,
-                urdf_path: str = None,
-                config_path: str = None,
-                enable_profiling: bool = False,
-                debug_checks: bool = False,
-                override_art_controller = False): # [s]
+        articulation: ArticulationView,
+        default_pgain: float = 300.0, 
+        default_vgain: float = 10.0, 
+        device: torch.device = torch.device("cpu"), 
+        filter_BW = 50.0, # [Hz]
+        filter_dt = None, # should correspond to the dt between samples
+        dtype = torch.double,
+        enable_safety = True,
+        urdf_path: str = None,
+        config_path: str = None,
+        enable_profiling: bool = False,
+        debug_checks: bool = False,
+        override_art_controller = False): # [s]
         
         self._articulation_view = articulation # used to actually apply control
         # signals to the robot

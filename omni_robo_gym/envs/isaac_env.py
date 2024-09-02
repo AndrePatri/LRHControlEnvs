@@ -16,6 +16,7 @@
 # along with OmniRoboGym.  If not, see <http://www.gnu.org/licenses/>.
 # 
 from isaacsim import SimulationApp
+
 import carb
 
 import os
@@ -40,6 +41,8 @@ class IsaacSimEnv(LRhcEnvBase):
         robot_names: List[str],
         robot_urdf_paths: List[str],
         robot_srdf_paths: List[str],
+        jnt_imp_config_paths: List[str],
+        n_contacts: List[int],
         cluster_dt: List[float],
         use_remote_stepping: List[bool],
         name: str = "IsaacSimEnv",
@@ -85,7 +88,7 @@ class IsaacSimEnv(LRhcEnvBase):
                                             experience=experience)
         # all imports depending on isaac sim kits have to be done after simulationapp
         # from omni.isaac.core.tasks.base_task import BaseTask
-
+        self._import_isaac_pkgs()
         info = "Using IsaacSim experience file @ " + experience
         Journal.log(self.__class__.__name__,
             "__init__",
@@ -101,7 +104,7 @@ class IsaacSimEnv(LRhcEnvBase):
                 info,
                 LogType.STAT,
                 throw_when_excep = True)
-            from omni.isaac.core.utils.extensions import enable_extension
+            
             self._simulation_app.set_setting("/app/livestream/enabled", True)
             self._simulation_app.set_setting("/app/window/drawMouse", True)
             self._simulation_app.set_setting("/app/livestream/proto", "ws")
@@ -148,6 +151,8 @@ class IsaacSimEnv(LRhcEnvBase):
             robot_names=robot_names,
             robot_urdf_paths=robot_urdf_paths,
             robot_srdf_paths=robot_srdf_paths,
+            jnt_imp_config_paths=jnt_imp_config_paths,
+            n_contacts=n_contacts,
             cluster_dt=cluster_dt,
             use_remote_stepping=use_remote_stepping,
             num_envs=num_envs,
@@ -161,6 +166,32 @@ class IsaacSimEnv(LRhcEnvBase):
             dtype=dtype)
         # BaseTask.__init__(self,name=self._name,offset=None)
 
+    def _import_isaac_pkgs(self):
+        # we use global, so that we can create the simulation app inside (and so
+        # access Isaac's kit) and also expose to all methods the imports
+        global World, omni_kit, get_context, UsdLux, Sdf, Gf, UsdPhysics, PhysicsSchemaTools
+        global enable_extension, set_camera_view, _urdf, move_prim, GridCloner, prim_utils
+        global get_current_stage, Scene, ArticulationView, rep
+        global OmniContactSensors, RlTerrains,OmniJntImpCntrl
+        from omni.isaac.core.world import World
+        from omni.usd import get_context
+        from pxr import UsdLux, Sdf, Gf, UsdPhysics, PhysicsSchemaTools
+        from omni.isaac.core.utils.extensions import enable_extension
+        from omni.isaac.core.utils.viewports import set_camera_view
+        import omni.kit as omni_kit
+        from omni.importer.urdf import _urdf
+        from omni.isaac.core.utils.prims import move_prim
+        from omni.isaac.cloner import GridCloner
+        import omni.isaac.core.utils.prims as prim_utils
+        from omni.isaac.core.utils.stage import get_current_stage
+        from omni.isaac.core.scenes.scene import Scene
+        from omni.isaac.core.articulations import ArticulationView
+        import omni.replicator.core as rep
+
+        from omni_robo_gym.utils.contact_sensor import OmniContactSensors
+        from omni_robo_gym.utils.jnt_imp_cntrl import OmniJntImpCntrl
+        from omni_robo_gym.utils.terrains import RlTerrains
+
     def _calc_robot_distrib(self):
 
         import math
@@ -172,16 +203,24 @@ class IsaacSimEnv(LRhcEnvBase):
             offset_angle = offset_baseangle * (i + 1) 
             robot_offset_wrt_center = torch.tensor([self._spawning_radius * math.cos(offset_angle), 
                                             self._spawning_radius * math.sin(offset_angle), 0], 
-                    device=self._dtype, 
-                    dtype=self.torch_dtype)
+                    device=self._device, 
+                    dtype=self._dtype)
             # list with n references to the original tensor
             tensor_list = [robot_offset_wrt_center] * self._num_envs
-            self._distr_offset[self.robot_names[i]] = torch.stack(tensor_list, dim=0)
+            self._distr_offset[self._robot_names[i]] = torch.stack(tensor_list, dim=0)
 
     def _init_world(self):
 
-        from omni.isaac.core.world import World
-
+        self._cloner = GridCloner(spacing=self._env_spacing)
+        self._cloner.define_base_env(self._env_ns)
+        prim_utils.define_prim(self._template_env_ns)
+        self._envs_prim_paths = self._cloner.generate_paths(self._env_ns + "/env", 
+                                                self._num_envs)
+        self._cloning_offset=self._custom_opts["cloning_offset"]
+        if self._cloning_offset is None:
+            self._cloning_offset = np.array([[0, 0, 0]] * self._num_envs)
+        self._replicate_physics=self._custom_opts["replicate_physics"] 
+        
         self.gpu_pipeline_enabled=False
         
         sim_params=self._custom_opts
@@ -229,7 +268,7 @@ class IsaacSimEnv(LRhcEnvBase):
                 info,
                 LogType.STAT,
                 throw_when_excep = True)
-        
+                
         self._world = World(
             stage_units_in_meters=1.0, 
             physics_dt=sim_params["physics_dt"], 
@@ -330,64 +369,33 @@ class IsaacSimEnv(LRhcEnvBase):
         self._scene = self._world.scene
         self._physics_context = self._world.get_physics_context()
 
-        from omni.usd import get_context
         self._stage = get_context().get_stage()
 
-        from pxr import UsdLux, Sdf, Gf, UsdPhysics, PhysicsSchemaTools
-        #add lighting
         distantLight = UsdLux.DistantLight.Define(self._stage, Sdf.Path("/World/DistantLight"))
         distantLight.CreateIntensityAttr(500)
 
-        self._world._current_tasks = dict() # resets registered tasks
-        self.configure_scene()
-        self._world.add_task(self)
-        
+        self._configure_scene()
+
         if "enable_viewport" in sim_params:
             self._render = sim_params["enable_viewport"]
 
-    # def set_up_scene(self, 
-    #                 scene: Scene):
-    #     BaseTask.set_up_scene(scene)
-
-    def configure_scene(self):
-
-        from omni.isaac.core.utils.viewports import set_camera_view
-        from omni.isaac.core.world import World
-        import omni.kit
-        from omni.importer.urdf import _urdf
-        from omni.isaac.core.utils.prims import move_prim
-        from omni.isaac.cloner import GridCloner
-        import omni.isaac.core.utils.prims as prim_utils
-        from omni.isaac.core.utils.stage import get_current_stage
-        from omni.isaac.core.scenes.scene import Scene
-        from omni_robo_gym.utils.contact_sensor import OmniContactSensors
-
-        self._cloner = GridCloner(spacing=self._env_spacing)
-        self._cloner.define_base_env(self._env_ns)
-        prim_utils.define_prim(self._template_env_ns)
-        self._envs_prim_paths = self._cloner.generate_paths(self._env_ns + "/env", 
-                                                self._num_envs)
-        self._cloning_offset=self._custom_opts["cloning_offset"]
-        if self._cloning_offset is None:
-            self._cloning_offset = np.array([[0, 0, 0]] * self._num_envs)
-        self._replicate_physics=self._custom_opts["replicate_physics"] 
+    def _configure_scene(self):
 
         for robot_name in self._robot_names:
             self.omni_contact_sensors[robot_name]=None
         self._contact_prims=self._custom_opts["contact_prims"]
-        if self._contact_prims is not None:
-            for robot_name in self._contact_prims:
-                if not (self._contact_prims[robot_name] is None):
-                    self.omni_contact_sensors[robot_name]=OmniContactSensors(
-                        name=robot_name, 
-                        n_envs=self._num_envs, 
-                        contact_prims=self._contact_prims, 
-                        contact_offsets=self._custom_opts["contact_offsets"], 
-                        sensor_radii=self._custom_opts["sensor_radii"], 
-                        device=self._device, 
-                        dtype=self.dtype,
-                        enable_debug=self._debug)
-                    
+        for robot_name in self._contact_prims:
+            if not (self._contact_prims[robot_name] is None):
+                self.omni_contact_sensors[robot_name]=OmniContactSensors(
+                    name=robot_name, 
+                    n_envs=self._num_envs, 
+                    contact_prims=self._contact_prims, 
+                    contact_offsets=self._custom_opts["contact_offsets"], 
+                    sensor_radii=self._custom_opts["sensor_radii"], 
+                    device=self._device, 
+                    dtype=self.dtype,
+                    enable_debug=self._debug)
+            
         # environment 
         self._fix_base = [False] * len(self._robot_names)
         self._self_collide = [False] * len(self._robot_names)
@@ -395,8 +403,8 @@ class IsaacSimEnv(LRhcEnvBase):
         
         for i in range(len(self._robot_names)):
             robot_name = self._robot_names[i]
-            urdf_path = self._robot_urdf_paths[i]
-            srdf_path = self._robot_srdf_paths[i]
+            urdf_path = self._robot_urdf_paths[robot_name]
+            srdf_path = self._robot_srdf_paths[robot_name]
             fix_base = self._fix_base[i]
             self_collide = self._self_collide[i]
             merge_fixed = self._merge_fixed[i]
@@ -408,7 +416,7 @@ class IsaacSimEnv(LRhcEnvBase):
                             self_collide=self_collide, 
                             merge_fixed=merge_fixed)
             Journal.log(self.__class__.__name__,
-                        "configure_scene",
+                        "_configure_scene",
                         "cloning environments...",
                         LogType.STAT,
                         throw_when_excep = True)
@@ -423,28 +431,27 @@ class IsaacSimEnv(LRhcEnvBase):
                         "finishing scene setup...",
                         LogType.STAT,
                         throw_when_excep = True)
-            for i in range(len(self.robot_names)):
-                robot_name = self.robot_names[i]
-                from omni.isaac.core.articulations import ArticulationView
+            for i in range(len(self._robot_names)):
+                robot_name = self._robot_names[i]
                 self._robots_art_views[robot_name] = ArticulationView(name = robot_name + "ArtView",
                                                             prim_paths_expr = self._env_ns + "/env_.*"+ "/" + robot_name + "/base_link", 
                                                             reset_xform_properties=False)
-                self._robots_articulations[robot_name] = self._world_scene.add(self._robots_art_views[robot_name])
+                self._robots_articulations[robot_name] = self._scene.add(self._robots_art_views[robot_name])
                 # self._robots_geom_prim_views[robot_name] = GeometryPrimView(name = robot_name + "GeomView",
                 #                                                 prim_paths_expr = self._env_ns + "/env*"+ "/" + robot_name,
                 #                                                 # prepare_contact_sensors = True
                 #                                             )
                 # self._robots_geom_prim_views[robot_name].apply_collision_apis() # to be able to apply contact sensors
             
-            if self.use_flat_ground:
-                self._world_scene.add_default_ground_plane(z_position=0, 
+            if self._use_flat_ground:
+                self._scene.add_default_ground_plane(z_position=0, 
                             name="terrain", 
                             prim_path= self._ground_plane_prim_path, 
                             static_friction=1.5, 
                             dynamic_friction=1.5, 
                             restitution=0.0)
             else:
-                from omni_robo_gym.utils.terrains import RlTerrains
+                
                 self.terrains = RlTerrains(get_current_stage())
                 self.terrains.get_obstacles_terrain(terrain_size=40, 
                                             num_obs=100, 
@@ -455,7 +462,7 @@ class IsaacSimEnv(LRhcEnvBase):
             
             # set default camera viewport position and target
             self._set_initial_camera_params()
-            self.apply_collision_filters(self._world_physics_context.prim_path, 
+            self.apply_collision_filters(self._physics_context.prim_path, 
                                 "/World/collisions")
             # init contact sensors
             self._init_contact_sensors() # IMPORTANT: this has to be called
@@ -464,8 +471,6 @@ class IsaacSimEnv(LRhcEnvBase):
             self._fill_robot_info_from_world() 
             # initializes robot state data
             self._init_robots_state()
-            self._move_jnts_to_homing()
-            self._move_root_to_defconfig()
             # update solver options 
             self._update_art_solver_options() 
             self._get_solver_info() # get again solver option before printing everything
@@ -501,7 +506,6 @@ class IsaacSimEnv(LRhcEnvBase):
         """Create a render product of the viewport for rendering."""
 
         try:
-            import omni.replicator.core as rep
 
             # create render product
             self._render_product = rep.create.render_product("/OmniverseKit_Persp", resolution)
@@ -520,17 +524,38 @@ class IsaacSimEnv(LRhcEnvBase):
     def _step_sim(self):
         pass
 
-    def _generate_jnt_imp_control(self):
-        from omni_robo_gym.utils.jnt_imp_cntrl import OmniJntImpCntrl
-        pass
+    def _generate_jnt_imp_control(self, robot_name: str):
+        
+        jnt_imp_controller = OmniJntImpCntrl(articulation=self._robots_articulations[robot_name],
+            device=self._device,
+            dtype=self._dtype,
+            enable_safety=True,
+            urdf_path=self._urdf_dump_paths[robot_name],
+            config_path=self._jnt_imp_config_paths[robot_name],
+            enable_profiling=False,
+            debug_checks=self._debug,
+            override_art_controller=self._override_low_lev_controller)
+        
+        return jnt_imp_controller
 
-    def _reset(self):
-        pass
+    def _reset(self,
+        env_indxs: torch.Tensor = None,
+        robot_names: List[str] =None,
+        randomize: bool = False):
+
+        self._reset_state(env_indxs=env_indxs,
+            robot_names=robot_names,
+            randomize=randomize)
+
+        for i in range(len(robot_names)):
+            self._reset_jnt_imp_control(robot_name=robot_names[i],
+                                env_indxs=env_indxs)
+
 
     def _reset_sim(self):
         self._world.reset(soft=False)
     
-    def reset_state(self,
+    def _reset_state(self,
             env_indxs: torch.Tensor = None,
             robot_names: List[str] =None,
             randomize: bool = False):
@@ -605,15 +630,17 @@ class IsaacSimEnv(LRhcEnvBase):
                                                         indices = None)
 
         # we update the robots state 
-        self.get_states(env_indxs=env_indxs, 
+        self._update_state_from_sim(env_indxs=env_indxs, 
                         robot_names=rob_names)
         
     def _import_urdf(self, 
         robot_name: str,
-        import_config, 
         fix_base = False, 
         self_collide = False, 
         merge_fixed = True):
+        
+        import_config=_urdf.ImportConfig()
+        # status,import_config=omni_kit.commands.execute("URDFCreateImportConfig")
 
         Journal.log(self.__class__.__name__,
             "update_root_offsets",
@@ -635,16 +662,19 @@ class IsaacSimEnv(LRhcEnvBase):
         # import_config.default_position_drive_damping = 52.35988
         # import_config.default_drive_type = _urdf.UrdfJointTargetType.JOINT_DRIVE_POSITION
         # import URDF
-        success, robot_prim_path_default = omni.kit.commands.execute(
+        print(self._urdf_dump_paths[robot_name])
+        success, robot_prim_path_default = omni_kit.commands.execute(
             "URDFParseAndImportFile",
-            urdf_path=self._urdf_paths[robot_name],
+            urdf_path=self._urdf_dump_paths[robot_name],
             import_config=import_config, 
+            # get_articulation_root=True,
         )
+
         robot_base_prim_path = self._template_env_ns + "/" + robot_name
         # moving default prim to base prim path for cloning
         move_prim(robot_prim_path_default, # from
                 robot_base_prim_path) # to
-
+        
         return success
 
     def apply_collision_filters(self, 
@@ -853,8 +883,8 @@ class IsaacSimEnv(LRhcEnvBase):
                         camera_prim_path="/OmniverseKit_Persp")
     
     def _init_contact_sensors(self):
-        for i in range(0, len(self.robot_names)):
-            robot_name = self.robot_names[i]
+        for i in range(0, len(self._robot_names)):
+            robot_name = self._robot_names[i]
             # creates base contact sensor (which is then cloned)
             if self.omni_contact_sensors[robot_name] is not None:
                 self.omni_contact_sensors[robot_name].create_contact_sensors(
@@ -864,7 +894,7 @@ class IsaacSimEnv(LRhcEnvBase):
 
         self._calc_robot_distrib()
 
-        for i in range(0, len(self.robot_names)):
+        for i in range(0, len(self._robot_names)):
 
             robot_name = self._robot_names[i]
             pose = self._robots_art_views[robot_name].get_world_poses( 
@@ -883,46 +913,52 @@ class IsaacSimEnv(LRhcEnvBase):
                                             clone = True) # joint positions 
             self._jnts_q_prev[robot_name] = self._robots_art_views[robot_name].get_joint_positions(
                                             clone = True) 
-            self._jnts_q_default[robot_name] = self.homers[robot_name].get_homing(clone=True)
+            self._jnts_q_default[robot_name] = torch.full((self._jnts_q[robot_name].shape[0], 
+                                                           self._jnts_q[robot_name].shape[1]), 
+                                                            0.0, 
+                                                            dtype=self._dtype, 
+                                                            device=self._device)
+            
+            self._homing
             # root v (measured, default)
             self._root_v[robot_name] = self._robots_art_views[robot_name].get_linear_velocities(
                                             clone = True) # root lin. velocity
             self._root_v_default[robot_name] = torch.full((self._root_v[robot_name].shape[0], self._root_v[robot_name].shape[1]), 
                                                         0.0, 
-                                                        dtype=self.torch_dtype, 
-                                                        device=self.torch_device)
+                                                        dtype=self._dtype, 
+                                                        device=self._device)
             # root omega (measured, default)
             self._root_omega[robot_name] = self._robots_art_views[robot_name].get_angular_velocities(
                                             clone = True) # root ang. velocity
             self._root_omega_default[robot_name] = torch.full((self._root_omega[robot_name].shape[0], self._root_omega[robot_name].shape[1]), 
                                                         0.0, 
-                                                        dtype=self.torch_dtype, 
-                                                        device=self.torch_device)
+                                                        dtype=self._dtype, 
+                                                        device=self._device)
             # joints v (measured, default)
             self._jnts_v[robot_name] = self._robots_art_views[robot_name].get_joint_velocities( 
                                             clone = True) # joint velocities
             self._jnts_v_default[robot_name] = torch.full((self._jnts_v[robot_name].shape[0], self._jnts_v[robot_name].shape[1]), 
                                                         0.0, 
-                                                        dtype=self.torch_dtype, 
-                                                        device=self.torch_device)
+                                                        dtype=self._dtype, 
+                                                        device=self._device)
             
             # joints efforts (measured, default)
             self._jnts_eff[robot_name] = torch.full((self._jnts_v[robot_name].shape[0], self._jnts_v[robot_name].shape[1]), 
                                                 0.0, 
-                                                dtype=self.torch_dtype, 
-                                                device=self.torch_device)
+                                                dtype=self._dtype, 
+                                                device=self._device)
             self._jnts_eff_default[robot_name] = torch.full((self._jnts_v[robot_name].shape[0], self._jnts_v[robot_name].shape[1]), 
                                                     0.0, 
-                                                    dtype=self.torch_dtype, 
-                                                    device=self.torch_device)
-            self._root_pos_offsets[robot_name] = torch.zeros((self.num_envs, 3), 
-                                device=self.torch_device) # reference position offses
+                                                    dtype=self._dtype, 
+                                                    device=self._device)
+            self._root_pos_offsets[robot_name] = torch.zeros((self._num_envs, 3), 
+                                device=self._device) # reference position offses
             
-            self._root_q_offsets[robot_name] = torch.zeros((self.num_envs, 4), 
-                                device=self.torch_device)
+            self._root_q_offsets[robot_name] = torch.zeros((self._num_envs, 4), 
+                                device=self._device)
             self._root_q_offsets[robot_name][:, 0] = 1.0 # init to valid identity quaternion
 
-            self.update_root_offsets(robot_name)
+            self._update_root_offsets(robot_name)
 
     def current_tstep(self):
         self._world.current_time_step_index
