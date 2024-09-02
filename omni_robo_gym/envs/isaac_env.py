@@ -112,8 +112,7 @@ class IsaacSimEnv(LRhcEnvBase):
             self._simulation_app.set_setting("/ngx/enabled", False)
             enable_extension("omni.kit.livestream.native")
             enable_extension("omni.services.streaming.manager")
-        
-        self._render = not sim_opts["headless"] or enable_livestream or enable_viewport
+        self._render = (not sim_opts["headless"]) or enable_livestream or enable_viewport
         self._record = False
         self._world = None
         self._physics_context = None
@@ -376,8 +375,8 @@ class IsaacSimEnv(LRhcEnvBase):
 
         self._configure_scene()
 
-        if "enable_viewport" in sim_params:
-            self._render = sim_params["enable_viewport"]
+        # if "enable_viewport" in sim_params:
+        #     self._render = sim_params["enable_viewport"]
 
     def _configure_scene(self):
 
@@ -478,7 +477,7 @@ class IsaacSimEnv(LRhcEnvBase):
 
             self.scene_setup_completed = True
 
-    def _render(self, mode="human"):
+    def _render_sim(self, mode="human"):
 
         if mode == "human":
             self._world.render()
@@ -521,8 +520,9 @@ class IsaacSimEnv(LRhcEnvBase):
         if self._simulation_app.is_running():
             self._simulation_app.close()
     
-    def _step_sim(self):
-        pass
+    def _step_sim(self): 
+        self._world.step(render=self._render)
+        return True
 
     def _generate_jnt_imp_control(self, robot_name: str):
         
@@ -662,7 +662,6 @@ class IsaacSimEnv(LRhcEnvBase):
         # import_config.default_position_drive_damping = 52.35988
         # import_config.default_drive_type = _urdf.UrdfJointTargetType.JOINT_DRIVE_POSITION
         # import URDF
-        print(self._urdf_dump_paths[robot_name])
         success, robot_prim_path_default = omni_kit.commands.execute(
             "URDFParseAndImportFile",
             urdf_path=self._urdf_dump_paths[robot_name],
@@ -842,7 +841,6 @@ class IsaacSimEnv(LRhcEnvBase):
             # the operation was successful
 
     def _print_envs_info(self):
-        print("ENV INFO:")
         for i in range(0, len(self._robot_names)):
             robot_name = self._robot_names[i]
             task_info = f"[{robot_name}]" + "\n" + \
