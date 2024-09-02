@@ -522,7 +522,6 @@ class IsaacSimEnv(LRhcEnvBase):
     
     def _step_sim(self): 
         self._world.step(render=self._render)
-        return True
 
     def _generate_jnt_imp_control(self, robot_name: str):
         
@@ -563,7 +562,7 @@ class IsaacSimEnv(LRhcEnvBase):
         rob_names = robot_names if (robot_names is not None) else self._robot_names
         if env_indxs is not None:
             if self._debug:
-                if self._using_gpu:
+                if self._use_gpu:
                     if not env_indxs.device.type == "cuda":
                             error = "Provided env_indxs should be on GPU!"
                             Journal.log(self.__class__.__name__,
