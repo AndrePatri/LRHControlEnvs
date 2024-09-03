@@ -52,19 +52,39 @@ class IsaacSimEnv(LRhcEnvBase):
         vlevel: VLevel = VLevel.V1,
         n_init_step: int = 0,
         timeout_ms: int = 60000,
-        sim_opts: Dict = None,
+        env_opts: Dict = None,
         use_gpu: bool = True,
         dtype: torch.dtype = torch.float32):
 
+        super().__init__(name=name,
+            robot_names=robot_names,
+            robot_urdf_paths=robot_urdf_paths,
+            robot_srdf_paths=robot_srdf_paths,
+            jnt_imp_config_paths=jnt_imp_config_paths,
+            n_contacts=n_contacts,
+            cluster_dt=cluster_dt,
+            use_remote_stepping=use_remote_stepping,
+            num_envs=num_envs,
+            debug=debug,
+            verbose=verbose,
+            vlevel=vlevel,
+            n_init_step=n_init_step,
+            timeout_ms=timeout_ms,
+            env_opts=env_opts,
+            use_gpu=use_gpu,
+            dtype=dtype)
+        # BaseTask.__init__(self,name=self._name,offset=None)
+
+    def _pre_setup(self):
         self._backend="torch"
-        enable_livestream = sim_opts["enable_livestream"]
-        enable_viewport = sim_opts["enable_viewport"]
+        enable_livestream = self._env_opts["enable_livestream"]
+        enable_viewport = self._env_opts["enable_viewport"]
         sim_device = 0
         base_isaac_exp = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnirobogym.kit'
         base_isaac_exp_headless = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnirobogym.headless.kit'
 
         experience=base_isaac_exp
-        if sim_opts["headless"]:
+        if self._env_opts["headless"]:
             info = f"Will run in headless mode."
             Journal.log(self.__class__.__name__,
                 "__init__",
@@ -83,7 +103,7 @@ class IsaacSimEnv(LRhcEnvBase):
             else:
                 experience=base_isaac_exp_headless
 
-        self._simulation_app = SimulationApp({"headless": sim_opts["headless"],
+        self._simulation_app = SimulationApp({"headless": self._env_opts["headless"],
                                             "physics_gpu": sim_device}, 
                                             experience=experience)
         # all imports depending on isaac sim kits have to be done after simulationapp
@@ -112,7 +132,7 @@ class IsaacSimEnv(LRhcEnvBase):
             self._simulation_app.set_setting("/ngx/enabled", False)
             enable_extension("omni.kit.livestream.native")
             enable_extension("omni.services.streaming.manager")
-        self._render = (not sim_opts["headless"]) or enable_livestream or enable_viewport
+        self._render = (not self._env_opts["headless"]) or enable_livestream or enable_viewport
         self._record = False
         self._world = None
         self._physics_context = None
@@ -125,11 +145,9 @@ class IsaacSimEnv(LRhcEnvBase):
         self._robots_geom_prim_views = {}
         self.omni_contact_sensors = {}
 
-        self._use_diff_velocities = False
-
-        self._solver_position_iteration_count=sim_opts["solver_position_iteration_count"]
-        self._solver_velocity_iteration_count=sim_opts["solver_velocity_iteration_count"]
-        self._solver_stabilization_thresh=sim_opts["stabilization_threshold"]
+        self._solver_position_iteration_count=self._env_opts["solver_position_iteration_count"]
+        self._solver_velocity_iteration_count=self._env_opts["solver_velocity_iteration_count"]
+        self._solver_stabilization_thresh=self._env_opts["stabilization_threshold"]
         self._solver_position_iteration_counts={}
         self._solver_velocity_iteration_counts={}
         self._solver_stabilization_threshs={}
@@ -138,33 +156,8 @@ class IsaacSimEnv(LRhcEnvBase):
         self._robot_n_dofs={}
         self._robot_dof_names={}
         self._distr_offset={} # decribed how robots within each env are distributed
-        self._use_flat_ground=sim_opts["use_flat_ground"]
-        self._spawning_radius=sim_opts["spawning_radius"] # [m] -> default distance between roots of robots in a single 
-
-        self._env_ns = "/World/envs"
-        self._env_spacing=sim_opts["env_spacing"]
-        self._template_env_ns = self._env_ns + "/env_0"
-        self._ground_plane_prim_path = "/World/terrain"
-
-        super().__init__(name=name,
-            robot_names=robot_names,
-            robot_urdf_paths=robot_urdf_paths,
-            robot_srdf_paths=robot_srdf_paths,
-            jnt_imp_config_paths=jnt_imp_config_paths,
-            n_contacts=n_contacts,
-            cluster_dt=cluster_dt,
-            use_remote_stepping=use_remote_stepping,
-            num_envs=num_envs,
-            debug=debug,
-            verbose=verbose,
-            vlevel=vlevel,
-            n_init_step=n_init_step,
-            timeout_ms=timeout_ms,
-            custom_opts=sim_opts,
-            use_gpu=use_gpu,
-            dtype=dtype)
-        # BaseTask.__init__(self,name=self._name,offset=None)
-
+        self._spawning_radius=self._env_opts["spawning_radius"] # [m] -> default distance between roots of robots in a single 
+        
     def _import_isaac_pkgs(self):
         # we use global, so that we can create the simulation app inside (and so
         # access Isaac's kit) and also expose to all methods the imports
@@ -191,6 +184,88 @@ class IsaacSimEnv(LRhcEnvBase):
         from omni_robo_gym.utils.jnt_imp_cntrl import OmniJntImpCntrl
         from omni_robo_gym.utils.terrains import RlTerrains
 
+    def _parse_env_opts(self):
+        isaac_opts={}
+        isaac_opts["envs_ns"]="/World/envs"
+        isaac_opts["template_env_ns"]=isaac_opts["envs_ns"] + "/env_0"
+        isaac_opts["ground_plane_prim_path"]="/World/terrain"
+        isaac_opts["physics_prim_path"]="/physicsScene"
+        isaac_opts["use_gpu"]=True
+        isaac_opts["use_gpu_pipeline"]=True
+        isaac_opts["device"]="cuda"
+        isaac_opts["sim_device"]=isaac_opts["device"]
+        isaac_opts["physics_dt"]=1e-3
+        isaac_opts["rendering_dt"]=isaac_opts["physics_dt"]
+        isaac_opts["substeps"]=1 # number of physics steps to be taken for for each rendering step
+        isaac_opts["gravity"] = np.array([0.0, 0.0, -9.81])
+        isaac_opts["enable_scene_query_support"]=False
+        isaac_opts["use_fabric"]=True# Enable/disable reading of physics buffers directly. Default is True.
+        isaac_opts["replicate_physics"]=True
+        # isaac_opts["worker_thread_count"]=4
+        isaac_opts["solver_type"]=1 # 0: PGS, 1:TGS, defaults to TGS. PGS faster but TGS more stable
+        isaac_opts["enable_stabilization"]=True
+        # isaac_opts["bounce_threshold_velocity"] = 0.2
+        # isaac_opts["friction_offset_threshold"] = 0.04
+        # isaac_opts["friction_correlation_distance"] = 0.025
+        # isaac_opts["enable_sleeping"] = True
+        # Per-actor settings ( can override in actor_options )
+        isaac_opts["solver_position_iteration_count"] = 4 # defaults to 4
+        isaac_opts["solver_velocity_iteration_count"] = 3 # defaults to 1
+        isaac_opts["sleep_threshold"] = 0.0 # Mass-normalized kinetic energy threshold below which an actor may go to sleep.
+        # Allowed range [0, max_float).
+        isaac_opts["stabilization_threshold"] = 1e-5
+        # Per-body settings ( can override in actor_options )
+        # isaac_opts["enable_gyroscopic_forces"] = True
+        # isaac_opts["density"] = 1000 # density to be used for bodies that do not specify mass or density
+        # isaac_opts["max_depenetration_velocity"] = 100.0
+        # isaac_opts["solver_velocity_iteration_count"] = 1
+        # GPU buffers settings
+        # isaac_opts["gpu_max_rigid_contact_count"] = 512 * 1024
+        # isaac_opts["gpu_max_rigid_patch_count"] = 80 * 1024
+        isaac_opts["gpu_found_lost_pairs_capacity"] = 4096
+        isaac_opts["gpu_found_lost_aggregate_pairs_capacity"] = 4096
+        # isaac_opts["gpu_total_aggregate_pairs_capacity"] = 1024
+        # isaac_opts["gpu_max_soft_body_contacts"] = 1024 * 1024
+        # isaac_opts["gpu_max_particle_contacts"] = 1024 * 1024
+        # isaac_opts["gpu_heap_capacity"] = 64 * 1024 * 1024
+        # isaac_opts["gpu_temp_buffer_capacity"] = 16 * 1024 * 1024
+        # isaac_opts["gpu_max_num_partitions"] = 8
+        isaac_opts["use_gpu_pipeline"]=True
+        isaac_opts["env_spacing"]=6
+        isaac_opts["spawning_height"]=0.8
+        isaac_opts["spawning_radius"]=1.0
+        isaac_opts["use_flat_ground"]=True
+        isaac_opts["contact_prims"] = {}
+        isaac_opts["sensor_radii"] = {}
+        isaac_opts["contact_offsets"] = {}
+        isaac_opts["contact_radius"]=0.1
+        for i in range(len(self._robot_names)):
+            robot_name=self._robot_names[i]
+            isaac_opts["contact_prims"][robot_name]=self._contacts(robot_name=robot_name)
+            isaac_opts["sensor_radii"][robot_name]={}
+            isaac_opts["contact_offsets"][robot_name]={}
+            if isaac_opts["contact_prims"][robot_name] is not None:
+                for contact in isaac_opts["contact_prims"][robot_name]:
+                    isaac_opts["sensor_radii"][robot_name][contact]=isaac_opts["contact_radius"]
+                    isaac_opts["contact_offsets"][robot_name][contact]=np.array([0.0, 0.0, 0.0])
+        isaac_opts["enable_livestream"] = False
+        isaac_opts["enable_viewport"] = False
+        isaac_opts["use_diff_vels"] = False
+
+        isaac_opts.update(self._env_opts) # update defaults with provided opts
+    
+        # modify things
+        isaac_opts["cloning_offset"] = np.array([[0.0, 0.0, isaac_opts["spawning_height"]]]*self._num_envs)
+        if not isaac_opts["use_gpu"]:
+            isaac_opts["use_gpu_pipeline"]=False
+            isaac_opts["device"]="cpu"
+        else:
+            if isaac_opts["device"]=="cpu":
+                isaac_opts["device"]="cuda"
+
+        # overwrite env opts in case some sim params were missing
+        self._env_opts=isaac_opts
+
     def _calc_robot_distrib(self):
 
         import math
@@ -210,86 +285,43 @@ class IsaacSimEnv(LRhcEnvBase):
 
     def _init_world(self):
 
-        self._cloner = GridCloner(spacing=self._env_spacing)
-        self._cloner.define_base_env(self._env_ns)
-        prim_utils.define_prim(self._template_env_ns)
-        self._envs_prim_paths = self._cloner.generate_paths(self._env_ns + "/env", 
+        self._cloner = GridCloner(spacing=self._env_opts["env_spacing"])
+        self._cloner.define_base_env(self._env_opts["envs_ns"])
+        prim_utils.define_prim(self._env_opts["template_env_ns"])
+        self._envs_prim_paths = self._cloner.generate_paths(self._env_opts["envs_ns"] + "/env", 
                                                 self._num_envs)
-        self._cloning_offset=self._custom_opts["cloning_offset"]
-        if self._cloning_offset is None:
-            self._cloning_offset = np.array([[0, 0, 0]] * self._num_envs)
-        self._replicate_physics=self._custom_opts["replicate_physics"] 
-        
-        self.gpu_pipeline_enabled=False
-        
-        sim_params=self._custom_opts
+                
         # parse device based on sim_param settings
-        if "sim_device" in sim_params:
-            device = sim_params["sim_device"]
-        else:
-            device = "cpu"
-            physics_device_id = carb.settings.get_settings().get_as_int("/physics/cudaDevice")
-            gpu_id = 0 if physics_device_id < 0 else physics_device_id
-            if "use_gpu_pipeline" in sim_params:
-                # GPU pipeline must use GPU simulation
-                if sim_params["use_gpu_pipeline"]:
-                    device = "cuda:" + str(gpu_id)
-            elif "use_gpu" in sim_params:
-                if sim_params["use_gpu"]:
-                    device = "cuda:" + str(gpu_id)
         
-        info = "Using device: " + str(device)
+        info = "Using sim device: " + str(self._env_opts["sim_device"])
         Journal.log(self.__class__.__name__,
             "__init__",
             info,
             LogType.STAT,
             throw_when_excep = True)
-
-        self.gpu_pipeline_enabled = sim_params["use_gpu_pipeline"]
-
-        # defaults for integration and rendering dt
-        if not("physics_dt" in sim_params):
-            sim_params["physics_dt"] = 1.0/1000.0
-            dt = sim_params["physics_dt"]
-            info = f"Using default integration_dt of {dt} s."
-            Journal.log(self.__class__.__name__,
-                "set_task",
-                info,
-                LogType.STAT,
-                throw_when_excep = True)
-                        
-        if not("rendering_dt" in sim_params):
-            sim_params["rendering_dt"] = sim_params["physics_dt"]
-            dt = sim_params["rendering_dt"]
-            info = f"Using default rendering_dt of {dt} s."
-            Journal.log(self.__class__.__name__,
-                "set_task",
-                info,
-                LogType.STAT,
-                throw_when_excep = True)
-                
+                         
         self._world = World(
             stage_units_in_meters=1.0, 
-            physics_dt=sim_params["physics_dt"], 
-            rendering_dt=sim_params["rendering_dt"], # dt between rendering steps. Note: rendering means rendering a frame of 
+            physics_dt=self._env_opts["physics_dt"], 
+            rendering_dt=self._env_opts["rendering_dt"], # dt between rendering steps. Note: rendering means rendering a frame of 
             # the current application and not only rendering a frame to the viewports/ cameras. 
             # So UI elements of Isaac Sim will be refereshed with this dt as well if running non-headless
             backend=self._backend,
-            device=str(device),
-            physics_prim_path="/physicsScene", 
+            device=str(self._env_opts["sim_device"]),
+            physics_prim_path=self._env_opts["physics_prim_path"], 
             set_defaults = False, # set to True to use the defaults settings [physics_dt = 1.0/ 60.0, 
             # stage units in meters = 0.01 (i.e in cms), rendering_dt = 1.0 / 60.0, gravity = -9.81 m / s 
             # ccd_enabled, stabilization_enabled, gpu dynamics turned off, 
             # broadcast type is MBP, solver type is TGS]
-            sim_params=sim_params
+            sim_params=self._env_opts
         )
 
-        big_info = "[World] Creating Isaac env " + self._name + "\n" + \
-            "use_gpu_pipeline: " + str(sim_params["use_gpu_pipeline"]) + "\n" + \
-            "device: " + str(device) + "\n" +\
+        big_info = "[World] Creating Isaac simulation " + self._name + "\n" + \
+            "use_gpu_pipeline: " + str(self._env_opts["use_gpu_pipeline"]) + "\n" + \
+            "device: " + str(self._env_opts["sim_device"]) + "\n" +\
             "backend: " + str(self._backend) + "\n" +\
-            "integration_dt: " + str(sim_params["physics_dt"]) + "\n" + \
-            "rendering_dt: " + str(sim_params["rendering_dt"]) + "\n" 
+            "integration_dt: " + str(self._env_opts["physics_dt"]) + "\n" + \
+            "rendering_dt: " + str(self._env_opts["rendering_dt"]) + "\n" 
         Journal.log(self.__class__.__name__,
             "set_task",
             big_info,
@@ -305,26 +337,26 @@ class IsaacSimEnv(LRhcEnvBase):
         self._physics_scene_prim = self._physics_context.get_current_physics_scene_prim()
         self._solver_type = self._physics_context.get_solver_type()
 
-        if "gpu_max_rigid_contact_count" in sim_params:
-                self._physics_context.set_gpu_max_rigid_contact_count(sim_params["gpu_max_rigid_contact_count"])
-        if "gpu_max_rigid_patch_count" in sim_params:
-                self._physics_context.set_gpu_max_rigid_patch_count(sim_params["gpu_max_rigid_patch_count"])
-        if "gpu_found_lost_pairs_capacity" in sim_params:
-                self._physics_context.set_gpu_found_lost_pairs_capacity(sim_params["gpu_found_lost_pairs_capacity"])
-        if "gpu_found_lost_aggregate_pairs_capacity" in sim_params:
-                self._physics_context.set_gpu_found_lost_aggregate_pairs_capacity(sim_params["gpu_found_lost_aggregate_pairs_capacity"])
-        if "gpu_total_aggregate_pairs_capacity" in sim_params:
-                self._physics_context.set_gpu_total_aggregate_pairs_capacity(sim_params["gpu_total_aggregate_pairs_capacity"])
-        if "gpu_max_soft_body_contacts" in sim_params:
-                self._physics_context.set_gpu_max_soft_body_contacts(sim_params["gpu_max_soft_body_contacts"])
-        if "gpu_max_particle_contacts" in sim_params:
-                self._physics_context.set_gpu_max_particle_contacts(sim_params["gpu_max_particle_contacts"])
-        if "gpu_heap_capacity" in sim_params:
-                self._physics_context.set_gpu_heap_capacity(sim_params["gpu_heap_capacity"])
-        if "gpu_temp_buffer_capacity" in sim_params:
-                self._physics_context.set_gpu_temp_buffer_capacity(sim_params["gpu_temp_buffer_capacity"])
-        if "gpu_max_num_partitions" in sim_params:
-                self._physics_context.set_gpu_max_num_partitions(sim_params["gpu_max_num_partitions"])
+        if "gpu_max_rigid_contact_count" in self._env_opts:
+                self._physics_context.set_gpu_max_rigid_contact_count(self._env_opts["gpu_max_rigid_contact_count"])
+        if "gpu_max_rigid_patch_count" in self._env_opts:
+                self._physics_context.set_gpu_max_rigid_patch_count(self._env_opts["gpu_max_rigid_patch_count"])
+        if "gpu_found_lost_pairs_capacity" in self._env_opts:
+                self._physics_context.set_gpu_found_lost_pairs_capacity(self._env_opts["gpu_found_lost_pairs_capacity"])
+        if "gpu_found_lost_aggregate_pairs_capacity" in self._env_opts:
+                self._physics_context.set_gpu_found_lost_aggregate_pairs_capacity(self._env_opts["gpu_found_lost_aggregate_pairs_capacity"])
+        if "gpu_total_aggregate_pairs_capacity" in self._env_opts:
+                self._physics_context.set_gpu_total_aggregate_pairs_capacity(self._env_opts["gpu_total_aggregate_pairs_capacity"])
+        if "gpu_max_soft_body_contacts" in self._env_opts:
+                self._physics_context.set_gpu_max_soft_body_contacts(self._env_opts["gpu_max_soft_body_contacts"])
+        if "gpu_max_particle_contacts" in self._env_opts:
+                self._physics_context.set_gpu_max_particle_contacts(self._env_opts["gpu_max_particle_contacts"])
+        if "gpu_heap_capacity" in self._env_opts:
+                self._physics_context.set_gpu_heap_capacity(self._env_opts["gpu_heap_capacity"])
+        if "gpu_temp_buffer_capacity" in self._env_opts:
+                self._physics_context.set_gpu_temp_buffer_capacity(self._env_opts["gpu_temp_buffer_capacity"])
+        if "gpu_max_num_partitions" in self._env_opts:
+                self._physics_context.set_gpu_max_num_partitions(self._env_opts["gpu_max_num_partitions"])
 
         # overwriting defaults
         # self._physics_context.set_gpu_max_rigid_contact_count(2 * self._physics_context.get_gpu_max_rigid_contact_count())
@@ -382,17 +414,18 @@ class IsaacSimEnv(LRhcEnvBase):
 
         for robot_name in self._robot_names:
             self.omni_contact_sensors[robot_name]=None
-        self._contact_prims=self._custom_opts["contact_prims"]
+        self._contact_prims=self._env_opts["contact_prims"]
         for robot_name in self._contact_prims:
-            if not (self._contact_prims[robot_name] is None):
+            contact_names=self._contact_prims[robot_name]
+            if not (contact_names is None):
                 self.omni_contact_sensors[robot_name]=OmniContactSensors(
                     name=robot_name, 
                     n_envs=self._num_envs, 
                     contact_prims=self._contact_prims, 
-                    contact_offsets=self._custom_opts["contact_offsets"], 
-                    sensor_radii=self._custom_opts["sensor_radii"], 
+                    contact_offsets=self._env_opts["contact_offsets"], 
+                    sensor_radii=self._env_opts["sensor_radii"], 
                     device=self._device, 
-                    dtype=self.dtype,
+                    dtype=self._dtype,
                     enable_debug=self._debug)
             
         # environment 
@@ -420,10 +453,10 @@ class IsaacSimEnv(LRhcEnvBase):
                         LogType.STAT,
                         throw_when_excep = True)
             self._cloner.clone(
-                source_prim_path=self._template_env_ns,
+                source_prim_path=self._env_opts["template_env_ns"],
                 prim_paths=self._envs_prim_paths,
-                replicate_physics=self._replicate_physics,
-                position_offsets = self._cloning_offset
+                replicate_physics=self._env_opts["replicate_physics"],
+                position_offsets=self._env_opts["cloning_offset"]
             ) # we can clone the environment in which all the robos are
             Journal.log(self.__class__.__name__,
                         "set_up_scene",
@@ -433,7 +466,7 @@ class IsaacSimEnv(LRhcEnvBase):
             for i in range(len(self._robot_names)):
                 robot_name = self._robot_names[i]
                 self._robots_art_views[robot_name] = ArticulationView(name = robot_name + "ArtView",
-                                                            prim_paths_expr = self._env_ns + "/env_.*"+ "/" + robot_name + "/base_link", 
+                                                            prim_paths_expr = self._env_opts["envs_ns"] + "/env_.*"+ "/" + robot_name + "/base_link", 
                                                             reset_xform_properties=False)
                 self._robots_articulations[robot_name] = self._scene.add(self._robots_art_views[robot_name])
                 # self._robots_geom_prim_views[robot_name] = GeometryPrimView(name = robot_name + "GeomView",
@@ -442,10 +475,10 @@ class IsaacSimEnv(LRhcEnvBase):
                 #                                             )
                 # self._robots_geom_prim_views[robot_name].apply_collision_apis() # to be able to apply contact sensors
             
-            if self._use_flat_ground:
+            if self._env_opts["use_flat_ground"]:
                 self._scene.add_default_ground_plane(z_position=0, 
                             name="terrain", 
-                            prim_path= self._ground_plane_prim_path, 
+                            prim_path=self._env_opts["ground_plane_prim_path"], 
                             static_friction=1.5, 
                             dynamic_friction=1.5, 
                             restitution=0.0)
@@ -457,7 +490,7 @@ class IsaacSimEnv(LRhcEnvBase):
                                             max_height=0.4, 
                                             min_size=0.5,
                                             max_size=5.0)
-            # delete_prim(self._ground_plane_prim_path + "/SphereLight") # we remove the default spherical light
+            # delete_prim(self._env_opts["ground_plane_prim_path"] + "/SphereLight") # we remove the default spherical light
             
             # set default camera viewport position and target
             self._set_initial_camera_params()
@@ -668,7 +701,7 @@ class IsaacSimEnv(LRhcEnvBase):
             # get_articulation_root=True,
         )
 
-        robot_base_prim_path = self._template_env_ns + "/" + robot_name
+        robot_base_prim_path = self._env_opts["template_env_ns"] + "/" + robot_name
         # moving default prim to base prim path for cloning
         move_prim(robot_prim_path_default, # from
                 robot_base_prim_path) # to
@@ -682,15 +715,15 @@ class IsaacSimEnv(LRhcEnvBase):
         self._cloner.filter_collisions(physicsscene_path = physicscene_path,
                                 collision_root_path = coll_root_path, 
                                 prim_paths=self._envs_prim_paths, 
-                                global_paths=[self._ground_plane_prim_path] # can collide with these prims
+                                global_paths=[self._env_opts["ground_plane_prim_path"]] # can collide with these prims
                                 )
 
     def _update_state_from_sim(self,
                 env_indxs: torch.Tensor = None,
                 robot_names: List[str] = None):
         
-        if self._use_diff_velocities:
-            self._get_robots_state(dt = self.integration_dt(),
+        if self._env_opts["use_diff_vels"]:
+            self._get_robots_state(dt = self.physics_dt(),
                             env_indxs = env_indxs,
                             robot_names = robot_names) # updates robot states
             # but velocities are obtained via num. differentiation
@@ -885,7 +918,8 @@ class IsaacSimEnv(LRhcEnvBase):
             # creates base contact sensor (which is then cloned)
             if self.omni_contact_sensors[robot_name] is not None:
                 self.omni_contact_sensors[robot_name].create_contact_sensors(
-                                                        self._world)
+                                                        self._world,
+                                                        envs_namespace=self._env_opts["envs_ns"])
     
     def _init_robots_state(self):
 
