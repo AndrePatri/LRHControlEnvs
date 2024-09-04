@@ -54,7 +54,8 @@ class IsaacSimEnv(LRhcEnvBase):
         timeout_ms: int = 60000,
         env_opts: Dict = None,
         use_gpu: bool = True,
-        dtype: torch.dtype = torch.float32):
+        dtype: torch.dtype = torch.float32,
+        override_low_lev_controller: bool = False):
 
         super().__init__(name=name,
             robot_names=robot_names,
@@ -72,7 +73,8 @@ class IsaacSimEnv(LRhcEnvBase):
             timeout_ms=timeout_ms,
             env_opts=env_opts,
             use_gpu=use_gpu,
-            dtype=dtype)
+            dtype=dtype,
+            override_low_lev_controller=override_low_lev_controller)
         # BaseTask.__init__(self,name=self._name,offset=None)
 
     def _pre_setup(self):
