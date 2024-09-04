@@ -432,7 +432,7 @@ class IsaacSimEnv(LRhcEnvBase):
             
         # environment 
         self._fix_base = [False] * len(self._robot_names)
-        self._self_collide = [False] * len(self._robot_names)
+        self._self_collide = [True] * len(self._robot_names)
         self._merge_fixed = [False] * len(self._robot_names)
         
         for i in range(len(self._robot_names)):
