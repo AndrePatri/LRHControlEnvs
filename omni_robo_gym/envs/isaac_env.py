@@ -33,7 +33,7 @@ from SharsorIPCpp.PySharsorIPC import Journal
 
 from omni_robo_gym.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
 
-from lrhc_control.envs.lrhc_sim_env_base import LRhcEnvBase
+from lrhc_control.envs.lrhc_remote_env_base import LRhcEnvBase
 
 class IsaacSimEnv(LRhcEnvBase):
 
