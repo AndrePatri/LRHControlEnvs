@@ -266,6 +266,7 @@ class IsaacSimEnv(LRhcEnvBase):
             else: # cpu pipeline
                 isaac_opts["device"]="cpu"
                 isaac_opts["sim_device"]="cpu"
+                isaac_opts["use_gpu"]=False
         # isaac_opts["sim_device"]=isaac_opts["device"]
 
         # overwrite env opts in case some sim params were missing
@@ -273,7 +274,8 @@ class IsaacSimEnv(LRhcEnvBase):
 
         # update device flag based on sim opts
         self._device=isaac_opts["device"]
-
+        self._use_gpu=isaac_opts["use_gpu"]
+        
     def _calc_robot_distrib(self):
 
         import math
