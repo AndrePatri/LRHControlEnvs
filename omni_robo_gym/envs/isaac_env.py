@@ -232,7 +232,6 @@ class IsaacSimEnv(LRhcEnvBase):
         # isaac_opts["gpu_heap_capacity"] = 64 * 1024 * 1024
         # isaac_opts["gpu_temp_buffer_capacity"] = 16 * 1024 * 1024
         # isaac_opts["gpu_max_num_partitions"] = 8
-        isaac_opts["use_gpu_pipeline"]=True
         isaac_opts["env_spacing"]=6
         isaac_opts["spawning_height"]=0.8
         isaac_opts["spawning_radius"]=1.0
@@ -258,12 +257,14 @@ class IsaacSimEnv(LRhcEnvBase):
     
         # modify things
         isaac_opts["cloning_offset"] = np.array([[0.0, 0.0, isaac_opts["spawning_height"]]]*self._num_envs)
-        if not isaac_opts["use_gpu"]:
+        if not isaac_opts["use_gpu"]: # don't use GPU at all
             isaac_opts["use_gpu_pipeline"]=False
             isaac_opts["device"]="cpu"
-        else:
-            if isaac_opts["device"]=="cpu":
+        else: # use GPU
+            if isaac_opts["use_gpu_pipeline"]:
                 isaac_opts["device"]="cuda"
+            else: # cpu pipeline
+                isaac_opts["device"]="cpu"
 
         # overwrite env opts in case some sim params were missing
         self._env_opts=isaac_opts
