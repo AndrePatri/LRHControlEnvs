@@ -81,7 +81,6 @@ class IsaacSimEnv(LRhcEnvBase):
         self._backend="torch"
         enable_livestream = self._env_opts["enable_livestream"]
         enable_viewport = self._env_opts["enable_viewport"]
-        sim_device = 0
         base_isaac_exp = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnirobogym.kit'
         base_isaac_exp_headless = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnirobogym.headless.kit'
 
@@ -105,8 +104,7 @@ class IsaacSimEnv(LRhcEnvBase):
             else:
                 experience=base_isaac_exp_headless
 
-        self._simulation_app = SimulationApp({"headless": self._env_opts["headless"],
-                                            "physics_gpu": sim_device}, 
+        self._simulation_app = SimulationApp({"headless": self._env_opts["headless"]}, 
                                             experience=experience)
         # all imports depending on isaac sim kits have to be done after simulationapp
         # from omni.isaac.core.tasks.base_task import BaseTask
@@ -195,7 +193,7 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["use_gpu"]=True
         isaac_opts["use_gpu_pipeline"]=True
         isaac_opts["device"]="cuda"
-        isaac_opts["sim_device"]=isaac_opts["device"]
+        isaac_opts["sim_device"]="cuda" if isaac_opts["use_gpu"] else "cpu"
         isaac_opts["physics_dt"]=1e-3
         isaac_opts["rendering_dt"]=isaac_opts["physics_dt"]
         isaac_opts["substeps"]=1 # number of physics steps to be taken for for each rendering step
@@ -260,14 +258,21 @@ class IsaacSimEnv(LRhcEnvBase):
         if not isaac_opts["use_gpu"]: # don't use GPU at all
             isaac_opts["use_gpu_pipeline"]=False
             isaac_opts["device"]="cpu"
+            isaac_opts["sim_device"]="cpu"
         else: # use GPU
             if isaac_opts["use_gpu_pipeline"]:
                 isaac_opts["device"]="cuda"
+                isaac_opts["sim_device"]="cuda"
             else: # cpu pipeline
                 isaac_opts["device"]="cpu"
+                isaac_opts["sim_device"]="cpu"
+        # isaac_opts["sim_device"]=isaac_opts["device"]
 
         # overwrite env opts in case some sim params were missing
         self._env_opts=isaac_opts
+
+        # update device flag based on sim opts
+        self._device=isaac_opts["device"]
 
     def _calc_robot_distrib(self):
 
@@ -304,7 +309,6 @@ class IsaacSimEnv(LRhcEnvBase):
             throw_when_excep = True)
                          
         self._world = World(
-            stage_units_in_meters=1.0, 
             physics_dt=self._env_opts["physics_dt"], 
             rendering_dt=self._env_opts["rendering_dt"], # dt between rendering steps. Note: rendering means rendering a frame of 
             # the current application and not only rendering a frame to the viewports/ cameras. 
@@ -335,7 +339,7 @@ class IsaacSimEnv(LRhcEnvBase):
         # settings of the simulation
         self._physics_context = self._world.get_physics_context() 
         self._physics_scene_path = self._physics_context.prim_path
-        self._physics_context.enable_gpu_dynamics(True)
+        # self._physics_context.enable_gpu_dynamics(True)
         self._physics_context.enable_stablization(True)
         self._physics_scene_prim = self._physics_context.get_current_physics_scene_prim()
         self._solver_type = self._physics_context.get_solver_type()
@@ -392,8 +396,13 @@ class IsaacSimEnv(LRhcEnvBase):
             "gpu_max_soft_body_contacts: " + str(self._gpu_max_soft_body_contacts) + "\n" + \
             "gpu_max_particle_contacts: " + str(self._gpu_max_particle_contacts) + "\n" + \
             "gpu_heap_capacity: " + str(self._gpu_heap_capacity) + "\n" + \
-            "gpu_temp_buffer_capacity: " + str(self._gpu_temp_buffer_capacity)
-        
+            "gpu_temp_buffer_capacity: " + str(self._gpu_temp_buffer_capacity) + "\n" + \
+            "use_gpu_sim: " + str(self._world.get_physics_context().use_gpu_sim) + "\n" + \
+            "use_gpu_pipeline: " + str(self._world.get_physics_context().use_gpu_pipeline) + "\n" + \
+            "use_fabric: " + str(self._world.get_physics_context().use_fabric) + "\n" + \
+            "world device: " + str(self._world.get_physics_context().device) + "\n" + \
+            "physics context device: " + str(self._world.get_physics_context().device) + "\n" 
+
         Journal.log(self.__class__.__name__,
             "set_task",
             big_info2,
@@ -937,6 +946,7 @@ class IsaacSimEnv(LRhcEnvBase):
             # root p (measured, previous, default)
             self._root_p[robot_name] = pose[0]  
             self._root_p_prev[robot_name] = torch.clone(pose[0])
+            # print(self._root_p_default[robot_name].device)
             self._root_p_default[robot_name] = torch.clone(pose[0]) + self._distr_offset[robot_name]
             # root q (measured, previous, default)
             self._root_q[robot_name] = pose[1] # root orientation
