@@ -252,7 +252,8 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["use_diff_vels"] = False
 
         isaac_opts.update(self._env_opts) # update defaults with provided opts
-    
+        isaac_opts["rendering_dt"]=isaac_opts["physics_dt"]
+        
         # modify things
         isaac_opts["cloning_offset"] = np.array([[0.0, 0.0, isaac_opts["spawning_height"]]]*self._num_envs)
         if not isaac_opts["use_gpu"]: # don't use GPU at all
@@ -268,7 +269,7 @@ class IsaacSimEnv(LRhcEnvBase):
                 isaac_opts["sim_device"]="cpu"
                 isaac_opts["use_gpu"]=False
         # isaac_opts["sim_device"]=isaac_opts["device"]
-
+        
         # overwrite env opts in case some sim params were missing
         self._env_opts=isaac_opts
 
