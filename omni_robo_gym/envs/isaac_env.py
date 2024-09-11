@@ -181,7 +181,7 @@ class IsaacSimEnv(LRhcEnvBase):
         import omni.replicator.core as rep
 
         from omni_robo_gym.utils.contact_sensor import OmniContactSensors
-        from OmniRoboGym.omni_robo_gym.utils.omni_jnt_imp_cntrl import OmniJntImpCntrl
+        from omni_robo_gym.utils.omni_jnt_imp_cntrl import OmniJntImpCntrl
         from omni_robo_gym.utils.terrains import RlTerrains
 
     def _parse_env_opts(self):
