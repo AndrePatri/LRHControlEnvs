@@ -22,11 +22,12 @@ from SharsorIPCpp.PySharsorIPC import LogType
 from SharsorIPCpp.PySharsorIPC import Journal
 
 from lrhc_control.utils.jnt_imp_control_base import JntImpCntrlBase
-        
+from adarl_ros.adapters.XbotMjAdapter import XbotMjAdapter
+
 class XMjJntImpCntrl(JntImpCntrlBase):
 
     def __init__(self, 
-        xbot_adapter: JointImpedanceAdapter,
+        xbot_adapter: XbotMjAdapter,
         default_pgain: float = 300.0, 
         default_vgain: float = 10.0, 
         device: torch.device = torch.device("cpu"), 
@@ -51,14 +52,32 @@ class XMjJntImpCntrl(JntImpCntrlBase):
                 throw_when_excep = True)
 
         n_envs=1
-        n_jnts = self._xbot_adapter.get_controlled_joints()
-        jnts_names = self._xbot_adapter.
+        controlled_joints=self._xbot_adapter.get_controlled_joints()
+        jnts_names=[]
+
+        i=0
+        self._model_name=controlled_joints[0][0]
+        for joint in controlled_joints:
+            if not self._model_name==joint[0]:
+                Journal.log(self.__class__.__name__,
+                    "__init__",
+                    f"Only one model name is currently supported. Read {joint[0]}, while prev. {self._model_name}",
+                    LogType.EXCEP,
+                    throw_when_excep = True)
+                
+            jnts_names.append(joint[1])
+            i+=1
+        n_jnts=len(controlled_joints)
+        
+        self._pvesd_adapter=torch.full((5, n_jnts), fill_value=0.0,
+            device=torch.device("cpu"), 
+            dtype=self._torch_dtype)
 
         super().__init__(num_envs=n_envs,
             n_jnts=n_jnts,
             jnt_names=jnts_names,
-            default_pgain=default_pgain,
-            default_vgain=default_vgain,
+            default_pgain=self._xmj_adapter.fallback_striffness(),
+            default_vgain=self._xmj_adapter.fallback_damping(),
             device=device,
             filter_BW=filter_BW,
             filter_dt=filter_dt,
@@ -71,18 +90,28 @@ class XMjJntImpCntrl(JntImpCntrlBase):
             override_low_lev_controller=override_art_controller
         )
 
+    def get_pvesd(self):
+        return self._pvesd_adapter
+    
     def _set_gains(self, 
         kps: torch.Tensor = None, 
         kds: torch.Tensor = None):
-        self._articulation_view.set_gains(kps=kps, 
-            kds=kds)
-    
-    def _set_pos_ref(self, pos: torch.Tensor):
-        self._articulation_view.set_joint_position_targets(pos)
 
+        kps_cpu=kps.cpu()
+        kds_cpu=kds.cpu()
+
+        self._pvesd_adapter[0, :]=kps_cpu
+        self._pvesd_adapter[1, :]=kds_cpu
+
+    def _set_pos_ref(self, pos: torch.Tensor):
+        pos_cpu=pos.cpu()
+        self._pvesd_adapter[2, :]=pos_cpu
+        
     def _set_vel_ref(self, vel: torch.Tensor):
-        self._articulation_view.set_joint_velocity_targets(vel)
+        vel_cpu=vel.cpu()
+        self._pvesd_adapter[3, :]=vel_cpu
 
     def _set_joint_efforts(self, effort: torch.Tensor):
-        self._articulation_view.set_joint_efforts(effort)
+        effort_cpu=effort.cpu()
+        self._pvesd_adapter[4, :]=effort_cpu
                     

@@ -15,12 +15,6 @@
 # You should have received a copy of the GNU General Public License
 # along with OmniRoboGym.  If not, see <http://www.gnu.org/licenses/>.
 # 
-from isaacsim import SimulationApp
-
-import carb
-
-import os
-import signal
 
 import torch
 import numpy as np
@@ -34,7 +28,9 @@ from SharsorIPCpp.PySharsorIPC import Journal
 from omni_robo_gym.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
 
 from lrhc_control.envs.lrhc_remote_env_base import LRhcEnvBase
-from OmniRoboGym.omni_robo_gym.utils.xmj_jnt_imp_cntrl import XMjJntImpCntrl
+from omni_robo_gym.utils.xmj_jnt_imp_cntrl import XMjJntImpCntrl
+from adarl_ros.adapters.XbotMjAdapter import XbotMjAdapter
+from xbot2_mujoco.PyXbotMjSimEnv import LoadingUtils
 
 class XMjSimEnv(LRhcEnvBase):
 
@@ -57,6 +53,13 @@ class XMjSimEnv(LRhcEnvBase):
         use_gpu: bool = True,
         dtype: torch.dtype = torch.float32,
         override_low_lev_controller: bool = False):
+
+        if not len(robot_names)==1:
+            Journal.log(self.__class__.__name__,
+            "__init__",
+            "Parallel simulation is not supported yet!",
+            LogType.EXCEP,
+            throw_when_excep = True)
 
         super().__init__(name=name,
             robot_names=robot_names,
@@ -93,6 +96,11 @@ class XMjSimEnv(LRhcEnvBase):
         xmj_opts["gravity"] = np.array([0.0, 0.0, -9.81])
         xmj_opts["use_diff_vels"] = False
 
+        xmj_opts["headless"] = False
+        xmj_opts["init_timesteps"] = 0
+        xmj_opts["xmj_files_dir"]=None
+        xmj_opts["xmj_timeout"]=1000
+
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         xmj_opts["rendering_dt"]=xmj_opts["physics_dt"]
         
@@ -114,7 +122,7 @@ class XMjSimEnv(LRhcEnvBase):
         self._use_gpu=xmj_opts["use_gpu"]
 
     def _init_world(self):
-        
+    
         info = "Using sim device: " + str(self._env_opts["sim_device"])
         Journal.log(self.__class__.__name__,
             "__init__",
@@ -156,6 +164,42 @@ class XMjSimEnv(LRhcEnvBase):
                                     urdf_path=urdf_path,
                                     srdf_path=srdf_path)
             
+            self._xmj_helper = LoadingUtils(self._name)
+            xmj_files_dir=self._env_opts["xmj_files_dir"]
+            self._xmj_helper.set_simopt_path(xmj_files_dir+"/sim_opt.xml")
+            self._xmj_helper.set_world_path(xmj_files_dir+"/world.xml")
+            self._xmj_helper.set_sites_path(xmj_files_dir+"/sites.xml")
+            
+            self._xmj_helper.set_urdf_path(self._urdf_dump_paths[self._robot_names[0]])
+            self._xmj_helper.set_srdf_path(self._srdf_dump_paths[self._robot_names[0]])
+            self._xmj_helper.set_xbot_config_path(self._jnt_imp_config_paths[self._robot_names[0]])
+            self._xmj_helper.generate()
+            self._mj_xml_path = self.loader.xml_path()
+
+            self._xmj_adapter=XbotMjAdapter(model_fpath=self._mj_xml_path,
+                model_name=self._robot_names[0],
+                xbot2_config_path=self._jnt_imp_config_paths[self._robot_names[0]],
+                headless=self._env_opts["headless"],
+                init_steps=self._env_opts["init_timesteps"],
+                timeout_ms=self._env_opts["xmj_timeout"],
+                forced_ros_master_uri= None,
+                maxObsDelay=float("+inf"),
+                blocking_observation=False,
+                is_floating_base=True,
+                reference_frame="world",
+                torch_device=self._device,
+                fallback_cmd_stiffness=200.0,
+                fallback_cmd_damping=100.0,
+                allow_fallback=True,
+                enable_filters=True)
+            self._xmj_adapter.startup()
+            to_monitor=[]
+            jnt_names_sim=self._robot_jnt_names()
+            for jnt in range(len(jnt_names_sim)):
+                to_monitor.append((self._robot_names[i],jnt_names_sim[jnt]))
+            self._xmj_adapter.set_monitored_joints(to_monitor)
+            self._xmj_adapter.set_impedance_controlled_joints(to_monitor)
+
             Journal.log(self.__class__.__name__,
                         "set_up_scene",
                         "finishing sim pre-setup...",
@@ -165,12 +209,12 @@ class XMjSimEnv(LRhcEnvBase):
             self._reset_sim()
             self._fill_robot_info_from_world() 
             # initializes robot state data
-            # self._init_robots_state()
+            self._init_robots_state()
             # update solver options 
             self._print_envs_info() # debug print
 
             self.scene_setup_completed = True
-
+        
     def _render_sim(self, mode="human"):
         pass
 
@@ -180,9 +224,13 @@ class XMjSimEnv(LRhcEnvBase):
     def _step_sim(self): 
         pass
 
+    def _pre_step(self): 
+        super()._pre_step()
+        self._xmj_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
+
     def _generate_jnt_imp_control(self, robot_name: str):
         
-        jnt_imp_controller = XMjJntImpCntrl(xbot_adapter=,
+        jnt_imp_controller = XMjJntImpCntrl(xbot_adapter=self._xmj_adapter,
             device=self._device,
             dtype=self._dtype,
             enable_safety=True,
@@ -207,9 +255,8 @@ class XMjSimEnv(LRhcEnvBase):
             self._reset_jnt_imp_control(robot_name=robot_names[i],
                                 env_indxs=env_indxs)
 
-
     def _reset_sim(self):
-        self._world.reset(soft=False)
+        self._xmj_adapter.resetWorld()
     
     def _reset_state(self,
             env_indxs: torch.Tensor = None,
@@ -217,130 +264,17 @@ class XMjSimEnv(LRhcEnvBase):
             randomize: bool = False):
 
         rob_names = robot_names if (robot_names is not None) else self._robot_names
-        if env_indxs is not None:
-            if self._debug:
-                if self._use_gpu:
-                    if not env_indxs.device.type == "cuda":
-                            error = "Provided env_indxs should be on GPU!"
-                            Journal.log(self.__class__.__name__,
-                            "_step_jnt_imp_control",
-                            error,
-                            LogType.EXCEP,
-                            True)
-                else:
-                    if not env_indxs.device.type == "cpu":
-                        error = "Provided env_indxs should be on CPU!"
-                        Journal.log(self.__class__.__name__,
-                            "_step_jnt_imp_control",
-                            error,
-                            LogType.EXCEP,
-                            True)
-            for i in range(len(rob_names)):
-                robot_name = rob_names[i]
-                if randomize:
-                    self._randomize_yaw(robot_name=robot_name,env_indxs=env_indxs)
 
-                # root q
-                self._robots_art_views[robot_name].set_world_poses(positions = self._root_p_default[robot_name][env_indxs, :],
-                                                    orientations=self._root_q_default[robot_name][env_indxs, :],
-                                                    indices = env_indxs)
-                # jnts q
-                self._robots_art_views[robot_name].set_joint_positions(positions = self._jnts_q_default[robot_name][env_indxs, :],
-                                                        indices = env_indxs)
-                # root v and omega
-                self._robots_art_views[robot_name].set_joint_velocities(velocities = self._jnts_v_default[robot_name][env_indxs, :],
-                                                        indices = env_indxs)
-                # jnts v
-                concatenated_vel = torch.cat((self._root_v_default[robot_name][env_indxs, :], 
-                                                self._root_omega_default[robot_name][env_indxs, :]), dim=1)
-                self._robots_art_views[robot_name].set_velocities(velocities = concatenated_vel,
-                                                        indices = env_indxs)
-                # jnts eff
-                self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][env_indxs, :],
-                                                        indices = env_indxs)
-        else:
+        for i in range(len(rob_names)):
+            robot_name = rob_names[i]
 
-            for i in range(len(rob_names)):
-                robot_name = rob_names[i]
-
-                if randomize:
-                    self.randomize_yaw(robot_name=robot_name,env_indxs=None)
-
-                # root q
-                self._robots_art_views[robot_name].set_world_poses(positions = self._root_p_default[robot_name][:, :],
-                                                    orientations=self._root_q_default[robot_name][:, :],
-                                                    indices = None)
-                # jnts q
-                self._robots_art_views[robot_name].set_joint_positions(positions = self._jnts_q_default[robot_name][:, :],
-                                                        indices = None)
-                # root v and omega
-                self._robots_art_views[robot_name].set_joint_velocities(velocities = self._jnts_v_default[robot_name][:, :],
-                                                        indices = None)
-                # jnts v
-                concatenated_vel = torch.cat((self._root_v_default[robot_name][:, :], 
-                                                self._root_omega_default[robot_name][:, :]), dim=1)
-                self._robots_art_views[robot_name].set_velocities(velocities = concatenated_vel,
-                                                        indices = None)
-                # jnts eff
-                self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][:, :],
-                                                        indices = None)
+            if randomize:
+                self.randomize_yaw(robot_name=robot_name,env_indxs=None)
+            self._move_root_to_defconfig()
 
         # we update the robots state 
         self._update_state_from_sim(env_indxs=env_indxs, 
                         robot_names=rob_names)
-        
-    def _import_urdf(self, 
-        robot_name: str,
-        fix_base = False, 
-        self_collide = False, 
-        merge_fixed = True):
-        
-        import_config=_urdf.ImportConfig()
-        # status,import_config=omni_kit.commands.execute("URDFCreateImportConfig")
-
-        Journal.log(self.__class__.__name__,
-            "update_root_offsets",
-            "importing robot URDF",
-            LogType.STAT,
-            throw_when_excep = True)
-        _urdf.acquire_urdf_interface()  
-        # we overwrite some settings which are bound to be fixed
-        import_config.merge_fixed_joints = merge_fixed # makes sim more stable
-        # in case of fixed joints with light objects
-        import_config.import_inertia_tensor = True
-        # import_config.convex_decomp = False
-        import_config.fix_base = fix_base
-        import_config.self_collision = self_collide
-        # import_config.distance_scale = 1
-        # import_config.make_default_prim = True
-        # import_config.create_physics_scene = True
-        # import_config.default_drive_strength = 1047.19751
-        # import_config.default_position_drive_damping = 52.35988
-        # import_config.default_drive_type = _urdf.UrdfJointTargetType.JOINT_DRIVE_POSITION
-        # import URDF
-        success, robot_prim_path_default = omni_kit.commands.execute(
-            "URDFParseAndImportFile",
-            urdf_path=self._urdf_dump_paths[robot_name],
-            import_config=import_config, 
-            # get_articulation_root=True,
-        )
-
-        robot_base_prim_path = self._env_opts["template_env_ns"] + "/" + robot_name
-        # moving default prim to base prim path for cloning
-        move_prim(robot_prim_path_default, # from
-                robot_base_prim_path) # to
-        
-        return success
-
-    def apply_collision_filters(self, 
-                                physicscene_path: str, 
-                                coll_root_path: str):
-
-        self._cloner.filter_collisions(physicsscene_path = physicscene_path,
-                                collision_root_path = coll_root_path, 
-                                prim_paths=self._envs_prim_paths, 
-                                global_paths=[self._env_opts["ground_plane_prim_path"]] # can collide with these prims
-                                )
 
     def _update_state_from_sim(self,
                 env_indxs: torch.Tensor = None,
@@ -363,170 +297,71 @@ class XMjSimEnv(LRhcEnvBase):
         reset: bool = False):
          
         rob_names = robot_names if (robot_names is not None) else self._robot_names
-        if env_indxs is not None:
-            for i in range(0, len(rob_names)):
-                robot_name = rob_names[i]
-                pose = self._robots_art_views[robot_name].get_world_poses( 
-                                                clone = True,
-                                                indices=env_indxs) # tuple: (pos, quat)
-                
-                self._root_p[robot_name][env_indxs, :] = pose[0] 
-                self._root_q[robot_name][env_indxs, :] = pose[1] # root orientation
-                self._jnts_q[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_joint_positions(
-                                                clone = True,
-                                                indices=env_indxs) # joint positions 
-                if dt is None:
-                    # we get velocities from the simulation. This is not good since 
-                    # these can actually represent artifacts which do not have physical meaning.
-                    # It's better to obtain them by differentiation to avoid issues with controllers, etc...
-                    self._root_v[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_linear_velocities(
-                                                clone = True,
-                                                indices=env_indxs) # root lin. velocity               
-                    self._root_omega[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_angular_velocities(
-                                                clone = True,
-                                                indices=env_indxs) # root ang. velocity
-                    self._jnts_v[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_joint_velocities( 
-                                                clone = True,
-                                                indices=env_indxs) # joint velocities
-                else:
-                    # differentiate numerically
-                    if not reset:                    
-                        self._root_v[robot_name][env_indxs, :] = (self._root_p[robot_name][env_indxs, :] - \
-                                                        self._root_p_prev[robot_name][env_indxs, :]) / dt 
-                        self._root_omega[robot_name][env_indxs, :] = quat_to_omega(self._root_q[robot_name][env_indxs, :], 
-                                                                    self._root_q_prev[robot_name][env_indxs, :], 
-                                                                    dt)
-                        self._jnts_v[robot_name][env_indxs, :] = (self._jnts_q[robot_name][env_indxs, :] - \
-                                                        self._jnts_q_prev[robot_name][env_indxs, :]) / dt
-                    else:
-                        # to avoid issues when differentiating numerically
-                        self._root_v[robot_name][env_indxs, :].zero_()
-                        self._root_omega[robot_name][env_indxs, :].zero_()
-                        self._jnts_v[robot_name][env_indxs, :].zero_()
-                    # update "previous" data for numerical differentiation
-                    self._root_p_prev[robot_name][env_indxs, :] = self._root_p[robot_name][env_indxs, :] 
-                    self._root_q_prev[robot_name][env_indxs, :] = self._root_q[robot_name][env_indxs, :]
-                    self._jnts_q_prev[robot_name][env_indxs, :] = self._jnts_q[robot_name][env_indxs, :]
+        
+        for i in range(0, len(rob_names)):
+            robot_name = rob_names[i]
+            
+            self._root_p[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().p)
+            self._root_q[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().q)
+            self._jnts_q[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_q)
+            if dt is None:
+                # we get velocities from the simulation. This is not good since 
+                # these can actually represent artifacts which do not have physical meaning.
+                # It's better to obtain them by differentiation to avoid issues with controllers, etc...
+                self._root_v[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().twist[0:3])             
+                self._root_omega[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().twist[3:6])  
+                self._jnts_v[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_v)
 
-                self._jnts_eff[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_measured_joint_efforts( 
-                                                clone = True,
-                                                joint_indices=None,
-                                                indices=env_indxs) # measured joint efforts (computed by joint force solver)
-        else:
-            # updating data for all environments
-            for i in range(0, len(rob_names)):
-                robot_name = rob_names[i]
-                pose = self._robots_art_views[robot_name].get_world_poses( 
-                                                clone = True) # tuple: (pos, quat)
-                self._root_p[robot_name][:, :] = pose[0]  
-                self._root_q[robot_name][:, :] = pose[1] # root orientation
-                self._jnts_q[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_positions(
-                                                clone = True) # joint positions 
-                if dt is None:
-                    # we get velocities from the simulation. This is not good since 
-                    # these can actually represent artifacts which do not have physical meaning.
-                    # It's better to obtain them by differentiation to avoid issues with controllers, etc...
-                    self._root_v[robot_name][:, :] = self._robots_art_views[robot_name].get_linear_velocities(
-                                                clone = True) # root lin. velocity 
-                    self._root_omega[robot_name][:, :] = self._robots_art_views[robot_name].get_angular_velocities(
-                                                    clone = True) # root ang. velocity
-                    self._jnts_v[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_velocities( 
-                                                    clone = True) # joint velocities
-                else: 
-                    # differentiate numerically
-                    if not reset:        
-                        self._root_v[robot_name][:, :] = (self._root_p[robot_name][:, :] - \
-                                                        self._root_p_prev[robot_name][:, :]) / dt 
-                        self._root_omega[robot_name][:, :] = quat_to_omega(self._root_q[robot_name][:, :], 
-                                                                    self._root_q_prev[robot_name][:, :], 
-                                                                    dt)
-                        self._jnts_v[robot_name][:, :] = (self._jnts_q[robot_name][:, :] - \
-                                                        self._jnts_q_prev[robot_name][:, :]) / dt
-                        # self._jnts_v[robot_name][:, :].zero_()
-                    else:
-                        # to avoid issues when differentiating numerically
-                        self._root_v[robot_name][:, :].zero_()
-                        self._root_omega[robot_name][:, :].zero_()
-                        self._jnts_v[robot_name][:, :].zero_()
-                    # update "previous" data for numerical differentiation
-                    self._root_p_prev[robot_name][:, :] = self._root_p[robot_name][:, :] 
-                    self._root_q_prev[robot_name][:, :] = self._root_q[robot_name][:, :]
-                    self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name][:, :]
-                
-                self._jnts_eff[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_measured_joint_efforts( 
-                                                clone = True) # measured joint efforts (computed by joint force solver)
+            else:
+                # differentiate numerically
+                if not reset:                    
+                    self._root_v[robot_name][:, :] = (self._root_p[robot_name] - \
+                                                    self._root_p_prev[robot_name]) / dt 
+                    self._root_omega[robot_name][:, :] = quat_to_omega(self._root_q[robot_name], 
+                                                                self._root_q_prev[robot_name], 
+                                                                dt)
+                    self._jnts_v[robot_name][:, :] = (self._jnts_q[robot_name] - \
+                                                    self._jnts_q_prev[robot_name]) / dt
+                else:
+                    # to avoid issues when differentiating numerically
+                    self._root_v[robot_name][:, :].zero_()
+                    self._root_omega[robot_name][:, :].zero_()
+                    self._jnts_v[robot_name][:, :].zero_()
+                # update "previous" data for numerical differentiation
+                self._root_p_prev[robot_name][:, :] = self._root_p[robot_name]
+                self._root_q_prev[robot_name][:, :] = self._root_q[robot_name]
+                self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name]
+
+            self._jnts_eff[robot_name][env_indxs, :] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_eff)
     
     def _move_jnts_to_homing(self):
         for i in range(0, len(self._robot_names)):
             robot_name = self._robot_names[i]
-            self._robots_art_views[robot_name].set_joints_default_state(positions=self._homing, 
-                velocities = torch.zeros((self._homing.shape[0], self._homing.shape[1]), \
-                                    dtype=self._dtype, device=self._device), 
-                efforts = torch.zeros((self._homing.shape[0], self._homing.shape[1]), \
-                                    dtype=self._dtype, device=self._device))
+            self._xmj_adapter.xmj_env().move_to_homing_now()
                 
     def _move_root_to_defconfig(self):
         for i in range(0, len(self._robot_names)):
             robot_name = self._robot_names[i]
-            self._robots_art_views[robot_name].set_default_state(positions=self._root_p_default[robot_name], 
-                orientations=self._root_q_default[robot_name])
+            self._xmj_adapter.xmj_env().set_pi(self._root_p_default[robot_name].numpy())
+            self._xmj_adapter.xmj_env().set_qi(self._root_q_default[robot_name].numpy())
+        self._xmj_adapter.step() # perform a sim step to update state
             
     def _get_solver_info(self):
-        for i in range(0, len(self._robot_names)):
-            robot_name = self._robot_names[i]
-            self._solver_position_iteration_counts[robot_name] = self._robots_art_views[robot_name].get_solver_position_iteration_counts()
-            self._solver_velocity_iteration_counts[robot_name] = self._robots_art_views[robot_name].get_solver_velocity_iteration_counts()
-            self._solver_stabilization_threshs[robot_name] = self._robots_art_views[robot_name].get_stabilization_thresholds()
-    
-    def _update_art_solver_options(self):
-        
-        # sets new solver iteration options for specifc articulations
-        self._get_solver_info() # gets current solver info for the articulations of the 
-        # environments, so that dictionaries are filled properly
-        
-        for i in range(0, len(self._robot_names)):
-            robot_name = self._robot_names[i]
-            # increase by a factor
-            self._solver_position_iteration_counts[robot_name] = torch.full((self._num_envs,), self._solver_position_iteration_count)
-            self._solver_velocity_iteration_counts[robot_name] = torch.full((self._num_envs,), self._solver_velocity_iteration_count)
-            self._solver_stabilization_threshs[robot_name] = torch.full((self._num_envs,), self._solver_stabilization_thresh)
-            self._robots_art_views[robot_name].set_solver_position_iteration_counts(self._solver_position_iteration_counts[robot_name])
-            self._robots_art_views[robot_name].set_solver_velocity_iteration_counts(self._solver_velocity_iteration_counts[robot_name])
-            self._robots_art_views[robot_name].set_stabilization_thresholds(self._solver_stabilization_threshs[robot_name])
-            self._get_solver_info() # gets again solver info for articulation, so that it's possible to debug if
-            # the operation was successful
+        raise NotImplementedError()
 
     def _print_envs_info(self):
-        for i in range(0, len(self._robot_names)):
-            robot_name = self._robot_names[i]
-            task_info = f"[{robot_name}]" + "\n"
-            Journal.log(self.__class__.__name__,
-                "_print_envs_info",
-                task_info,
-                LogType.STAT,
-                throw_when_excep = True)
+        raise NotImplementedError()
     
     def _fill_robot_info_from_world(self):
-        for i in range(0, len(self._robot_names)):
-            robot_name = self._robot_names[i]
-            self._robot_bodynames[robot_name] = self._robots_art_views[robot_name].body_names
-            self._robot_n_links[robot_name] = self._robots_art_views[robot_name].num_bodies
-            self._robot_n_dofs[robot_name] = self._robots_art_views[robot_name].num_dof
-            self._robot_dof_names[robot_name] = self._robots_art_views[robot_name].dof_names
+        raise NotImplementedError()
     
     def _set_initial_camera_params(self, 
                                 camera_position=[10, 10, 3], 
                                 camera_target=[0, 0, 0]):
-        pass
+        raise NotImplementedError()
     
     def _init_contact_sensors(self):
-        for i in range(0, len(self._robot_names)):
-            robot_name = self._robot_names[i]
-            # creates base contact sensor (which is then cloned)
-            if self.omni_contact_sensors[robot_name] is not None:
-                self.omni_contact_sensors[robot_name].create_contact_sensors(
-                                                        self._world,
-                                                        envs_namespace=self._env_opts["envs_ns"])
+        raise NotImplementedError()
     
     def _init_robots_state(self):
 
@@ -537,52 +372,36 @@ class XMjSimEnv(LRhcEnvBase):
             robot_name = self._robot_names[i]
         
             # root p (measured, previous, default)
-            self._root_p[robot_name] =
-            self._root_p_prev[robot_name] = 
+            self._root_p[robot_name] = torch.from_numpy(self._xmj_adapter.xmj_env().p.copy())
+            self._root_p_prev[robot_name] = self._root_p[robot_name].clone()
             # print(self._root_p_default[robot_name].device)
-            self._root_p_default[robot_name] =
+            self._root_p_default[robot_name] = self._root_p[robot_name].clone()
             # root q (measured, previous, default)
-            self._root_q[robot_name] =
-            self._root_q_prev[robot_name] = 
-            self._root_q_default[robot_name] = 
+            self._root_q[robot_name] = torch.from_numpy(self._xmj_adapter.xmj_env().q.copy())
+            self._root_q_prev[robot_name] = self._root_q[robot_name].clone()
+            self._root_q_default[robot_name] = self._root_q[robot_name].clone()
             # jnt q (measured, previous, default)
-            self._jnts_q[robot_name] =
-            self._jnts_q_prev[robot_name] =
-            self._jnts_q_default[robot_name] = torch.full((self._jnts_q[robot_name].shape[0], 
-                                                           self._jnts_q[robot_name].shape[1]), 
-                                                            0.0, 
-                                                            dtype=self._dtype, 
-                                                            device=self._device)
+            self._jnts_q[robot_name] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_q.copy())
+            self._jnts_q_prev[robot_name] = self._jnts_q[robot_name].clone()
+            self._jnts_q_default[robot_name] = self._jnts_q[robot_name].clone()
             
             # root v (measured, default)
-            self._root_v[robot_name] = 
+            self._root_v[robot_name] = torch.from_numpy(self._xmj_adapter.xmj_env().twist.copy()[0:3])
 
-            self._root_v_default[robot_name] = torch.full((self._root_v[robot_name].shape[0], self._root_v[robot_name].shape[1]), 
-                                                        0.0, 
-                                                        dtype=self._dtype, 
-                                                        device=self._device)
+            self._root_v_default[robot_name] = self._root_v[robot_name].clone()
+
             # root omega (measured, default)
-            self._root_omega[robot_name] = 
-            self._root_omega_default[robot_name] = torch.full((self._root_omega[robot_name].shape[0], self._root_omega[robot_name].shape[1]), 
-                                                        0.0, 
-                                                        dtype=self._dtype, 
-                                                        device=self._device)
+            self._root_omega[robot_name] = torch.from_numpy(self._xmj_adapter.xmj_env().twist.copy()[3:6])
+            self._root_omega_default[robot_name] = self._root_omega[robot_name].clone()
+
             # joints v (measured, default)
-            self._jnts_v[robot_name] = 
-            self._jnts_v_default[robot_name] = torch.full((self._jnts_v[robot_name].shape[0], self._jnts_v[robot_name].shape[1]), 
-                                                        0.0, 
-                                                        dtype=self._dtype, 
-                                                        device=self._device)
+            self._jnts_v[robot_name] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_v.copy())
+            self._jnts_v_default[robot_name] = self._jnts_v[robot_name].clone()
             
             # joints efforts (measured, default)
-            self._jnts_eff[robot_name] = torch.full((self._jnts_v[robot_name].shape[0], self._jnts_v[robot_name].shape[1]), 
-                                                0.0, 
-                                                dtype=self._dtype, 
-                                                device=self._device)
-            self._jnts_eff_default[robot_name] = torch.full((self._jnts_v[robot_name].shape[0], self._jnts_v[robot_name].shape[1]), 
-                                                    0.0, 
-                                                    dtype=self._dtype, 
-                                                    device=self._device)
+            self._jnts_eff[robot_name] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_eff.copy())
+            self._jnts_eff_default[robot_name] = self._jnts_eff[robot_name].clone()
+
             self._root_pos_offsets[robot_name] = torch.zeros((self._num_envs, 3), 
                                 device=self._device) # reference position offses
             
@@ -593,22 +412,22 @@ class XMjSimEnv(LRhcEnvBase):
             # self._update_root_offsets(robot_name)
 
     def current_tstep(self):
-        pass
+        return self._xmj_adapter.xmj_env().step_counter
     
     def current_time(self):
-        pass
+        return self._xmj_adapter.getEnvTimeFromReset()
     
     def physics_dt(self):
-        pass
+        return self._xmj_adapter.xmj_env().physics_dt
     
     def rendering_dt(self):
-        pass
+        return self._xmj_adapter.xmj_env().physics_dt
     
     def set_physics_dt(self, physics_dt:float):
-        pass
+        raise NotImplementedError()
     
     def set_rendering_dt(self, rendering_dt:float):
-        pass
+        raise NotImplementedError()
     
     def _robot_jnt_names(self, robot_name: str):
-        pass
+        return self._xmj_adapter.xmj_env().jnt_names()
