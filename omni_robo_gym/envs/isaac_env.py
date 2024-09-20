@@ -34,6 +34,7 @@ from SharsorIPCpp.PySharsorIPC import Journal
 from omni_robo_gym.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
 
 from lrhc_control.envs.lrhc_remote_env_base import LRhcEnvBase
+from control_cluster_bridge.utilities.math_utils_torch import world2base_frame,world2base_frame3D
 
 class IsaacSimEnv(LRhcEnvBase):
 
@@ -751,8 +752,10 @@ class IsaacSimEnv(LRhcEnvBase):
         env_indxs: torch.Tensor = None,
         robot_names: List[str] = None,
         dt: float = None, 
-        reset: bool = False):
-         
+        reset: bool = False,
+        base_loc: bool = True):
+        
+        # measurements from simulator are in world frame 
         rob_names = robot_names if (robot_names is not None) else self._robot_names
         if env_indxs is not None:
             for i in range(0, len(rob_names)):
@@ -846,7 +849,22 @@ class IsaacSimEnv(LRhcEnvBase):
                 
                 self._jnts_eff[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_measured_joint_efforts( 
                                                 clone = True) # measured joint efforts (computed by joint force solver)
-    
+
+        if base_loc:
+            # rotate robot twist in base local
+            self._root_omega_base_loc[robot_name]
+            twist_w=torch.cat((self._root_v[robot_name], 
+                self._root_omega[robot_name]), 
+                dim=1)
+            twist_base_loc=torch.cat((self._root_v_base_loc[robot_name], 
+                self._root_omega_base_loc[robot_name]), 
+                dim=1)
+            world2base_frame(t_w=twist_w,q_b=self._root_q[robot_name],t_out=twist_base_loc)
+            self._root_v_base_loc[robot_name]=twist_base_loc[:, 0:3]
+            self._root_omega_base_loc[robot_name]=twist_base_loc[:, 3:6]
+
+            world2base_frame3D(v_w=self._gravity_normalized[robot_name],q_b=self._root_q[robot_name],v_out=self._gravity_normalized_base_loc[robot_name])
+
     def _move_jnts_to_homing(self):
         for i in range(0, len(self._robot_names)):
             robot_name = self._robot_names[i]
@@ -968,14 +986,14 @@ class IsaacSimEnv(LRhcEnvBase):
             
             # root v (measured, default)
             self._root_v[robot_name] = self._robots_art_views[robot_name].get_linear_velocities(
-                                            clone = True) # root lin. velocity
-            self._root_v_default[robot_name] = torch.full((self._root_v[robot_name].shape[0], self._root_v[robot_name].shape[1]), 
-                                                        0.0, 
-                                                        dtype=self._dtype, 
-                                                        device=self._device)
+                                            clone = True) # root lin. velocityù
+            self._root_v_base_loc[robot_name] = torch.full_like(self._root_v[robot_name], fill_value=0.0)
+
+            self._root_v_default[robot_name] = torch.full_like(self._root_v[robot_name], fill_value=0.0)
             # root omega (measured, default)
             self._root_omega[robot_name] = self._robots_art_views[robot_name].get_angular_velocities(
                                             clone = True) # root ang. velocity
+            self._root_omega_base_loc[robot_name] = torch.full_like(self._root_omega[robot_name], fill_value=0.0)
             self._root_omega_default[robot_name] = torch.full((self._root_omega[robot_name].shape[0], self._root_omega[robot_name].shape[1]), 
                                                         0.0, 
                                                         dtype=self._dtype, 
