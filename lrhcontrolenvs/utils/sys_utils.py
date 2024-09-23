@@ -10,6 +10,6 @@ class PathsGetter:
                                     'cfg',
                                     'omni_kits')
         self.OMNIRGYM_HEADLESS_KIT = os.path.join(self.OMNI_APPKITS_ROOT, 
-                                    'omni.isaac.sim.python.omnirobogym.headless.kit')
+                                    'omni.isaac.sim.python.lrhcontrolenvs.headless.kit')
         self.OMNIRGYM_KIT = os.path.join(self.OMNI_APPKITS_ROOT, 
-                                    'omni.isaac.sim.python.omnirobogym.kit')
+                                    'omni.isaac.sim.python.lrhcontrolenvs.kit')

@@ -148,7 +148,7 @@ import carb
 
 import os
 
-experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.omnirobogym.headless.kit'
+experience = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.lrhcontrolenvs.headless.kit'
 
 sim_params = sim_parameters()
 

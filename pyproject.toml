@@ -3,8 +3,8 @@ requires = ["flit_core >=2,<4"]
 build-backend = "flit_core.buildapi"
 
 [project]
-name = "omni_robo_gym"
-version = "0.1.0"
+name = "lrhcontrolenvs"
+version = "0.2.0"
 description = ""
 authors = [{name = "AndrePatri", email = "andreapatrizi1b6e6@gmail.com"}]
 readme = "README.md"
