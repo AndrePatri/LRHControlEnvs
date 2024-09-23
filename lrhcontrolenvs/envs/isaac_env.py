@@ -31,7 +31,7 @@ from SharsorIPCpp.PySharsorIPC import VLevel
 from SharsorIPCpp.PySharsorIPC import LogType
 from SharsorIPCpp.PySharsorIPC import Journal
 
-from omni_robo_gym.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
+from lrhcontrolenvs.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
 
 from lrhc_control.envs.lrhc_remote_env_base import LRhcEnvBase
 from control_cluster_bridge.utilities.math_utils_torch import world2base_frame,world2base_frame3D
@@ -181,9 +181,9 @@ class IsaacSimEnv(LRhcEnvBase):
         from omni.isaac.core.articulations import ArticulationView
         import omni.replicator.core as rep
 
-        from omni_robo_gym.utils.contact_sensor import OmniContactSensors
-        from omni_robo_gym.utils.omni_jnt_imp_cntrl import OmniJntImpCntrl
-        from omni_robo_gym.utils.terrains import RlTerrains
+        from lrhcontrolenvs.utils.contact_sensor import OmniContactSensors
+        from lrhcontrolenvs.utils.omni_jnt_imp_cntrl import OmniJntImpCntrl
+        from lrhcontrolenvs.utils.terrains import RlTerrains
 
     def _parse_env_opts(self):
         isaac_opts={}

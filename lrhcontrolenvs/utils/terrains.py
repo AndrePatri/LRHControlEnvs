@@ -21,7 +21,7 @@ sys.path.append(SCRIPT_DIR)
 
 import numpy as np
 
-from omni_robo_gym.utils.terrain_utils import *
+from lrhcontrolenvs.utils.terrain_utils import *
 
 from pxr import Usd
 

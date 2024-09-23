@@ -25,10 +25,10 @@ from SharsorIPCpp.PySharsorIPC import VLevel
 from SharsorIPCpp.PySharsorIPC import LogType
 from SharsorIPCpp.PySharsorIPC import Journal
 
-from omni_robo_gym.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
+from lrhcontrolenvs.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
 
 from lrhc_control.envs.lrhc_remote_env_base import LRhcEnvBase
-from omni_robo_gym.utils.xmj_jnt_imp_cntrl import XMjJntImpCntrl
+from lrhcontrolenvs.utils.xmj_jnt_imp_cntrl import XMjJntImpCntrl
 from adarl_ros.adapters.XbotMjAdapter import XbotMjAdapter
 from xbot2_mujoco.PyXbotMjSimEnv import LoadingUtils
 
