@@ -194,6 +194,9 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["use_gpu"]=True
         isaac_opts["use_gpu_pipeline"]=True
         isaac_opts["device"]="cuda"
+        isaac_opts["is_fixed_base"]=False
+        isaac_opts["merge_fixed_jnts"]=True
+        isaac_opts["self_collide"]=False
         isaac_opts["sim_device"]="cuda" if isaac_opts["use_gpu"] else "cpu"
         isaac_opts["physics_dt"]=1e-3
         isaac_opts["rendering_dt"]=isaac_opts["physics_dt"]
@@ -231,7 +234,7 @@ class IsaacSimEnv(LRhcEnvBase):
         # isaac_opts["gpu_heap_capacity"] = 64 * 1024 * 1024
         # isaac_opts["gpu_temp_buffer_capacity"] = 16 * 1024 * 1024
         # isaac_opts["gpu_max_num_partitions"] = 8
-        isaac_opts["env_spacing"]=6
+        isaac_opts["env_spacing"]=10.0
         isaac_opts["spawning_height"]=0.8
         isaac_opts["spawning_radius"]=1.0
         isaac_opts["use_flat_ground"]=True
@@ -311,7 +314,7 @@ class IsaacSimEnv(LRhcEnvBase):
             info,
             LogType.STAT,
             throw_when_excep = True)
-                         
+        
         self._world = World(
             physics_dt=self._env_opts["physics_dt"], 
             rendering_dt=self._env_opts["rendering_dt"], # dt between rendering steps. Note: rendering means rendering a frame of 
@@ -445,10 +448,10 @@ class IsaacSimEnv(LRhcEnvBase):
                     enable_debug=self._debug)
             
         # environment 
-        self._fix_base = [False] * len(self._robot_names)
-        self._self_collide = [False] * len(self._robot_names)
-        self._merge_fixed = [True] * len(self._robot_names)
-        
+        self._fix_base = [self._env_opts["is_fixed_base"]] * len(self._robot_names)
+        self._self_collide = [self._env_opts["self_collide"]]  * len(self._robot_names)
+        self._merge_fixed = [self._env_opts["merge_fixed_jnts"]] * len(self._robot_names)
+            
         for i in range(len(self._robot_names)):
             robot_name = self._robot_names[i]
             urdf_path = self._robot_urdf_paths[robot_name]
