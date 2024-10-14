@@ -166,6 +166,10 @@ class IsaacSimEnv(LRhcEnvBase):
         global enable_extension, set_camera_view, _urdf, move_prim, GridCloner, prim_utils
         global get_current_stage, Scene, ArticulationView, rep
         global OmniContactSensors, RlTerrains,OmniJntImpCntrl
+        global PhysxSchema, UsdGeom
+
+        from pxr import PhysxSchema, UsdGeom
+
         from omni.isaac.core.world import World
         from omni.usd import get_context
         from pxr import UsdLux, Sdf, Gf, UsdPhysics, PhysicsSchemaTools
@@ -515,6 +519,7 @@ class IsaacSimEnv(LRhcEnvBase):
             self._set_initial_camera_params()
             self.apply_collision_filters(self._physics_context.prim_path, 
                                 "/World/collisions")
+            
             # init contact sensors
             self._init_contact_sensors() # IMPORTANT: this has to be called
             # after calling the clone() method and initializing articulation views!!! 
@@ -528,6 +533,48 @@ class IsaacSimEnv(LRhcEnvBase):
             self._print_envs_info() # debug print
 
             self.scene_setup_completed = True
+            
+    def _is_link(self, prim):
+        return prim.GetTypeName() == 'Xform' 
+
+    def _is_joint(self, prim):
+        return prim.GetTypeName() == 'PhysicsRevoluteJoint'
+    
+    def _create_collision_group(self, group_path, link_paths):
+        """
+        Create a collision group under the given group_path that contains the links.
+        Args:
+            group_path (str): Path to create the collision group.
+            link_paths (List[str]): List of link paths to include in this group.
+        """
+        collision_group = Sdf.PrimSpec(
+            self._stage.GetRootLayer().GetPrimAtPath(group_path),
+            group_path.split("/")[-1],
+            Sdf.SpecifierDef,
+            "PhysicsCollisionGroup"
+        )
+        # Add the links to the collision group
+        for link_path in link_paths:
+            includes_rel = Sdf.RelationshipSpec(collision_group, "collection:colliders:includes", False)
+            includes_rel.targetPathList.Append(link_path)
+
+    def _add_collision_filter(self, group_path, link1, link2):
+        """
+        Filters collision between two successive links.
+        
+        Args:
+            group_path (str): Path of the collision group.
+            link1 (str): Path of the first link.
+            link2 (str): Path of the second link.
+        """
+        # Create a relationship to filter collisions between the two links
+        filtered_groups = Sdf.RelationshipSpec(
+            self._stage.GetPrimAtPath(group_path),
+            "physics:filteredGroups",
+            False
+        )
+        filtered_groups.targetPathList.Append(link1)
+        filtered_groups.targetPathList.Append(link2)
 
     def _render_sim(self, mode="human"):
 
