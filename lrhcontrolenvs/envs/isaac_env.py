@@ -230,9 +230,9 @@ class IsaacSimEnv(LRhcEnvBase):
         # GPU buffers settings
         isaac_opts["gpu_max_rigid_contact_count"] = 512 * 1024
         isaac_opts["gpu_max_rigid_patch_count"] = 80 * 1024
-        isaac_opts["gpu_found_lost_pairs_capacity"] = 8192
-        isaac_opts["gpu_found_lost_aggregate_pairs_capacity"] = 8192
-        isaac_opts["gpu_total_aggregate_pairs_capacity"] = 8192
+        isaac_opts["gpu_found_lost_pairs_capacity"] = 51200
+        isaac_opts["gpu_found_lost_aggregate_pairs_capacity"] = 51200
+        isaac_opts["gpu_total_aggregate_pairs_capacity"] = 51200
         # isaac_opts["gpu_max_soft_body_contacts"] = 1024 * 1024
         # isaac_opts["gpu_max_particle_contacts"] = 1024 * 1024
         # isaac_opts["gpu_heap_capacity"] = 64 * 1024 * 1024
