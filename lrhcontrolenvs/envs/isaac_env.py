@@ -200,7 +200,7 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["device"]="cuda"
         isaac_opts["is_fixed_base"]=False
         isaac_opts["merge_fixed_jnts"]=True
-        isaac_opts["self_collide"]=False
+        isaac_opts["self_collide"]=True
         isaac_opts["sim_device"]="cuda" if isaac_opts["use_gpu"] else "cpu"
         isaac_opts["physics_dt"]=1e-3
         isaac_opts["rendering_dt"]=isaac_opts["physics_dt"]
