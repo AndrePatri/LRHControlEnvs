@@ -50,14 +50,20 @@ class XMjSimEnv(LRhcEnvBase):
         n_init_step: int = 0,
         timeout_ms: int = 60000,
         env_opts: Dict = None,
-        use_gpu: bool = True,
+        use_gpu: bool = False,
         dtype: torch.dtype = torch.float32,
         override_low_lev_controller: bool = False):
-
+        
         if not len(robot_names)==1:
             Journal.log(self.__class__.__name__,
             "__init__",
             "Parallel simulation is not supported yet!",
+            LogType.EXCEP,
+            throw_when_excep = True)
+        if use_gpu:
+            Journal.log(self.__class__.__name__,
+            "__init__",
+            "Only CPU simulation is supported!",
             LogType.EXCEP,
             throw_when_excep = True)
 
@@ -97,7 +103,6 @@ class XMjSimEnv(LRhcEnvBase):
         xmj_opts["use_diff_vels"] = False
 
         xmj_opts["headless"] = False
-        xmj_opts["init_timesteps"] = 0
         xmj_opts["xmj_files_dir"]=None
         xmj_opts["xmj_timeout"]=1000
 
@@ -166,6 +171,12 @@ class XMjSimEnv(LRhcEnvBase):
             
             self._xmj_helper = LoadingUtils(self._name)
             xmj_files_dir=self._env_opts["xmj_files_dir"]
+            if xmj_files_dir is None:
+                Journal.log(self.__class__.__name__,
+                    "_configure_scene",
+                    "xmj_files_dir is None. It should be a valid path to where sim_opt.xml, world.xml and sites.xml files are.",
+                    LogType.EXCEP,
+                    throw_when_excep = True)
             self._xmj_helper.set_simopt_path(xmj_files_dir+"/sim_opt.xml")
             self._xmj_helper.set_world_path(xmj_files_dir+"/world.xml")
             self._xmj_helper.set_sites_path(xmj_files_dir+"/sites.xml")
@@ -174,13 +185,14 @@ class XMjSimEnv(LRhcEnvBase):
             self._xmj_helper.set_srdf_path(self._srdf_dump_paths[self._robot_names[0]])
             self._xmj_helper.set_xbot_config_path(self._jnt_imp_config_paths[self._robot_names[0]])
             self._xmj_helper.generate()
-            self._mj_xml_path = self.loader.xml_path()
+            self._mj_xml_path = self._xmj_helper.xml_path()
 
             self._xmj_adapter=XbotMjAdapter(model_fpath=self._mj_xml_path,
                 model_name=self._robot_names[0],
                 xbot2_config_path=self._jnt_imp_config_paths[self._robot_names[0]],
+                stepLength_sec=self._env_opts["physics_dt"],
                 headless=self._env_opts["headless"],
-                init_steps=self._env_opts["init_timesteps"],
+                init_steps=self._n_init_steps,
                 timeout_ms=self._env_opts["xmj_timeout"],
                 forced_ros_master_uri= None,
                 maxObsDelay=float("+inf"),
@@ -193,6 +205,7 @@ class XMjSimEnv(LRhcEnvBase):
                 allow_fallback=True,
                 enable_filters=True)
             self._xmj_adapter.startup()
+            
             to_monitor=[]
             jnt_names_sim=self._robot_jnt_names()
             for jnt in range(len(jnt_names_sim)):
@@ -214,7 +227,14 @@ class XMjSimEnv(LRhcEnvBase):
             self._print_envs_info() # debug print
 
             self.scene_setup_completed = True
-        
+    
+    def _xrdf_cmds(self, robot_name:str):
+        cmds=super()._xrdf_cmds(robot_name=robot_name)
+        for i, s in enumerate(cmds):
+            if "floating_joint:=" in s: # mujoco needs a floating joint
+                cmds[i] = "floating_joint:=true" 
+        return cmds
+
     def _render_sim(self, mode="human"):
         pass
 
@@ -222,7 +242,7 @@ class XMjSimEnv(LRhcEnvBase):
         pass
     
     def _step_sim(self): 
-        pass
+        self.xmj_adapter.step()
 
     def _pre_step(self): 
         super()._pre_step()
@@ -344,8 +364,13 @@ class XMjSimEnv(LRhcEnvBase):
             robot_name = self._robot_names[i]
             self._xmj_adapter.xmj_env().set_pi(self._root_p_default[robot_name].numpy())
             self._xmj_adapter.xmj_env().set_qi(self._root_q_default[robot_name].numpy())
-        self._xmj_adapter.step() # perform a sim step to update state
-            
+        if not self._xmj_adapter.step()>0: # perform a sim step to update state
+            Journal.log(self.__class__.__name__,
+            "_move_root_to_defconfig",
+            "Failed to step simulation",
+            LogType.EXCEP,
+            throw_when_excep = True)
+
     def _get_solver_info(self):
         raise NotImplementedError()
 
