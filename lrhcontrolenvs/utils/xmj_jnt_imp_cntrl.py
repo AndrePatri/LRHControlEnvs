@@ -43,16 +43,8 @@ class XMjJntImpCntrl(JntImpCntrlBase):
         
         self._xbot_adapter = xbot_adapter # used to actually apply control
         # signals to the robot
-        if not self._articulation_view.initialized:
-            exception = f"the provided articulation_view is not initialized properly!"
-            Journal.log(self.__class__.__name__,
-                "__init__",
-                exception,
-                LogType.EXCEP,
-                throw_when_excep = True)
-
-        n_envs=1
-        controlled_joints=self._xbot_adapter.get_controlled_joints()
+        n_envs=1 # multiple envs not supported
+        controlled_joints=self._xbot_adapter.get_impedance_controlled_joints()
         jnts_names=[]
 
         i=0
@@ -69,15 +61,11 @@ class XMjJntImpCntrl(JntImpCntrlBase):
             i+=1
         n_jnts=len(controlled_joints)
         
-        self._pvesd_adapter=torch.full((5, n_jnts), fill_value=0.0,
-            device=torch.device("cpu"), 
-            dtype=self._torch_dtype)
-
         super().__init__(num_envs=n_envs,
             n_jnts=n_jnts,
             jnt_names=jnts_names,
-            default_pgain=self._xmj_adapter.fallback_striffness(),
-            default_vgain=self._xmj_adapter.fallback_damping(),
+            default_pgain=self._xbot_adapter.fallback_striffness(),
+            default_vgain=self._xbot_adapter.fallback_damping(),
             device=device,
             filter_BW=filter_BW,
             filter_dt=filter_dt,
@@ -87,8 +75,11 @@ class XMjJntImpCntrl(JntImpCntrlBase):
             config_path=config_path,
             enable_profiling=enable_profiling,
             debug_checks=debug_checks,
-            override_low_lev_controller=override_art_controller
-        )
+            override_low_lev_controller=override_art_controller)
+        
+        self._pvesd_adapter=torch.full((5, n_jnts), fill_value=0.0,
+            device=torch.device("cpu"), 
+            dtype=self._torch_dtype)
 
     def get_pvesd(self):
         return self._pvesd_adapter

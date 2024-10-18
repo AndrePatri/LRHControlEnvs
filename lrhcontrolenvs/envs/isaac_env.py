@@ -78,6 +78,9 @@ class IsaacSimEnv(LRhcEnvBase):
             override_low_lev_controller=override_low_lev_controller)
         # BaseTask.__init__(self,name=self._name,offset=None)
 
+    def _sim_is_running(self):
+        return self._simulation_app.is_running()
+
     def _pre_setup(self):
         self._backend="torch"
         enable_livestream = self._env_opts["enable_livestream"]
@@ -807,113 +810,114 @@ class IsaacSimEnv(LRhcEnvBase):
         
         # measurements from simulator are in world frame 
         rob_names = robot_names if (robot_names is not None) else self._robot_names
-        if env_indxs is not None:
-            for i in range(0, len(rob_names)):
-                robot_name = rob_names[i]
-                pose = self._robots_art_views[robot_name].get_world_poses( 
-                                                clone = True,
-                                                indices=env_indxs) # tuple: (pos, quat)
-                
-                self._root_p[robot_name][env_indxs, :] = pose[0] 
-                self._root_q[robot_name][env_indxs, :] = pose[1] # root orientation
-                self._jnts_q[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_joint_positions(
-                                                clone = True,
-                                                indices=env_indxs) # joint positions 
-                if dt is None:
-                    # we get velocities from the simulation. This is not good since 
-                    # these can actually represent artifacts which do not have physical meaning.
-                    # It's better to obtain them by differentiation to avoid issues with controllers, etc...
-                    self._root_v[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_linear_velocities(
-                                                clone = True,
-                                                indices=env_indxs) # root lin. velocity               
-                    self._root_omega[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_angular_velocities(
-                                                clone = True,
-                                                indices=env_indxs) # root ang. velocity
-                    self._jnts_v[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_joint_velocities( 
-                                                clone = True,
-                                                indices=env_indxs) # joint velocities
-                else:
-                    # differentiate numerically
-                    if not reset:                    
-                        self._root_v[robot_name][env_indxs, :] = (self._root_p[robot_name][env_indxs, :] - \
-                                                        self._root_p_prev[robot_name][env_indxs, :]) / dt 
-                        self._root_omega[robot_name][env_indxs, :] = quat_to_omega(self._root_q[robot_name][env_indxs, :], 
-                                                                    self._root_q_prev[robot_name][env_indxs, :], 
-                                                                    dt)
-                        self._jnts_v[robot_name][env_indxs, :] = (self._jnts_q[robot_name][env_indxs, :] - \
-                                                        self._jnts_q_prev[robot_name][env_indxs, :]) / dt
+
+        for i in range(0, len(rob_names)):
+            robot_name = rob_names[i]
+            if env_indxs is not None:
+            
+                    pose = self._robots_art_views[robot_name].get_world_poses( 
+                                                    clone = True,
+                                                    indices=env_indxs) # tuple: (pos, quat)
+                    
+                    self._root_p[robot_name][env_indxs, :] = pose[0] 
+                    self._root_q[robot_name][env_indxs, :] = pose[1] # root orientation
+                    self._jnts_q[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_joint_positions(
+                                                    clone = True,
+                                                    indices=env_indxs) # joint positions 
+                    if dt is None:
+                        # we get velocities from the simulation. This is not good since 
+                        # these can actually represent artifacts which do not have physical meaning.
+                        # It's better to obtain them by differentiation to avoid issues with controllers, etc...
+                        self._root_v[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_linear_velocities(
+                                                    clone = True,
+                                                    indices=env_indxs) # root lin. velocity               
+                        self._root_omega[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_angular_velocities(
+                                                    clone = True,
+                                                    indices=env_indxs) # root ang. velocity
+                        self._jnts_v[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_joint_velocities( 
+                                                    clone = True,
+                                                    indices=env_indxs) # joint velocities
                     else:
-                        # to avoid issues when differentiating numerically
-                        self._root_v[robot_name][env_indxs, :].zero_()
-                        self._root_omega[robot_name][env_indxs, :].zero_()
-                        self._jnts_v[robot_name][env_indxs, :].zero_()
-                    # update "previous" data for numerical differentiation
-                    self._root_p_prev[robot_name][env_indxs, :] = self._root_p[robot_name][env_indxs, :] 
-                    self._root_q_prev[robot_name][env_indxs, :] = self._root_q[robot_name][env_indxs, :]
-                    self._jnts_q_prev[robot_name][env_indxs, :] = self._jnts_q[robot_name][env_indxs, :]
+                        # differentiate numerically
+                        if not reset:                    
+                            self._root_v[robot_name][env_indxs, :] = (self._root_p[robot_name][env_indxs, :] - \
+                                                            self._root_p_prev[robot_name][env_indxs, :]) / dt 
+                            self._root_omega[robot_name][env_indxs, :] = quat_to_omega(self._root_q[robot_name][env_indxs, :], 
+                                                                        self._root_q_prev[robot_name][env_indxs, :], 
+                                                                        dt)
+                            self._jnts_v[robot_name][env_indxs, :] = (self._jnts_q[robot_name][env_indxs, :] - \
+                                                            self._jnts_q_prev[robot_name][env_indxs, :]) / dt
+                        else:
+                            # to avoid issues when differentiating numerically
+                            self._root_v[robot_name][env_indxs, :].zero_()
+                            self._root_omega[robot_name][env_indxs, :].zero_()
+                            self._jnts_v[robot_name][env_indxs, :].zero_()
+                        # update "previous" data for numerical differentiation
+                        self._root_p_prev[robot_name][env_indxs, :] = self._root_p[robot_name][env_indxs, :] 
+                        self._root_q_prev[robot_name][env_indxs, :] = self._root_q[robot_name][env_indxs, :]
+                        self._jnts_q_prev[robot_name][env_indxs, :] = self._jnts_q[robot_name][env_indxs, :]
 
-                self._jnts_eff[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_measured_joint_efforts( 
-                                                clone = True,
-                                                joint_indices=None,
-                                                indices=env_indxs) # measured joint efforts (computed by joint force solver)
-        else:
-            # updating data for all environments
-            for i in range(0, len(rob_names)):
-                robot_name = rob_names[i]
-                pose = self._robots_art_views[robot_name].get_world_poses( 
-                                                clone = True) # tuple: (pos, quat)
-                self._root_p[robot_name][:, :] = pose[0]  
-                self._root_q[robot_name][:, :] = pose[1] # root orientation
-                self._jnts_q[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_positions(
-                                                clone = True) # joint positions 
-                if dt is None:
-                    # we get velocities from the simulation. This is not good since 
-                    # these can actually represent artifacts which do not have physical meaning.
-                    # It's better to obtain them by differentiation to avoid issues with controllers, etc...
-                    self._root_v[robot_name][:, :] = self._robots_art_views[robot_name].get_linear_velocities(
-                                                clone = True) # root lin. velocity 
-                    self._root_omega[robot_name][:, :] = self._robots_art_views[robot_name].get_angular_velocities(
-                                                    clone = True) # root ang. velocity
-                    self._jnts_v[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_velocities( 
-                                                    clone = True) # joint velocities
-                else: 
-                    # differentiate numerically
-                    if not reset:        
-                        self._root_v[robot_name][:, :] = (self._root_p[robot_name][:, :] - \
-                                                        self._root_p_prev[robot_name][:, :]) / dt 
-                        self._root_omega[robot_name][:, :] = quat_to_omega(self._root_q[robot_name][:, :], 
-                                                                    self._root_q_prev[robot_name][:, :], 
-                                                                    dt)
-                        self._jnts_v[robot_name][:, :] = (self._jnts_q[robot_name][:, :] - \
-                                                        self._jnts_q_prev[robot_name][:, :]) / dt
-                        # self._jnts_v[robot_name][:, :].zero_()
-                    else:
-                        # to avoid issues when differentiating numerically
-                        self._root_v[robot_name][:, :].zero_()
-                        self._root_omega[robot_name][:, :].zero_()
-                        self._jnts_v[robot_name][:, :].zero_()
-                    # update "previous" data for numerical differentiation
-                    self._root_p_prev[robot_name][:, :] = self._root_p[robot_name][:, :] 
-                    self._root_q_prev[robot_name][:, :] = self._root_q[robot_name][:, :]
-                    self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name][:, :]
-                
-                self._jnts_eff[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_measured_joint_efforts( 
-                                                clone = True) # measured joint efforts (computed by joint force solver)
+                    self._jnts_eff[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_measured_joint_efforts( 
+                                                    clone = True,
+                                                    joint_indices=None,
+                                                    indices=env_indxs) # measured joint efforts (computed by joint force solver)
 
-        if base_loc:
-            # rotate robot twist in base local
-            self._root_omega_base_loc[robot_name]
-            twist_w=torch.cat((self._root_v[robot_name], 
-                self._root_omega[robot_name]), 
-                dim=1)
-            twist_base_loc=torch.cat((self._root_v_base_loc[robot_name], 
-                self._root_omega_base_loc[robot_name]), 
-                dim=1)
-            world2base_frame(t_w=twist_w,q_b=self._root_q[robot_name],t_out=twist_base_loc)
-            self._root_v_base_loc[robot_name]=twist_base_loc[:, 0:3]
-            self._root_omega_base_loc[robot_name]=twist_base_loc[:, 3:6]
+            else:
+                # updating data for all environments
+                    pose = self._robots_art_views[robot_name].get_world_poses( 
+                                                    clone = True) # tuple: (pos, quat)
+                    self._root_p[robot_name][:, :] = pose[0]  
+                    self._root_q[robot_name][:, :] = pose[1] # root orientation
+                    self._jnts_q[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_positions(
+                                                    clone = True) # joint positions 
+                    if dt is None:
+                        # we get velocities from the simulation. This is not good since 
+                        # these can actually represent artifacts which do not have physical meaning.
+                        # It's better to obtain them by differentiation to avoid issues with controllers, etc...
+                        self._root_v[robot_name][:, :] = self._robots_art_views[robot_name].get_linear_velocities(
+                                                    clone = True) # root lin. velocity 
+                        self._root_omega[robot_name][:, :] = self._robots_art_views[robot_name].get_angular_velocities(
+                                                        clone = True) # root ang. velocity
+                        self._jnts_v[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_velocities( 
+                                                        clone = True) # joint velocities
+                    else: 
+                        # differentiate numerically
+                        if not reset:        
+                            self._root_v[robot_name][:, :] = (self._root_p[robot_name][:, :] - \
+                                                            self._root_p_prev[robot_name][:, :]) / dt 
+                            self._root_omega[robot_name][:, :] = quat_to_omega(self._root_q[robot_name][:, :], 
+                                                                        self._root_q_prev[robot_name][:, :], 
+                                                                        dt)
+                            self._jnts_v[robot_name][:, :] = (self._jnts_q[robot_name][:, :] - \
+                                                            self._jnts_q_prev[robot_name][:, :]) / dt
+                            # self._jnts_v[robot_name][:, :].zero_()
+                        else:
+                            # to avoid issues when differentiating numerically
+                            self._root_v[robot_name][:, :].zero_()
+                            self._root_omega[robot_name][:, :].zero_()
+                            self._jnts_v[robot_name][:, :].zero_()
+                        # update "previous" data for numerical differentiation
+                        self._root_p_prev[robot_name][:, :] = self._root_p[robot_name][:, :] 
+                        self._root_q_prev[robot_name][:, :] = self._root_q[robot_name][:, :]
+                        self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name][:, :]
+                    
+                    self._jnts_eff[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_measured_joint_efforts( 
+                                                    clone = True) # measured joint efforts (computed by joint force solver)
+                    
+            if base_loc:
+                # rotate robot twist in base local
+                twist_w=torch.cat((self._root_v[robot_name], 
+                    self._root_omega[robot_name]), 
+                    dim=1)
+                twist_base_loc=torch.cat((self._root_v_base_loc[robot_name], 
+                    self._root_omega_base_loc[robot_name]), 
+                    dim=1)
+                world2base_frame(t_w=twist_w,q_b=self._root_q[robot_name],t_out=twist_base_loc)
+                self._root_v_base_loc[robot_name]=twist_base_loc[:, 0:3]
+                self._root_omega_base_loc[robot_name]=twist_base_loc[:, 3:6]
 
-            world2base_frame3D(v_w=self._gravity_normalized[robot_name],q_b=self._root_q[robot_name],v_out=self._gravity_normalized_base_loc[robot_name])
+                world2base_frame3D(v_w=self._gravity_normalized[robot_name],q_b=self._root_q[robot_name],
+                    v_out=self._gravity_normalized_base_loc[robot_name])
 
     def _move_jnts_to_homing(self):
         for i in range(0, len(self._robot_names)):
