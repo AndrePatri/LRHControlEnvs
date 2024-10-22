@@ -525,15 +525,20 @@ class IsaacSimEnv(LRhcEnvBase):
             
             # init contact sensors
             self._init_contact_sensors() # IMPORTANT: this has to be called
-            # after calling the clone() method and initializing articulation views!!! 
+            # after calling the clone() method and initializing articulation views!!!
+            for i in range(self._n_init_steps): # run some initialization steps
+                self._step_sim()
+
             self._reset_sim()
             self._fill_robot_info_from_world() 
             # initializes robot state data
-            self._init_robots_state()
+            
             # update solver options 
             self._update_art_solver_options() 
             self._get_solver_info() # get again solver option before printing everything
             self._print_envs_info() # debug print
+
+            self._init_robots_state()
 
             self.scene_setup_completed = True
             
@@ -772,12 +777,26 @@ class IsaacSimEnv(LRhcEnvBase):
         env_indxs: torch.Tensor = None):
         
         if self._env_opts["use_diff_vels"]:
-            self._get_robots_state(dt=self.physics_dt(),
+            self._get_robots_state(dt=self._cluster_dt[robot_name],
+                env_indxs=env_indxs,
+                robot_name=robot_name) # updates robot states
+            # but velocities are obtained via num. differentiation
+        else:
+            self._get_robots_state(env_indxs=env_indxs,
+                            robot_name=robot_name) # velocities directly from simulator (can 
+            # introduce relevant artifacts, making them unrealistic)
+    
+    def _read_jnts_state_from_robot(self,
+        robot_name: str,
+        env_indxs: torch.Tensor = None):
+        
+        if self._env_opts["use_diff_vels"]:
+            self._get_robots_jnt_state(dt=self.physics_dt(),
                             env_indxs=env_indxs,
                             robot_name=robot_name) # updates robot states
             # but velocities are obtained via num. differentiation
         else:
-            self._get_robots_state(env_indxs=env_indxs,
+            self._get_robots_jnt_state(env_indxs=env_indxs,
                             robot_name=robot_name) # velocities directly from simulator (can 
             # introduce relevant artifacts, making them unrealistic)
 
@@ -785,7 +804,6 @@ class IsaacSimEnv(LRhcEnvBase):
         robot_name: str,
         env_indxs: torch.Tensor = None,
         dt: float = None, 
-        reset: bool = False,
         base_loc: bool = True):
         
         # measurements from simulator are in world frame 
@@ -797,9 +815,6 @@ class IsaacSimEnv(LRhcEnvBase):
             
             self._root_p[robot_name][env_indxs, :] = pose[0] 
             self._root_q[robot_name][env_indxs, :] = pose[1] # root orientation
-            self._jnts_q[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_joint_positions(
-                                            clone = True,
-                                            indices=env_indxs) # joint positions 
             if dt is None:
                 # we get velocities from the simulation. This is not good since 
                 # these can actually represent artifacts which do not have physical meaning.
@@ -810,33 +825,17 @@ class IsaacSimEnv(LRhcEnvBase):
                 self._root_omega[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_angular_velocities(
                                             clone = True,
                                             indices=env_indxs) # root ang. velocity
-                self._jnts_v[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_joint_velocities( 
-                                            clone = True,
-                                            indices=env_indxs) # joint velocities
             else:
                 # differentiate numerically
-                if not reset:                    
-                    self._root_v[robot_name][env_indxs, :] = (self._root_p[robot_name][env_indxs, :] - \
-                                                    self._root_p_prev[robot_name][env_indxs, :]) / dt 
-                    self._root_omega[robot_name][env_indxs, :] = quat_to_omega(self._root_q[robot_name][env_indxs, :], 
-                                                                self._root_q_prev[robot_name][env_indxs, :], 
-                                                                dt)
-                    self._jnts_v[robot_name][env_indxs, :] = (self._jnts_q[robot_name][env_indxs, :] - \
-                                                    self._jnts_q_prev[robot_name][env_indxs, :]) / dt
-                else:
-                    # to avoid issues when differentiating numerically
-                    self._root_v[robot_name][env_indxs, :].zero_()
-                    self._root_omega[robot_name][env_indxs, :].zero_()
-                    self._jnts_v[robot_name][env_indxs, :].zero_()
+                self._root_v[robot_name][env_indxs, :] = (self._root_p[robot_name][env_indxs, :] - \
+                                                self._root_p_prev[robot_name][env_indxs, :]) / dt 
+                self._root_omega[robot_name][env_indxs, :] = quat_to_omega(self._root_q[robot_name][env_indxs, :], 
+                                                            self._root_q_prev[robot_name][env_indxs, :], 
+                                                            dt)
+        
                 # update "previous" data for numerical differentiation
                 self._root_p_prev[robot_name][env_indxs, :] = self._root_p[robot_name][env_indxs, :] 
                 self._root_q_prev[robot_name][env_indxs, :] = self._root_q[robot_name][env_indxs, :]
-                self._jnts_q_prev[robot_name][env_indxs, :] = self._jnts_q[robot_name][env_indxs, :]
-
-            self._jnts_eff[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_measured_joint_efforts( 
-                                            clone = True,
-                                            joint_indices=None,
-                                            indices=env_indxs) # measured joint efforts (computed by joint force solver)
 
         else:
             # updating data for all environments
@@ -844,8 +843,6 @@ class IsaacSimEnv(LRhcEnvBase):
                                             clone = True) # tuple: (pos, quat)
             self._root_p[robot_name][:, :] = pose[0]  
             self._root_q[robot_name][:, :] = pose[1] # root orientation
-            self._jnts_q[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_positions(
-                                            clone = True) # joint positions 
             if dt is None:
                 # we get velocities from the simulation. This is not good since 
                 # these can actually represent artifacts which do not have physical meaning.
@@ -854,32 +851,17 @@ class IsaacSimEnv(LRhcEnvBase):
                                             clone = True) # root lin. velocity 
                 self._root_omega[robot_name][:, :] = self._robots_art_views[robot_name].get_angular_velocities(
                                                 clone = True) # root ang. velocity
-                self._jnts_v[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_velocities( 
-                                                clone = True) # joint velocities
             else: 
                 # differentiate numerically
-                if not reset:        
-                    self._root_v[robot_name][:, :] = (self._root_p[robot_name][:, :] - \
-                                                    self._root_p_prev[robot_name][:, :]) / dt 
-                    self._root_omega[robot_name][:, :] = quat_to_omega(self._root_q[robot_name][:, :], 
-                                                                self._root_q_prev[robot_name][:, :], 
-                                                                dt)
-                    self._jnts_v[robot_name][:, :] = (self._jnts_q[robot_name][:, :] - \
-                                                    self._jnts_q_prev[robot_name][:, :]) / dt
-                    # self._jnts_v[robot_name][:, :].zero_()
-                else:
-                    # to avoid issues when differentiating numerically
-                    self._root_v[robot_name][:, :].zero_()
-                    self._root_omega[robot_name][:, :].zero_()
-                    self._jnts_v[robot_name][:, :].zero_()
+                self._root_v[robot_name][:, :] = (self._root_p[robot_name][:, :] - \
+                                                self._root_p_prev[robot_name][:, :]) / dt 
+                self._root_omega[robot_name][:, :] = quat_to_omega(self._root_q[robot_name][:, :], 
+                                                            self._root_q_prev[robot_name][:, :], 
+                                                            dt)
                 # update "previous" data for numerical differentiation
                 self._root_p_prev[robot_name][:, :] = self._root_p[robot_name][:, :] 
                 self._root_q_prev[robot_name][:, :] = self._root_q[robot_name][:, :]
-                self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name][:, :]
-            
-            self._jnts_eff[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_measured_joint_efforts( 
-                                            clone = True) # measured joint efforts (computed by joint force solver)
-                
+        
         if base_loc:
             # rotate robot twist in base local
             twist_w=torch.cat((self._root_v[robot_name], 
@@ -895,6 +877,48 @@ class IsaacSimEnv(LRhcEnvBase):
             world2base_frame3D(v_w=self._gravity_normalized[robot_name],q_b=self._root_q[robot_name],
                 v_out=self._gravity_normalized_base_loc[robot_name])
 
+    def _get_robots_jnt_state(self, 
+        robot_name: str,
+        env_indxs: torch.Tensor = None,
+        dt: float = None):
+        
+        # measurements from simulator are in world frame 
+        if env_indxs is not None:
+        
+            self._jnts_q[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_joint_positions(
+                                            clone = True,
+                                            indices=env_indxs) # joint positions 
+            if dt is None:
+                self._jnts_v[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_joint_velocities( 
+                                            clone = True,
+                                            indices=env_indxs) # joint velocities
+            else:
+                # differentiate numerically
+                self._jnts_v[robot_name][env_indxs, :] = (self._jnts_q[robot_name][env_indxs, :] - \
+                                                self._jnts_q_prev[robot_name][env_indxs, :]) / dt
+                # update "previous" data for numerical differentiation
+                self._jnts_q_prev[robot_name][env_indxs, :] = self._jnts_q[robot_name][env_indxs, :]
+
+            self._jnts_eff[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_measured_joint_efforts( 
+                                            clone = True,
+                                            joint_indices=None,
+                                            indices=env_indxs) # measured joint efforts (computed by joint force solver)
+
+        else:
+            self._jnts_q[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_positions(
+                                            clone = True) # joint positions 
+            if dt is None:
+                self._jnts_v[robot_name][:, :] = self._robots_art_views[robot_name].get_joint_velocities( 
+                                                clone = True) # joint velocities
+            else: 
+                self._jnts_v[robot_name][:, :] = (self._jnts_q[robot_name][:, :] - \
+                                                self._jnts_q_prev[robot_name][:, :]) / dt
+                
+                self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name][:, :]
+            
+            self._jnts_eff[robot_name][env_indxs, :] = self._robots_art_views[robot_name].get_measured_joint_efforts( 
+                                            clone = True) # measured joint efforts (computed by joint force solver)
+                
     def _set_jnts_homing(self, robot_name: str):
         self._robots_art_views[robot_name].set_joints_default_state(positions=self._homing, 
             velocities = torch.zeros((self._homing.shape[0], self._homing.shape[1]), \
