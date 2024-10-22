@@ -88,11 +88,12 @@ class XMjJntImpCntrl(JntImpCntrlBase):
         kps: torch.Tensor = None, 
         kds: torch.Tensor = None):
 
-        kps_cpu=kps.cpu()
-        kds_cpu=kds.cpu()
-
-        self._pvesd_adapter[0, :]=kps_cpu
-        self._pvesd_adapter[1, :]=kds_cpu
+        if kps is not None:
+            kps_cpu=kps.cpu()
+            self._pvesd_adapter[0, :]=kps_cpu
+        if kds is not None:
+            kds_cpu=kds.cpu()
+            self._pvesd_adapter[1, :]=kds_cpu
 
     def _set_pos_ref(self, pos: torch.Tensor):
         pos_cpu=pos.cpu()
