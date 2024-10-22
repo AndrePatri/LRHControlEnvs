@@ -76,6 +76,7 @@ class XMjSimEnv(LRhcEnvBase):
             LogType.EXCEP,
             throw_when_excep = True)
 
+        self._xmj_adapter_init_tsteps=n_init_step
         super().__init__(name=name,
             robot_names=robot_names,
             robot_urdf_paths=robot_urdf_paths,
@@ -88,7 +89,7 @@ class XMjSimEnv(LRhcEnvBase):
             debug=debug,
             verbose=verbose,
             vlevel=vlevel,
-            n_init_step=n_init_step,
+            n_init_step=0, # adapter will handle init steppingy
             timeout_ms=timeout_ms,
             env_opts=env_opts,
             use_gpu=use_gpu,
@@ -204,7 +205,7 @@ class XMjSimEnv(LRhcEnvBase):
                 xbot2_config_path=self._jnt_imp_config_paths[self._robot_names[0]],
                 stepLength_sec=self._env_opts["physics_dt"],
                 headless=self._env_opts["headless"],
-                init_steps=self._n_init_steps,
+                init_steps=self._xmj_adapter_init_tsteps,
                 timeout_ms=self._env_opts["xmj_timeout"],
                 forced_ros_master_uri= None,
                 maxObsDelay=float("+inf"),
