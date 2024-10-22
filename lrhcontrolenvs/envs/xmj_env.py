@@ -256,7 +256,7 @@ class XMjSimEnv(LRhcEnvBase):
     
     def _step_sim(self): 
 
-        # self._xmj_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
+        self._xmj_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
         time_elapsed=self._xmj_adapter.step()
         if not (abs(time_elapsed-self.physics_dt())<1e-6):
             Journal.log(self.__class__.__name__,
