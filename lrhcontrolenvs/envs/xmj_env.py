@@ -256,9 +256,9 @@ class XMjSimEnv(LRhcEnvBase):
     
     def _step_sim(self): 
 
-        self._xmj_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
+        # self._xmj_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
         time_elapsed=self._xmj_adapter.step()
-        if not time_elapsed>0:
+        if not (abs(time_elapsed-self.physics_dt())<1e-6):
             Journal.log(self.__class__.__name__,
                 "_step_sim",
                 f"simulation stepped of {time_elapsed} [s], while expected one should be {self.physics_dt()} [s]",
@@ -279,124 +279,99 @@ class XMjSimEnv(LRhcEnvBase):
         
         return jnt_imp_controller
 
-    def _reset(self,
-        env_indxs: torch.Tensor = None,
-        robot_names: List[str] =None,
-        randomize: bool = False):
-
-        self._reset_state(env_indxs=env_indxs,
-            robot_names=robot_names,
-            randomize=randomize)
-
-        for i in range(len(robot_names)):
-            self._reset_jnt_imp_control(robot_name=robot_names[i],
-                                env_indxs=env_indxs)
-
     def _reset_sim(self):
         self._xmj_adapter.resetWorld()
     
     def _reset_state(self,
+            robot_name: str,
             env_indxs: torch.Tensor = None,
-            robot_names: List[str] =None,
             randomize: bool = False):
 
-        rob_names = robot_names if (robot_names is not None) else self._robot_names
-
-        for i in range(len(rob_names)):
-            robot_name = rob_names[i]
-
-            if randomize:
-                self._randomize_yaw(robot_name=robot_name,env_indxs=None)
-            self._move_root_to_defconfig()
-
+        if randomize:
+            self._randomize_yaw(robot_name=robot_name,env_indxs=None)
+            self._set_root_to_defconfig(robot_name=robot_name)
+        
         # we update the robots state 
-        self._update_state_from_sim(env_indxs=env_indxs, 
-                        robot_names=rob_names)
+        self._read_state_from_robot(env_indxs=env_indxs, 
+            robot_name=robot_name)
 
-    def _update_state_from_sim(self,
-                env_indxs: torch.Tensor = None,
-                robot_names: List[str] = None):
+    def _read_state_from_robot(self,
+            robot_name: str,
+            env_indxs: torch.Tensor = None,
+            ):
         
         if self._env_opts["use_diff_vels"]:
-            self._get_robots_state(dt = self.physics_dt(),
-                            env_indxs = env_indxs,
-                            robot_names = robot_names) # updates robot states
+            self._get_robots_state(dt=self.physics_dt(),
+                env_indxs=env_indxs,
+                robot_name=robot_name) # updates robot states
             # but velocities are obtained via num. differentiation
         else:
-            self._get_robots_state(env_indxs = env_indxs,
-                            robot_names = robot_names) # velocities directly from simulator (can 
+            self._get_robots_state(env_indxs=env_indxs,
+                robot_name=robot_name) # velocities directly from simulator (can 
             # introduce relevant artifacts, making them unrealistic)
 
     def _get_robots_state(self, 
+        robot_name: str,
         env_indxs: torch.Tensor = None,
-        robot_names: List[str] = None,
         dt: float = None, 
         reset: bool = False,
         base_loc: bool = True):
-         
-        rob_names = robot_names if (robot_names is not None) else self._robot_names
-        
-        for i in range(0, len(rob_names)):
-            robot_name = rob_names[i]
-            
-            self._root_p[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().p).reshape(self._num_envs, -1).to(self._dtype)
-            self._root_q[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().q).reshape(self._num_envs, -1).to(self._dtype)
-            self._jnts_q[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_q).reshape(self._num_envs, -1).to(self._dtype)
-            if dt is None:
-                # we get velocities from the simulation. This is not good since 
-                # these can actually represent artifacts which do not have physical meaning.
-                # It's better to obtain them by differentiation to avoid issues with controllers, etc...
-                self._root_v[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().twist[0:3]).reshape(self._num_envs, -1).to(self._dtype)             
-                self._root_omega[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().twist[3:6]).reshape(self._num_envs, -1).to(self._dtype)        
-                self._jnts_v[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_v).reshape(self._num_envs, -1).to(self._dtype)        
-
+                         
+        self._root_p[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().p).reshape(self._num_envs, -1).to(self._dtype)
+        self._root_q[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().q).reshape(self._num_envs, -1).to(self._dtype)
+        self._jnts_q[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_q).reshape(self._num_envs, -1).to(self._dtype)
+        if dt is None:
+            # we get velocities from the simulation. This is not good since 
+            # these can actually represent artifacts which do not have physical meaning.
+            # It's better to obtain them by differentiation to avoid issues with controllers, etc...
+            self._root_v[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().twist[0:3]).reshape(self._num_envs, -1).to(self._dtype)             
+            self._root_omega[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().twist[3:6]).reshape(self._num_envs, -1).to(self._dtype)        
+            self._jnts_v[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_v).reshape(self._num_envs, -1).to(self._dtype)        
+        else:
+            # differentiate numerically
+            if not reset:                    
+                self._root_v[robot_name][:, :] = (self._root_p[robot_name] - \
+                                                self._root_p_prev[robot_name]) / dt 
+                self._root_omega[robot_name][:, :] = quat_to_omega(self._root_q[robot_name], 
+                                                            self._root_q_prev[robot_name], 
+                                                            dt)
+                self._jnts_v[robot_name][:, :] = (self._jnts_q[robot_name] - \
+                                                self._jnts_q_prev[robot_name]) / dt
             else:
-                # differentiate numerically
-                if not reset:                    
-                    self._root_v[robot_name][:, :] = (self._root_p[robot_name] - \
-                                                    self._root_p_prev[robot_name]) / dt 
-                    self._root_omega[robot_name][:, :] = quat_to_omega(self._root_q[robot_name], 
-                                                                self._root_q_prev[robot_name], 
-                                                                dt)
-                    self._jnts_v[robot_name][:, :] = (self._jnts_q[robot_name] - \
-                                                    self._jnts_q_prev[robot_name]) / dt
-                else:
-                    # to avoid issues when differentiating numerically
-                    self._root_v[robot_name][:, :].zero_()
-                    self._root_omega[robot_name][:, :].zero_()
-                    self._jnts_v[robot_name][:, :].zero_()
-                # update "previous" data for numerical differentiation
-                self._root_p_prev[robot_name][:, :] = self._root_p[robot_name]
-                self._root_q_prev[robot_name][:, :] = self._root_q[robot_name]
-                self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name]
+                # to avoid issues when differentiating numerically
+                self._root_v[robot_name][:, :].zero_()
+                self._root_omega[robot_name][:, :].zero_()
+                self._jnts_v[robot_name][:, :].zero_()
+            # update "previous" data for numerical differentiation
+            self._root_p_prev[robot_name][:, :] = self._root_p[robot_name]
+            self._root_q_prev[robot_name][:, :] = self._root_q[robot_name]
+            self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name]
 
-            self._jnts_eff[robot_name][env_indxs, :] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_eff).reshape(self._num_envs, -1).to(self._dtype)        
+        self._jnts_eff[robot_name][env_indxs, :] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_eff).reshape(self._num_envs, -1).to(self._dtype)        
 
-            if base_loc:
-                # rotate robot twist in base local
-                twist_w=torch.cat((self._root_v[robot_name], 
-                    self._root_omega[robot_name]), 
-                    dim=1)
-                twist_base_loc=torch.cat((self._root_v_base_loc[robot_name], 
-                    self._root_omega_base_loc[robot_name]), 
-                    dim=1)
-                world2base_frame(t_w=twist_w,q_b=self._root_q[robot_name],t_out=twist_base_loc)
-                self._root_v_base_loc[robot_name]=twist_base_loc[:, 0:3]
-                self._root_omega_base_loc[robot_name]=twist_base_loc[:, 3:6]
+        if base_loc:
+            # rotate robot twist in base local
+            twist_w=torch.cat((self._root_v[robot_name], 
+                self._root_omega[robot_name]), 
+                dim=1)
+            twist_base_loc=torch.cat((self._root_v_base_loc[robot_name], 
+                self._root_omega_base_loc[robot_name]), 
+                dim=1)
+            world2base_frame(t_w=twist_w,q_b=self._root_q[robot_name],t_out=twist_base_loc)
+            self._root_v_base_loc[robot_name]=twist_base_loc[:, 0:3]
+            self._root_omega_base_loc[robot_name]=twist_base_loc[:, 3:6]
 
-                world2base_frame3D(v_w=self._gravity_normalized[robot_name],q_b=self._root_q[robot_name],v_out=self._gravity_normalized_base_loc[robot_name])
+            world2base_frame3D(v_w=self._gravity_normalized[robot_name],q_b=self._root_q[robot_name],v_out=self._gravity_normalized_base_loc[robot_name])
 
-    def _move_jnts_to_homing(self):
-        for i in range(0, len(self._robot_names)):
-            robot_name = self._robot_names[i]
-            self._xmj_adapter.xmj_env().move_to_homing_now()
+    def _set_jnts_homing(self, robot_name: str):
+        self._xmj_adapter.xmj_env().move_to_homing_now()
                 
-    def _move_root_to_defconfig(self):
-        for i in range(0, len(self._robot_names)):
-            robot_name = self._robot_names[i]
-            self._xmj_adapter.xmj_env().set_pi(self._root_p_default[robot_name].numpy())
-            self._xmj_adapter.xmj_env().set_qi(self._root_q_default[robot_name].numpy())
-        self._xmj_adapter.resetWorld()
+    def _set_root_to_defconfig(self, robot_name: str):
+
+        self._xmj_adapter.xmj_env().set_pi(self._root_p_default[robot_name].numpy())
+        self._xmj_adapter.xmj_env().set_qi(self._root_q_default[robot_name].numpy())
+
+        self._reset_sim()
 
     def _get_solver_info(self):
         raise NotImplementedError()

@@ -639,29 +639,14 @@ class IsaacSimEnv(LRhcEnvBase):
         
         return jnt_imp_controller
 
-    def _reset(self,
-        env_indxs: torch.Tensor = None,
-        robot_names: List[str] =None,
-        randomize: bool = False):
-
-        self._reset_state(env_indxs=env_indxs,
-            robot_names=robot_names,
-            randomize=randomize)
-
-        for i in range(len(robot_names)):
-            self._reset_jnt_imp_control(robot_name=robot_names[i],
-                                env_indxs=env_indxs)
-
-
     def _reset_sim(self):
         self._world.reset(soft=False)
     
     def _reset_state(self,
-            env_indxs: torch.Tensor = None,
-            robot_names: List[str] =None,
-            randomize: bool = False):
+        robot_name: str,
+        env_indxs: torch.Tensor = None,
+        randomize: bool = False):
 
-        rob_names = robot_names if (robot_names is not None) else self._robot_names
         if env_indxs is not None:
             if self._debug:
                 if self._use_gpu:
@@ -680,59 +665,54 @@ class IsaacSimEnv(LRhcEnvBase):
                             error,
                             LogType.EXCEP,
                             True)
-            for i in range(len(rob_names)):
-                robot_name = rob_names[i]
-                if randomize:
-                    self._randomize_yaw(robot_name=robot_name,env_indxs=env_indxs)
+            if randomize:
+                self._randomize_yaw(robot_name=robot_name,env_indxs=env_indxs)
 
-                # root q
-                self._robots_art_views[robot_name].set_world_poses(positions = self._root_p_default[robot_name][env_indxs, :],
-                                                    orientations=self._root_q_default[robot_name][env_indxs, :],
+            # root q
+            self._robots_art_views[robot_name].set_world_poses(positions = self._root_p_default[robot_name][env_indxs, :],
+                                                orientations=self._root_q_default[robot_name][env_indxs, :],
+                                                indices = env_indxs)
+            # jnts q
+            self._robots_art_views[robot_name].set_joint_positions(positions = self._jnts_q_default[robot_name][env_indxs, :],
                                                     indices = env_indxs)
-                # jnts q
-                self._robots_art_views[robot_name].set_joint_positions(positions = self._jnts_q_default[robot_name][env_indxs, :],
-                                                        indices = env_indxs)
-                # root v and omega
-                self._robots_art_views[robot_name].set_joint_velocities(velocities = self._jnts_v_default[robot_name][env_indxs, :],
-                                                        indices = env_indxs)
-                # jnts v
-                concatenated_vel = torch.cat((self._root_v_default[robot_name][env_indxs, :], 
-                                                self._root_omega_default[robot_name][env_indxs, :]), dim=1)
-                self._robots_art_views[robot_name].set_velocities(velocities = concatenated_vel,
-                                                        indices = env_indxs)
-                # jnts eff
-                self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][env_indxs, :],
-                                                        indices = env_indxs)
+            # root v and omega
+            self._robots_art_views[robot_name].set_joint_velocities(velocities = self._jnts_v_default[robot_name][env_indxs, :],
+                                                    indices = env_indxs)
+            # jnts v
+            concatenated_vel = torch.cat((self._root_v_default[robot_name][env_indxs, :], 
+                                            self._root_omega_default[robot_name][env_indxs, :]), dim=1)
+            self._robots_art_views[robot_name].set_velocities(velocities = concatenated_vel,
+                                                    indices = env_indxs)
+            # jnts eff
+            self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][env_indxs, :],
+                                                    indices = env_indxs)
         else:
 
-            for i in range(len(rob_names)):
-                robot_name = rob_names[i]
+            if randomize:
+                self.randomize_yaw(robot_name=robot_name,env_indxs=None)
 
-                if randomize:
-                    self.randomize_yaw(robot_name=robot_name,env_indxs=None)
-
-                # root q
-                self._robots_art_views[robot_name].set_world_poses(positions = self._root_p_default[robot_name][:, :],
-                                                    orientations=self._root_q_default[robot_name][:, :],
+            # root q
+            self._robots_art_views[robot_name].set_world_poses(positions = self._root_p_default[robot_name][:, :],
+                                                orientations=self._root_q_default[robot_name][:, :],
+                                                indices = None)
+            # jnts q
+            self._robots_art_views[robot_name].set_joint_positions(positions = self._jnts_q_default[robot_name][:, :],
                                                     indices = None)
-                # jnts q
-                self._robots_art_views[robot_name].set_joint_positions(positions = self._jnts_q_default[robot_name][:, :],
-                                                        indices = None)
-                # root v and omega
-                self._robots_art_views[robot_name].set_joint_velocities(velocities = self._jnts_v_default[robot_name][:, :],
-                                                        indices = None)
-                # jnts v
-                concatenated_vel = torch.cat((self._root_v_default[robot_name][:, :], 
-                                                self._root_omega_default[robot_name][:, :]), dim=1)
-                self._robots_art_views[robot_name].set_velocities(velocities = concatenated_vel,
-                                                        indices = None)
-                # jnts eff
-                self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][:, :],
-                                                        indices = None)
+            # root v and omega
+            self._robots_art_views[robot_name].set_joint_velocities(velocities = self._jnts_v_default[robot_name][:, :],
+                                                    indices = None)
+            # jnts v
+            concatenated_vel = torch.cat((self._root_v_default[robot_name][:, :], 
+                                            self._root_omega_default[robot_name][:, :]), dim=1)
+            self._robots_art_views[robot_name].set_velocities(velocities = concatenated_vel,
+                                                    indices = None)
+            # jnts eff
+            self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][:, :],
+                                                    indices = None)
 
         # we update the robots state 
-        self._update_state_from_sim(env_indxs=env_indxs, 
-                        robot_names=rob_names)
+        self._read_state_from_robot(env_indxs=env_indxs, 
+            robot_name=robot_name)
         
     def _import_urdf(self, 
         robot_name: str,
@@ -787,7 +767,7 @@ class IsaacSimEnv(LRhcEnvBase):
                                 global_paths=[self._env_opts["ground_plane_prim_path"]] # can collide with these prims
                                 )
 
-    def _update_state_from_sim(self,
+    def _read_state_from_robot(self,
                 env_indxs: torch.Tensor = None,
                 robot_names: List[str] = None):
         
@@ -919,21 +899,17 @@ class IsaacSimEnv(LRhcEnvBase):
                 world2base_frame3D(v_w=self._gravity_normalized[robot_name],q_b=self._root_q[robot_name],
                     v_out=self._gravity_normalized_base_loc[robot_name])
 
-    def _move_jnts_to_homing(self):
-        for i in range(0, len(self._robot_names)):
-            robot_name = self._robot_names[i]
-            self._robots_art_views[robot_name].set_joints_default_state(positions=self._homing, 
-                velocities = torch.zeros((self._homing.shape[0], self._homing.shape[1]), \
-                                    dtype=self._dtype, device=self._device), 
-                efforts = torch.zeros((self._homing.shape[0], self._homing.shape[1]), \
-                                    dtype=self._dtype, device=self._device))
+    def _set_jnts_homing(self, robot_name: str):
+        self._robots_art_views[robot_name].set_joints_default_state(positions=self._homing, 
+            velocities = torch.zeros((self._homing.shape[0], self._homing.shape[1]), \
+                                dtype=self._dtype, device=self._device), 
+            efforts = torch.zeros((self._homing.shape[0], self._homing.shape[1]), \
+                                dtype=self._dtype, device=self._device))
                 
-    def _move_root_to_defconfig(self):
-        for i in range(0, len(self._robot_names)):
-            robot_name = self._robot_names[i]
-            self._robots_art_views[robot_name].set_default_state(positions=self._root_p_default[robot_name], 
-                orientations=self._root_q_default[robot_name])
-            
+    def _set_root_to_defconfig(self, robot_name: str):
+        self._robots_art_views[robot_name].set_default_state(positions=self._root_p_default[robot_name], 
+            orientations=self._root_q_default[robot_name])
+        
     def _get_solver_info(self):
         for i in range(0, len(self._robot_names)):
             robot_name = self._robot_names[i]
