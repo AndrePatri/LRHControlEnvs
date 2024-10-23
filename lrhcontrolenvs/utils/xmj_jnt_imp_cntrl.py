@@ -77,7 +77,7 @@ class XMjJntImpCntrl(JntImpCntrlBase):
             debug_checks=debug_checks,
             override_low_lev_controller=override_art_controller)
         
-        self._pvesd_adapter=torch.full((5, n_jnts), fill_value=0.0,
+        self._pvesd_adapter=torch.full((n_jnts, 5), fill_value=0.0,
             device=torch.device("cpu"), 
             dtype=self._torch_dtype)
 
@@ -90,20 +90,20 @@ class XMjJntImpCntrl(JntImpCntrlBase):
 
         if kps is not None:
             kps_cpu=kps.cpu()
-            self._pvesd_adapter[0, :]=kps_cpu
+            self._pvesd_adapter[:, 3]=kps_cpu
         if kds is not None:
             kds_cpu=kds.cpu()
-            self._pvesd_adapter[1, :]=kds_cpu
+            self._pvesd_adapter[:, 4]=kds_cpu
 
     def _set_pos_ref(self, pos: torch.Tensor):
         pos_cpu=pos.cpu()
-        self._pvesd_adapter[2, :]=pos_cpu
+        self._pvesd_adapter[:, 0]=pos_cpu
         
     def _set_vel_ref(self, vel: torch.Tensor):
         vel_cpu=vel.cpu()
-        self._pvesd_adapter[3, :]=vel_cpu
+        self._pvesd_adapter[:, 1]=vel_cpu
 
     def _set_joint_efforts(self, effort: torch.Tensor):
         effort_cpu=effort.cpu()
-        self._pvesd_adapter[4, :]=effort_cpu
+        self._pvesd_adapter[:, 2]=effort_cpu
                     
