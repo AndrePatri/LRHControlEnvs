@@ -107,6 +107,7 @@ class XMjSimEnv(LRhcEnvBase):
     def _parse_env_opts(self):
         xmj_opts={}
         xmj_opts["use_gpu"]=False
+        xmj_opts["state_from_xbot"]=False
         xmj_opts["device"]="cpu"
         xmj_opts["sim_device"]="cpu" if xmj_opts["use_gpu"] else "cpu"
         xmj_opts["physics_dt"]=1e-3
@@ -212,7 +213,7 @@ class XMjSimEnv(LRhcEnvBase):
                 blocking_observation=False,
                 is_floating_base=True,
                 reference_frame="world",
-                torch_device=self._device,
+                torch_device=torch.device(self._device),
                 fallback_cmd_stiffness=200.0,
                 fallback_cmd_damping=100.0,
                 allow_fallback=True,
@@ -314,18 +315,22 @@ class XMjSimEnv(LRhcEnvBase):
 
     def _read_jnts_state_from_robot(self,
         robot_name: str,
-        env_indxs: torch.Tensor = None):
+        env_indxs: torch.Tensor = None):            
         
-        if self._env_opts["use_diff_vels"]:
+        if (not self._env_opts["state_from_xbot"]) and (not self._env_opts["use_diff_vels"]):
+            self._get_robots_jnt_state(env_indxs=env_indxs,
+                            robot_name=robot_name)
+        elif self._env_opts["state_from_xbot"] and (not self._env_opts["use_diff_vels"]):
+            self._get_robots_jnt_state_xbot(env_indxs=env_indxs,
+                            robot_name=robot_name)
+        elif (not self._env_opts["state_from_xbot"]) and self._env_opts["use_diff_vels"]:
             self._get_robots_jnt_state(dt=self.physics_dt(),
                             env_indxs=env_indxs,
-                            robot_name=robot_name) # updates robot states
-            # but velocities are obtained via num. differentiation
+                            robot_name=robot_name) 
         else:
-            self._get_robots_jnt_state(env_indxs=env_indxs,
-                            robot_name=robot_name) # velocities directly from simulator (can 
-            # introduce relevant artifacts, making them unrealistic)
-
+            self._get_robots_jnt_state_xbot(dt=self.physics_dt(),
+                            env_indxs=env_indxs,
+                            robot_name=robot_name) 
     def _get_root_state(self, 
         robot_name: str,
         env_indxs: torch.Tensor = None,
@@ -334,6 +339,7 @@ class XMjSimEnv(LRhcEnvBase):
         
         self._root_p[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().p).reshape(self._num_envs, -1).to(self._dtype)
         self._root_q[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().q).reshape(self._num_envs, -1).to(self._dtype)
+
         if dt is None:
             # we get velocities from the simulation. This is not good since 
             # these can actually represent artifacts which do not have physical meaning.
@@ -383,6 +389,25 @@ class XMjSimEnv(LRhcEnvBase):
             self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name]
 
         self._jnts_eff[robot_name][env_indxs, :] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_eff).reshape(self._num_envs, -1).to(self._dtype) 
+
+    def _get_robots_jnt_state_xbot(self, 
+        robot_name: str,
+        env_indxs: torch.Tensor = None,
+        dt: float = None):
+
+        jnt_state_from_xbot=self._xmj_adapter.getJointsState().T # [3(p, v, e)x n_jnts]
+
+        self._jnts_q[robot_name][:, :] = jnt_state_from_xbot[0,:]
+
+        if dt is None:
+            self._jnts_v[robot_name][:, :] = jnt_state_from_xbot[1,:]
+        else: 
+            self._jnts_v[robot_name][:, :] = self._jnts_v[robot_name][:, :] = (self._jnts_q[robot_name] - \
+                self._jnts_q_prev[robot_name]) / dt
+            
+            self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name]
+
+        self._jnts_eff[robot_name][env_indxs, :] = jnt_state_from_xbot[2,:]
 
     def _set_jnts_homing(self, robot_name: str):
         self._xmj_adapter.xmj_env().move_to_homing_now()
