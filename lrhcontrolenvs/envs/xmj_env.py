@@ -294,21 +294,21 @@ class XMjSimEnv(LRhcEnvBase):
             self._set_root_to_defconfig(robot_name=robot_name)
         
         # we update the robots state 
-        self._read_state_from_robot(env_indxs=env_indxs, 
+        self._read_root_state_from_robot(env_indxs=env_indxs, 
             robot_name=robot_name)
 
-    def _read_state_from_robot(self,
+    def _read_root_state_from_robot(self,
             robot_name: str,
             env_indxs: torch.Tensor = None,
             ):
         
         if self._env_opts["use_diff_vels"]:
-            self._get_robots_state(dt=self.physics_dt(),
+            self._get_root_state(dt=self.physics_dt(),
                 env_indxs=env_indxs,
                 robot_name=robot_name) # updates robot states
             # but velocities are obtained via num. differentiation
         else:
-            self._get_robots_state(env_indxs=env_indxs,
+            self._get_root_state(env_indxs=env_indxs,
                 robot_name=robot_name) # velocities directly from simulator (can 
             # introduce relevant artifacts, making them unrealistic)
 
@@ -326,7 +326,7 @@ class XMjSimEnv(LRhcEnvBase):
                             robot_name=robot_name) # velocities directly from simulator (can 
             # introduce relevant artifacts, making them unrealistic)
 
-    def _get_robots_state(self, 
+    def _get_root_state(self, 
         robot_name: str,
         env_indxs: torch.Tensor = None,
         dt: float = None, 
