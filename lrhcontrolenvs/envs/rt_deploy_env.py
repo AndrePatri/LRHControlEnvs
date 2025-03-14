@@ -34,6 +34,8 @@ from adarl_ros.adapters.XbotMjAdapter import RosXbotAdapter
 from xbot2_mujoco.PyXbotMjSim import LoadingUtils
 from control_cluster_bridge.utilities.math_utils_torch import world2base_frame,world2base_frame3D
 
+from control_cluster_bridge.utilities.math_utils_torch import quaternion_multiply, normalize_quaternion
+
 import rospy
 class RtDeploymentEnv(LRhcEnvBase):
 
@@ -117,7 +119,7 @@ class RtDeploymentEnv(LRhcEnvBase):
 
         xmj_opts["xbot2_filter_prof"]="medium"
 
-        xmj_opts["use_mpc_pos_for_robot"]=False
+        xmj_opts["use_mpc_pos_for_robot"]=True
 
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         
@@ -141,7 +143,28 @@ class RtDeploymentEnv(LRhcEnvBase):
             throw_when_excep = True)
     
         self._configure_scene()
+    
+    def _setup(self):
+        # this is the last thing called before spinning
+        super()._setup()
+        for i in range(len(self._robot_names)):
+            robot_name = self._robot_names[i]
+            if self._root_q_offset[robot_name] is not None:
+                actions=self.cluster_servers[robot_name].get_actions()
+                rhc_q=actions.root_state.get(data_type="q", gpu=self._use_gpu)
+                rhc_q_m1=normalize_quaternion(rhc_q)
+                robot_q=normalize_quaternion(self._root_q[robot_name][:, :])
 
+                rhc_q_m1[1:4]=-rhc_q_m1[1:4] # inverse (assumes normalized)
+
+                self._root_q_offset[robot_name][:, :]=quaternion_multiply(rhc_q_m1.flatten(), 
+                                                        robot_q.flatten())
+                
+                self._root_q_offsetm1[robot_name][:, :]=self._root_q_offset[robot_name].clone()
+                self._root_q_offsetm1[robot_name][:, 1:4]=-self._root_q_offsetm1[robot_name][:, 1:4]
+                
+        self._q_offset_acquired=True
+                
     def _configure_scene(self):
         
         for i in range(len(self._robot_names)):
@@ -194,7 +217,9 @@ class RtDeploymentEnv(LRhcEnvBase):
 
             self._rospy_startime=rospy.get_time()
             self._last_control_time=0.0
-    
+        
+        self._q_offset_acquired=False
+
     def _xrdf_cmds(self, robot_name:str):
         cmds=super()._xrdf_cmds(robot_name=robot_name)
         for i, s in enumerate(cmds):
@@ -330,8 +355,11 @@ class RtDeploymentEnv(LRhcEnvBase):
             rhc_p=actions.root_state.get(data_type="p", gpu=self._use_gpu)
             self._root_p[robot_name][:, :] = rhc_p
             # self._root_p[robot_name][:, :] = torch.sub(rhc_p, self._root_pos_offsets[robot_name])
-
+            
         self._root_q[robot_name][:, :] = torch.from_numpy(q).reshape(self._num_envs, -1).to(self._dtype)
+        if self._root_q_offset[robot_name] is not None and self._q_offset_acquired:
+            self._root_q[robot_name][:, :]= quaternion_multiply(self._root_q_offsetm1[robot_name][:, :].flatten(),
+                self._root_q[robot_name][:, :].flatten()) # rotate
 
         dt=self._cluster_dt[robot_name] # getting diff state always at cluster rate
 
@@ -448,7 +476,9 @@ class RtDeploymentEnv(LRhcEnvBase):
         return None
     
     def _init_robots_state(self):
-
+        
+        self._root_q_offset={}
+        self._root_q_offsetm1={}
         for i in range(0, len(self._robot_names)):
 
             robot_name = self._robot_names[i]
@@ -463,6 +493,11 @@ class RtDeploymentEnv(LRhcEnvBase):
             self._root_q[robot_name][:, 0]=1
             self._root_q_prev[robot_name] = self._root_q[robot_name].clone()
             self._root_q_default[robot_name] = self._root_q[robot_name].clone()
+            self._root_q_offset[robot_name]=None
+            if  self._env_opts["use_mpc_pos_for_robot"]:
+                self._root_q_offset[robot_name]=self._root_q[robot_name].clone()
+                self._root_q_offsetm1[robot_name]=self._root_q[robot_name].clone()
+
             # jnt q (measured, previous, default)
             n_jnts=len(self._robot_iface_enabled_jnts)
             self._jnts_q[robot_name] = torch.zeros((self._num_envs, n_jnts), dtype=self._dtype)
