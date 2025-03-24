@@ -121,6 +121,8 @@ class XMjSimEnv(LRhcEnvBase):
         xmj_opts["xmj_timeout"]=1000
         xmj_opts["xbot2_filter_prof"]="medium"
 
+        xmj_opts["base_link_name"]="base_link"
+
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         xmj_opts["rendering_dt"]=xmj_opts["physics_dt"]
         
@@ -218,7 +220,8 @@ class XMjSimEnv(LRhcEnvBase):
                 fallback_cmd_stiffness=200.0,
                 fallback_cmd_damping=100.0,
                 allow_fallback=True,
-                enable_filters=True)
+                enable_filters=True,
+                base_link_name=self._env_opts["base_link_name"])
             # self._xmj_adapter.build_scenario()
             self._xmj_adapter.startup()
             self._xmj_adapter.set_filters(set_enabled=True, 
