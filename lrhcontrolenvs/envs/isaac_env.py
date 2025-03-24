@@ -510,8 +510,7 @@ class IsaacSimEnv(LRhcEnvBase):
         else:
             defaul_prim_path=self._env_opts["ground_plane_prim_path"]+"_default"
             self._ground_plane_prim_paths.append(defaul_prim_path)
-            self._ground_plane=self._scene.add_ground_plane(z_position=0, 
-                size=self._env_opts["ground_size"],
+            self._ground_plane=self._scene.add_default_ground_plane(z_position=0, 
                 name="terrain", 
                 prim_path=defaul_prim_path, 
                 static_friction=self._env_opts["static_friction"], 
