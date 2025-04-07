@@ -138,6 +138,7 @@ class IsaacSimEnv(LRhcEnvBase):
             enable_extension("omni.kit.livestream.native")
             enable_extension("omni.services.streaming.manager")
         self._render = (not self._env_opts["headless"]) or enable_livestream or enable_viewport
+
         self._record = False
         self._world = None
         self._physics_context = None
@@ -269,6 +270,8 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["enable_viewport"] = False
         isaac_opts["use_diff_vels"] = False
 
+        isaac_opts["render_to_file"]=False
+
         isaac_opts.update(self._env_opts) # update defaults with provided opts
         isaac_opts["rendering_freq"]=int(isaac_opts["rendering_dt"]/isaac_opts["physics_dt"])
         # isaac_opts["rendering_dt"]=isaac_opts["physics_dt"] # forcing rendering_dt==physics_dt
@@ -289,7 +292,6 @@ class IsaacSimEnv(LRhcEnvBase):
                 isaac_opts["sim_device"]="cpu"
                 isaac_opts["use_gpu"]=False
         # isaac_opts["sim_device"]=isaac_opts["device"]
-        
         # overwrite env opts in case some sim params were missing
         self._env_opts=isaac_opts
 
@@ -585,7 +587,22 @@ class IsaacSimEnv(LRhcEnvBase):
         # delete_prim(self._env_opts["ground_plane_prim_path"] + "/SphereLight") # we remove the default spherical light
         
         # set default camera viewport position and target
-        self._set_initial_camera_params()
+        camera_position=[4, 4, 1.5]
+        camera_target=[0, 0, 0]
+        self._set_initial_camera_params(camera_position=camera_position,
+                camera_target=camera_target)
+        self._render_camera = rep.create.camera(focal_length=12, 
+                            name='rendering_camera',
+                            clipping_range = (5, 40), 
+                            position = camera_position,
+                            look_at = camera_target)
+        self._render_product  = rep.create.render_product(self._render_camera, 
+                    (1280, 720), name='rendering_camera')
+        self._render_writer = rep.WriterRegistry.get("BasicWriter")
+        self._render_writer.initialize(output_dir="/tmp/IsaacRenderings/", 
+                    rgb=True)
+        self._render_writer.attach([self._render_product])
+
         self.apply_collision_filters(self._physics_context.prim_path, 
                             "/World/collisions")
 
@@ -712,6 +729,8 @@ class IsaacSimEnv(LRhcEnvBase):
     def _step_world(self): 
         self._world.step(render=False, step_sim=True) 
         if self._render and (self.step_counter%self._env_opts["rendering_freq"]==0):
+            if self._env_opts["render_to_file"]:
+                rep.orchestrator.step()
             self._render_sim() # manually trigger rendering (World.step(render=True) for some reason 
             # will step the simulation for a dt==rendering_dt)
 
@@ -1169,7 +1188,7 @@ class IsaacSimEnv(LRhcEnvBase):
         set_camera_view(eye=camera_position, 
                         target=camera_target, 
                         camera_prim_path="/OmniverseKit_Persp")
-    
+
     def _init_contact_sensors(self, robot_name: str):
         self.omni_contact_sensors[robot_name]=None
         sensor_radii={}
