@@ -1,19 +1,19 @@
 # Copyright (C) 2023  Andrea Patrizi (AndrePatri, andreapatrizi1b6e6@gmail.com)
 # 
-# This file is part of LRHControlEnvs and distributed under the General Public License version 2 license.
+# This file is part of AugMPCEnvs and distributed under the General Public License version 2 license.
 # 
-# LRHControlEnvs is free software: you can redistribute it and/or modify
+# AugMPCEnvs is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 2 of the License, or
 # (at your option) any later version.
 # 
-# LRHControlEnvs is distributed in the hope that it will be useful,
+# AugMPCEnvs is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 # 
 # You should have received a copy of the GNU General Public License
-# along with LRHControlEnvs.  If not, see <http://www.gnu.org/licenses/>.
+# along with AugMPCEnvs.  If not, see <http://www.gnu.org/licenses/>.
 # 
 from isaacsim import SimulationApp
 
@@ -32,7 +32,7 @@ from EigenIPC.PyEigenIPC import VLevel
 from EigenIPC.PyEigenIPC import LogType
 from EigenIPC.PyEigenIPC import Journal
 
-from lrhcontrolenvs.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
+from aug_mpc_envs.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
 
 from lrhc_control.envs.lrhc_remote_env_base import LRhcEnvBase
 from control_cluster_bridge.utilities.math_utils_torch import world2base_frame,world2base_frame3D
@@ -86,8 +86,8 @@ class IsaacSimEnv(LRhcEnvBase):
         self._backend="torch"
         enable_livestream = self._env_opts["enable_livestream"]
         enable_viewport = self._env_opts["enable_viewport"]
-        base_isaac_exp = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.lrhcontrolenvs.kit'
-        base_isaac_exp_headless = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.lrhcontrolenvs.headless.kit'
+        base_isaac_exp = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.aug_mpc_envs.kit'
+        base_isaac_exp_headless = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.aug_mpc_envs.headless.kit'
 
         experience=base_isaac_exp
         if self._env_opts["headless"]:
@@ -196,9 +196,9 @@ class IsaacSimEnv(LRhcEnvBase):
 
         from omni.isaac.sensor import _sensor
 
-        from lrhcontrolenvs.utils.contact_sensor import OmniContactSensors
-        from lrhcontrolenvs.utils.omni_jnt_imp_cntrl import OmniJntImpCntrl
-        from lrhcontrolenvs.utils.terrains import RlTerrains
+        from aug_mpc_envs.utils.contact_sensor import OmniContactSensors
+        from aug_mpc_envs.utils.omni_jnt_imp_cntrl import OmniJntImpCntrl
+        from aug_mpc_envs.utils.terrains import RlTerrains
 
     def _parse_env_opts(self):
         isaac_opts={}

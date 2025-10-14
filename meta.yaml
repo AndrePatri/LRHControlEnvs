@@ -1,5 +1,5 @@
 package:
-  name: lrhcontrolenvs 
+  name: aug_mpc_envs 
   version: 0.1.0  
 
 source:

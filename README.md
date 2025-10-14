@@ -1,3 +1,3 @@
-# LRHControlEnvs
+# AugMPCEnvs
 
-Environment implementations for the [LRHControl](https://github.com/AndrePatri/LRHControl) package.
+Environment implementations for the [AugMPC](https://github.com/AndrePatri/AugMPC) package.

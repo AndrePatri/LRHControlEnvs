@@ -1,19 +1,19 @@
 # Copyright (C) 2023  Andrea Patrizi (AndrePatri, andreapatrizi1b6e6@gmail.com)
 # 
-# This file is part of LRHControlEnvs and distributed under the General Public License version 2 license.
+# This file is part of AugMPCEnvs and distributed under the General Public License version 2 license.
 # 
-# LRHControlEnvs is free software: you can redistribute it and/or modify
+# AugMPCEnvs is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 2 of the License, or
 # (at your option) any later version.
 # 
-# LRHControlEnvs is distributed in the hope that it will be useful,
+# AugMPCEnvs is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 # 
 # You should have received a copy of the GNU General Public License
-# along with LRHControlEnvs.  If not, see <http://www.gnu.org/licenses/>.
+# along with AugMPCEnvs.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
 import torch
@@ -25,10 +25,10 @@ from EigenIPC.PyEigenIPC import VLevel
 from EigenIPC.PyEigenIPC import LogType
 from EigenIPC.PyEigenIPC import Journal
 
-from lrhcontrolenvs.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
+from aug_mpc_envs.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
 
 from lrhc_control.envs.lrhc_remote_env_base import LRhcEnvBase
-from lrhcontrolenvs.utils.xmj_jnt_imp_cntrl import XMjJntImpCntrl
+from aug_mpc_envs.utils.xmj_jnt_imp_cntrl import XMjJntImpCntrl
 from adarl_ros.adapters.XbotMjAdapter import XbotMjAdapter
 from xbot2_mujoco.PyXbotMjSim import LoadingUtils
 from control_cluster_bridge.utilities.math_utils_torch import world2base_frame,world2base_frame3D
