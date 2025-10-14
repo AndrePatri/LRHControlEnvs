@@ -21,7 +21,7 @@ import torch
 from EigenIPC.PyEigenIPC import LogType
 from EigenIPC.PyEigenIPC import Journal
 
-from lrhc_control.utils.jnt_imp_control_base import JntImpCntrlBase
+from aug_mpc.utils.jnt_imp_control_base import JntImpCntrlBase
 from adarl_ros.adapters.XbotMjAdapter import XbotMjAdapter
 
 class XMjJntImpCntrl(JntImpCntrlBase):

@@ -27,7 +27,7 @@ from EigenIPC.PyEigenIPC import Journal
 
 from aug_mpc_envs.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
 
-from lrhc_control.envs.lrhc_remote_env_base import LRhcEnvBase
+from aug_mpc.envs.lrhc_remote_env_base import LRhcEnvBase
 from aug_mpc_envs.utils.xmj_jnt_imp_cntrl import XMjJntImpCntrl
 from adarl_ros.adapters.XbotMjAdapter import XbotMjAdapter
 from xbot2_mujoco.PyXbotMjSim import LoadingUtils

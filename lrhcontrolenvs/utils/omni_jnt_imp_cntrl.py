@@ -22,7 +22,7 @@ from omni.isaac.core.articulations.articulation_view import ArticulationView
 from EigenIPC.PyEigenIPC import LogType
 from EigenIPC.PyEigenIPC import Journal
 
-from lrhc_control.utils.jnt_imp_control_base import JntImpCntrlBase
+from aug_mpc.utils.jnt_imp_control_base import JntImpCntrlBase
         
 class OmniJntImpCntrl(JntImpCntrlBase):
 

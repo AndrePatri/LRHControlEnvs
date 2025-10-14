@@ -34,7 +34,7 @@ from EigenIPC.PyEigenIPC import Journal
 
 from aug_mpc_envs.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
 
-from lrhc_control.envs.lrhc_remote_env_base import LRhcEnvBase
+from aug_mpc.envs.lrhc_remote_env_base import LRhcEnvBase
 from control_cluster_bridge.utilities.math_utils_torch import world2base_frame,world2base_frame3D
 
 class IsaacSimEnv(LRhcEnvBase):
