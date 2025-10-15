@@ -32,9 +32,9 @@ from aug_mpc_envs.utils.xmj_jnt_imp_cntrl import XMjJntImpCntrl
 from aug_mpc.envs.lrhc_remote_env_base import LRhcEnvBase
 from adarl_ros.adapters.XbotMjAdapter import RosXbotAdapter
 from xbot2_mujoco.PyXbotMjSim import LoadingUtils
-from control_cluster_bridge.utilities.math_utils_torch import world2base_frame,world2base_frame3D
+from mpc_hive.utilities.math_utils_torch import world2base_frame,world2base_frame3D
 
-from control_cluster_bridge.utilities.math_utils_torch import quaternion_multiply, normalize_quaternion
+from mpc_hive.utilities.math_utils_torch import quaternion_multiply, normalize_quaternion
 
 import rospy
 class RtDeploymentEnv(LRhcEnvBase):

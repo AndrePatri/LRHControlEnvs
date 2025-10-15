@@ -31,7 +31,7 @@ from aug_mpc.envs.lrhc_remote_env_base import LRhcEnvBase
 from aug_mpc_envs.utils.xmj_jnt_imp_cntrl import XMjJntImpCntrl
 from adarl_ros.adapters.XbotMjAdapter import XbotMjAdapter
 from xbot2_mujoco.PyXbotMjSim import LoadingUtils
-from control_cluster_bridge.utilities.math_utils_torch import world2base_frame,world2base_frame3D
+from mpc_hive.utilities.math_utils_torch import world2base_frame,world2base_frame3D
 
 class XMjSimEnv(LRhcEnvBase):
 
