@@ -866,10 +866,26 @@ class IsaacSimEnv(LRhcEnvBase):
         )
 
         robot_base_prim_path = self._env_opts["template_env_ns"] + "/" + robot_name
+
+        if success:
+            Journal.log(self.__class__.__name__,
+                "_import_urdf",
+                "Successfully importedf URDF into IsaacSim",
+                LogType.STAT)
+        else:
+            Journal.log(self.__class__.__name__,
+                "_import_urdf",
+                "Failed to import URDF into IsaacSim",
+                LogType.EXCEP,
+                throw_when_excep = True)
+        
         # moving default prim to base prim path for cloning
         move_prim(robot_prim_path_default, # from
                 robot_base_prim_path) # to
         
+        robot_base_prim = prim_utils.get_prim_at_path(robot_base_prim_path)
+        print("Imported robot URDF: \n", prim_utils.get_prim_children(robot_base_prim))
+
         return success
 
     def apply_collision_filters(self, 
