@@ -125,6 +125,8 @@ class XMjSimEnv(LRhcEnvBase):
 
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         xmj_opts["rendering_dt"]=xmj_opts["physics_dt"]
+        xmj_opts["render_to_file"]=False
+        xmj_opts["render_fps"]=60
         
         if not xmj_opts["use_gpu"]: # don't use GPU at all
             xmj_opts["use_gpu_pipeline"]=False
@@ -221,7 +223,8 @@ class XMjSimEnv(LRhcEnvBase):
                 fallback_cmd_damping=100.0,
                 allow_fallback=True,
                 enable_filters=True,
-                base_link_name=self._env_opts["base_link_name"])
+                base_link_name=self._env_opts["base_link_name"],
+                render_to_file=self._env_opts["render_to_file"])
             # self._xmj_adapter.build_scenario()
             self._xmj_adapter.startup()
             self._xmj_adapter.set_filters(set_enabled=True, 
@@ -609,7 +612,8 @@ class XMjSimEnv(LRhcEnvBase):
         return self._xmj_adapter.xmj_env().physics_dt
     
     def rendering_dt(self):
-        return self._xmj_adapter.xmj_env().physics_dt
+        return self._env_opts["rendering_dt"]
+        # return self._xmj_adapter.xmj_env().physics_dt
     
     def set_physics_dt(self, physics_dt:float):
         raise NotImplementedError()
