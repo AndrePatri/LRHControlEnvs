@@ -112,6 +112,8 @@ class XMjSimEnv(LRhcEnvBase):
         xmj_opts["sim_device"]="cpu" if xmj_opts["use_gpu"] else "cpu"
         xmj_opts["physics_dt"]=1e-3
         xmj_opts["rendering_dt"]=xmj_opts["physics_dt"]
+        xmj_opts["render_to_file"]=False
+        xmj_opts["render_fps"]=60
         xmj_opts["substeps"]=1 # number of physics steps to be taken for for each rendering step
         xmj_opts["gravity"] = np.array([0.0, 0.0, -9.81])
         xmj_opts["use_diff_vels"] = False
@@ -124,9 +126,7 @@ class XMjSimEnv(LRhcEnvBase):
         xmj_opts["base_link_name"]="base_link"
 
         xmj_opts.update(self._env_opts) # update defaults with provided opts
-        xmj_opts["rendering_dt"]=xmj_opts["physics_dt"]
-        xmj_opts["render_to_file"]=False
-        xmj_opts["render_fps"]=60
+        xmj_opts["rendering_dt"]=1/xmj_opts["render_fps"]        
         
         if not xmj_opts["use_gpu"]: # don't use GPU at all
             xmj_opts["use_gpu_pipeline"]=False
@@ -224,7 +224,8 @@ class XMjSimEnv(LRhcEnvBase):
                 allow_fallback=True,
                 enable_filters=True,
                 base_link_name=self._env_opts["base_link_name"],
-                render_to_file=self._env_opts["render_to_file"])
+                render_to_file=self._env_opts["render_to_file"],
+                render_fps=self._env_opts["render_fps"])
             # self._xmj_adapter.build_scenario()
             self._xmj_adapter.startup()
             self._xmj_adapter.set_filters(set_enabled=True, 
