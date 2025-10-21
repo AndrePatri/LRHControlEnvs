@@ -119,7 +119,7 @@ class RtDeploymentEnv(LRhcEnvBase):
 
         xmj_opts["xbot2_filter_prof"]="medium"
         
-        xmj_opts["base_link_name"]="base_link"
+        xmj_opts["base_linkname"]="base_link"
 
         xmj_opts["use_mpc_pos_for_robot"]=True
 
@@ -188,7 +188,7 @@ class RtDeploymentEnv(LRhcEnvBase):
                 fallback_cmd_damping=60.0,
                 allow_fallback=True,
                 enable_filters=True,
-                base_link=self._env_opts["base_link_name"])
+                base_link=self._env_opts["base_linkname"])
             # self._ros_xbot_adapter.build_scenario()
             self._ros_xbot_adapter.startup()
             self._ros_xbot_adapter.set_filters(set_enabled=True, 
