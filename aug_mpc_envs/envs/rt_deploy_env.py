@@ -349,7 +349,10 @@ class RtDeploymentEnv(LRhcEnvBase):
         numerical_diff: bool = False,
         base_loc: bool = True):
         
-        frame_id, q, omega, linacc = self._ros_xbot_adapter.get_imu_data()
+        self._ros_xbot_adapter.read_imu_data() # updated imu data 
+
+        # frame_name, q, omega, linacc = self._ros_xbot_adapter.get_imu_data()
+        frame_name, q, omega, linacc = self._ros_xbot_adapter.get_base_link_state()
 
         # in sim we get pos from sim
 
