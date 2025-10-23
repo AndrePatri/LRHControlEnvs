@@ -191,8 +191,6 @@ class RtDeploymentEnv(LRhcEnvBase):
                 base_link=self._env_opts["base_linkname"])
             # self._ros_xbot_adapter.build_scenario()
             self._ros_xbot_adapter.startup()
-            self._ros_xbot_adapter.set_filters(set_enabled=True, 
-                profile_name=self._env_opts["xbot2_filter_prof"])
 
             to_monitor=[]
             self._robot_iface_enabled_jnts=self._ros_xbot_adapter.get_robot_interface().getEnabledJointNames()
@@ -218,9 +216,13 @@ class RtDeploymentEnv(LRhcEnvBase):
 
             self.scene_setup_completed = True
 
+            # set joint reference filters
+            self._ros_xbot_adapter.set_filters(set_enabled=True, 
+                profile_name=self._env_opts["xbot2_filter_prof"])
+            
             self._rospy_startime=rospy.get_time()
             self._last_control_time=0.0
-        
+            
         self._q_offset_acquired=False
 
     def _xrdf_cmds(self, robot_name:str):
@@ -257,7 +259,29 @@ class RtDeploymentEnv(LRhcEnvBase):
         self._ros_xbot_adapter.apply_cmds_now() # write to robot (there could be
         # communication delays)
         self._last_control_time=self._get_world_time(robot_name=robot_name)
- 
+    
+    def _jnt_imp_reset_overrride(self, 
+        robot_name: str):
+        
+        # before env applies jnt imp reset to robot, we ensure no discountinuities by always ramping impedances 
+        # with the current position as target and no velocity and effort references
+
+        # write joint position targets to current position to avoid jumps  
+        n_jnts=len(self._robot_jnt_names(robot_name=robot_name))
+        null_cmd=torch.zeros((1, n_jnts), 
+                    dtype=self._dtype,
+                    device=self._device)   
+        self._jnt_imp_controllers[robot_name].set_refs(
+            pos_ref=self._jnts_q[robot_name],
+            vel_ref=null_cmd,
+            eff_ref=null_cmd,
+            robot_indxs = None)
+        super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
+
+        self._ros_xbot_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
+        
+        self._ros_xbot_adapter.apply_joint_impedances_with_ramp(self._ros_xbot_adapter._commanded_joint_impedances_by_name) # ramps impeances
+
     def _step_world(self): # real world steps by itself (hopefully)
         pass
 
@@ -286,7 +310,8 @@ class RtDeploymentEnv(LRhcEnvBase):
             env_indxs: torch.Tensor = None):
         super()._set_startup_jnt_imp_gains(robot_name=robot_name,env_indxs=env_indxs)
         # apply jnt imp cmds to xbot immediately
-        self._ros_xbot_adapter.apply_joint_impedances(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
+        # self._ros_xbot_adapter.apply_joint_impedances(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
+        self._ros_xbot_adapter.apply_joint_impedances_with_ramp(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
         # self._ros_xbot_adapter.step()
 
     def _reset_state(self,
@@ -299,6 +324,8 @@ class RtDeploymentEnv(LRhcEnvBase):
             self._set_root_to_defconfig(robot_name=robot_name)
         
         # self._reset_sim()
+
+        self._set_jnts_to_homing(robot_name)
         
         # we update the robots state 
         self._read_root_state_from_robot(env_indxs=env_indxs, 
@@ -361,7 +388,9 @@ class RtDeploymentEnv(LRhcEnvBase):
             rhc_p=actions.root_state.get(data_type="p", gpu=self._use_gpu)
             self._root_p[robot_name][:, :] = rhc_p
             # self._root_p[robot_name][:, :] = torch.sub(rhc_p, self._root_pos_offsets[robot_name])
-            
+        else:
+            raise NotImplementedError("Only root position from MPC is implemented. No odometry available yet.")
+        
         self._root_q[robot_name][:, :] = torch.from_numpy(q).reshape(self._num_envs, -1).to(self._dtype)
         if self._root_q_offset[robot_name] is not None and self._q_offset_acquired:
             self._root_q[robot_name][:, :]= quaternion_multiply(self._root_q_offsetm1[robot_name][:, :].flatten(),
@@ -445,8 +474,8 @@ class RtDeploymentEnv(LRhcEnvBase):
 
         self._jnts_eff[robot_name][env_indxs, :] = jnt_state_from_xbot[2,:]
 
-    def _set_jnts_homing(self, robot_name: str):
-        #self._ros_xbot_adapter.trigger_homing() # blocking, moves the robot using plugins
+    def _set_jnts_to_homing(self, robot_name: str):
+        # self._ros_xbot_adapter.trigger_homing() # blocking, moves the robot using plugins
     	pass
     
     def _set_root_to_defconfig(self, robot_name: str):

@@ -517,7 +517,7 @@ class XMjSimEnv(LRhcEnvBase):
 
         self._jnts_eff[robot_name][env_indxs, :] = jnt_state_from_xbot[2,:]
 
-    def _set_jnts_homing(self, robot_name: str):
+    def _set_jnts_to_homing(self, robot_name: str):
         self._xmj_adapter.xmj_env().move_to_homing_now()
                 
     def _set_root_to_defconfig(self, robot_name: str):

@@ -1118,7 +1118,7 @@ class IsaacSimEnv(LRhcEnvBase):
                             env_indxs=env_indxs,
                             clone=False)
     
-    def _set_jnts_homing(self, robot_name: str):
+    def _set_jnts_to_homing(self, robot_name: str):
         self._robots_art_views[robot_name].set_joints_default_state(positions=self._homing, 
             velocities = torch.zeros((self._homing.shape[0], self._homing.shape[1]), \
                                 dtype=self._dtype, device=self._device), 
