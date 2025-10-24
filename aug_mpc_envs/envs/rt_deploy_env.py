@@ -244,7 +244,7 @@ class RtDeploymentEnv(LRhcEnvBase):
         elapsed_since_last_cmd=self._get_world_time(robot_name=robot_name)-\
             self._last_control_time
         walltime_to_sleep=self.physics_dt()-elapsed_since_last_cmd
-        if walltime_to_sleep<0:
+        if walltime_to_sleep<-1e-2:
             Journal.log(self.__class__.__name__,
                 "_apply_cmds_to_jnt_imp_control",
                 f"RT performance violated of {walltime_to_sleep} s.",
