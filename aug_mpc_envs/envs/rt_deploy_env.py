@@ -18,6 +18,7 @@
 
 import torch
 import numpy as np
+import math
 
 import time
 from perf_sleep.pyperfsleep import PerfSleep
@@ -147,25 +148,55 @@ class RtDeploymentEnv(LRhcEnvBase):
         self._configure_scene()
     
     def _setup(self):
-        # this is the last thing called before spinning
+        # last thing called before spinning
         super()._setup()
+
+        # for safety: get dtype/device from existing storage
+        # assume self._root_q_offset[robot_name] exists and is a torch tensor
         for i in range(len(self._robot_names)):
             robot_name = self._robot_names[i]
             if self._root_q_offset[robot_name] is not None:
-                actions=self.cluster_servers[robot_name].get_actions()
-                rhc_q=actions.root_state.get(data_type="q", gpu=self._use_gpu)
-                rhc_q_m1=normalize_quaternion(rhc_q)
-                robot_q=normalize_quaternion(self._root_q[robot_name][:, :])
+                # get rhc quaternion from cluster (assumed torch)
+                actions = self.cluster_servers[robot_name].get_actions()
+                rhc_q = actions.root_state.get(data_type="q", gpu=self._use_gpu)  # expecting torch tensor
+                # ensure shape: (num_envs,4) or (1,4)
+                if rhc_q.dim() == 1:
+                    rhc_q = rhc_q.unsqueeze(0)
+                rhc_q = rhc_q.to(self._dtype)
 
-                rhc_q_m1[1:4]=-rhc_q_m1[1:4] # inverse (assumes normalized)
+                # get robot (sim) quaternion stored in self._root_q (torch)
+                robot_q = self._root_q[robot_name][:, :].to(self._dtype)
 
-                self._root_q_offset[robot_name][:, :]=quaternion_multiply(rhc_q_m1.flatten(), 
-                                                        robot_q.flatten())
-                
-                self._root_q_offsetm1[robot_name][:, :]=self._root_q_offset[robot_name].clone()
-                self._root_q_offsetm1[robot_name][:, 1:4]=-self._root_q_offsetm1[robot_name][:, 1:4]
-                
-        self._q_offset_acquired=True
+                # normalize both
+
+                # extract yaw-only quaternions (vectorized)
+                yaw_rhc = self.quat_to_yaw(rhc_q)                # (num_envs,) or (1,)
+                yaw_robot = self.quat_to_yaw(robot_q)            # (num_envs,)
+
+                # build yaw-only quaternions
+                device = self._root_q_offset[robot_name].device
+                rhc_yaw_q = self.yaw_quat(yaw_rhc)
+                robot_yaw_q = self.yaw_quat(yaw_robot)
+
+                # offset = rhc_yaw^{-1} * robot_yaw  so that rhc_yaw * offset = robot_yaw
+                offset = quaternion_multiply(self._quat_inverse(rhc_yaw_q), robot_yaw_q)  # shape: (num_envs,4) or (1,4)
+
+                # store offset into tensors; match layout (repeat if needed)
+                # if storage expects one row per env, ensure shape matches
+                # self._root_q_offset[robot_name] assumed shape (num_envs,4)
+                storage_shape = self._root_q_offset[robot_name].shape
+                if offset.shape[0] == 1 and storage_shape[0] > 1:
+                    offset_to_store = offset.repeat(storage_shape[0], 1)
+                else:
+                    offset_to_store = offset.reshape(storage_shape)
+
+                self._root_q_offset[robot_name][:, :] = offset_to_store.to(self._dtype).to(device)
+
+                # store inverse of offset for runtime use
+                offsetm1=self._quat_inverse(offset_to_store)
+                self._root_q_offsetm1[robot_name][:, :] = offsetm1.to(self._dtype).to(device)
+
+        self._q_offset_acquired = True
                 
     def _configure_scene(self):
         
@@ -271,8 +302,10 @@ class RtDeploymentEnv(LRhcEnvBase):
         null_cmd=torch.zeros((1, n_jnts), 
                     dtype=self._dtype,
                     device=self._device)   
+        reset_q=self._jnts_q[robot_name]
+        # reset_q=self._homing
         self._jnt_imp_controllers[robot_name].set_refs(
-            pos_ref=self._jnts_q[robot_name],
+            pos_ref=reset_q,
             vel_ref=null_cmd,
             eff_ref=null_cmd,
             robot_indxs = None)
@@ -370,31 +403,43 @@ class RtDeploymentEnv(LRhcEnvBase):
         
         raise NotImplementedError()
 
-    def _get_root_state_xbot(self, 
+    def _get_root_state_xbot(self,
         robot_name: str,
         env_indxs: torch.Tensor = None,
         numerical_diff: bool = False,
         base_loc: bool = True):
-        
-        self._ros_xbot_adapter.read_imu_data() # updated imu data 
 
-        # frame_name, q, omega, linacc = self._ros_xbot_adapter.get_imu_data()
+        # update IMU and get base link state (assumed to return torch tensors)
+        self._ros_xbot_adapter.read_imu_data()
         frame_name, q, omega, linacc = self._ros_xbot_adapter.get_base_link_state()
 
-        # in sim we get pos from sim
-
+        # position handling (same as before)
         if self._env_opts["use_mpc_pos_for_robot"]:
-            actions=self.cluster_servers[robot_name].get_actions()
-            rhc_p=actions.root_state.get(data_type="p", gpu=self._use_gpu)
+            actions = self.cluster_servers[robot_name].get_actions()
+            rhc_p = actions.root_state.get(data_type="p", gpu=self._use_gpu)
             self._root_p[robot_name][:, :] = rhc_p
-            # self._root_p[robot_name][:, :] = torch.sub(rhc_p, self._root_pos_offsets[robot_name])
         else:
             raise NotImplementedError("Only root position from MPC is implemented. No odometry available yet.")
-        
-        self._root_q[robot_name][:, :] = torch.from_numpy(q).reshape(self._num_envs, -1).to(self._dtype)
+
         if self._root_q_offset[robot_name] is not None and self._q_offset_acquired:
-            self._root_q[robot_name][:, :]= quaternion_multiply(self._root_q_offsetm1[robot_name][:, :].flatten(),
-                self._root_q[robot_name][:, :].flatten()) # rotate
+
+            # extract yaw-only part of incoming q
+            yaw_q = self.yaw_quat(self.quat_to_yaw(q))
+
+            # pitch-roll part: q_pr = q_yaw^{-1} * q_full  (so q_full = q_yaw * q_pr)
+            yaw_q_inv=  self._quat_inverse(yaw_q)
+            q_pr = quaternion_multiply(yaw_q_inv.flatten(), q.flatten())
+
+            # adjusted yaw = offsetm1 * q_yaw  (offsetm1 maps from rhc frame to sim frame; we apply its inverse stored earlier)
+
+            adjusted_yaw = quaternion_multiply(self._root_q_offsetm1[robot_name].flatten(), yaw_q.flatten())
+
+            # new quaternion: adjusted_yaw * q_pr  (applies yaw offset only, keeps pitch+roll from IMU)
+            self._root_q[robot_name][:, :] = quaternion_multiply(adjusted_yaw, q_pr)
+
+        else:
+            # no offset acquired: store raw IMU quaternion (ensure dtype/device)
+            self._root_q[robot_name][:, :] = torch.from_numpy(q).reshape(self._num_envs, -1).to(self._dtype)
 
         dt=self._cluster_dt[robot_name] # getting diff state always at cluster rate
 
@@ -445,7 +490,7 @@ class RtDeploymentEnv(LRhcEnvBase):
         self._root_omega_base_loc[robot_name][:, :]=self._root_omega[robot_name]
         self._root_a_base_loc[robot_name][:, :]=self._root_a[robot_name]
         self._root_alpha_base_loc[robot_name][:, :]=self._root_alpha[robot_name]
-            
+
     def _get_robots_jnt_state(self, 
         robot_name: str,
         env_indxs: torch.Tensor = None,
@@ -606,3 +651,17 @@ class RtDeploymentEnv(LRhcEnvBase):
             LogType.WARN,
             throw_when_excep = True)
         return running
+    
+    def quat_to_yaw(self, q : torch.Tensor):
+        w, x, y, z = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
+
+        return math.atan2(2.0*(w*z + x*y), 1.0 - 2.0*(y*y + z*z))
+
+    def yaw_quat(self, yaw):
+        return torch.tensor([math.cos(yaw/2.0), 0.0, 0.0, math.sin(yaw/2.0)], dtype=self._dtype, device=self._device)
+
+    def _quat_inverse(self, q: torch.Tensor) -> torch.Tensor:
+        # inverse for unit quaternion: [w, -x, -y, -z]
+        qi = q.clone()
+        qi[..., 1:] = -qi[..., 1:]
+        return qi
