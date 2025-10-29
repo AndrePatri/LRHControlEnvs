@@ -317,12 +317,15 @@ class RtDeploymentEnv(LRhcEnvBase):
         
         self._ros_xbot_adapter.apply_joint_impedances_with_ramp(self._ros_xbot_adapter._commanded_joint_impedances_by_name) # ramps impeances
 
-    def _step_world(self): # real world steps by itself (hopefully)
-        pass
+    # def _set_startup_jnt_imp_gains(self,
+    #         robot_name:str, 
+    #         env_indxs: torch.Tensor = None):
+    #     super()._set_startup_jnt_imp_gains(robot_name=robot_name,env_indxs=env_indxs)
+    #     # apply jnt imp cmds to xbot immediately
+    #     # self._ros_xbot_adapter.apply_joint_impedances(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
+    #     self._ros_xbot_adapter.apply_joint_impedances_with_ramp(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
+    #     # self._ros_xbot_adapter.step()
 
-    def _get_world_time(self, robot_name: str): # get relative walltime
-        return rospy.get_time()-self._rospy_startime
-    
     def _generate_jnt_imp_control(self, robot_name: str):
         
         jnt_imp_controller = XMjJntImpCntrl(xbot_adapter=self._ros_xbot_adapter,
@@ -337,18 +340,15 @@ class RtDeploymentEnv(LRhcEnvBase):
         
         return jnt_imp_controller
 
+    def _step_world(self): # real world steps by itself (hopefully)
+        pass
+
+    def _get_world_time(self, robot_name: str): # get relative walltime
+        return rospy.get_time()-self._rospy_startime
+    
     def _reset_sim(self):
         self._ros_xbot_adapter.resetWorld()
-        
-    def _set_startup_jnt_imp_gains(self,
-            robot_name:str, 
-            env_indxs: torch.Tensor = None):
-        super()._set_startup_jnt_imp_gains(robot_name=robot_name,env_indxs=env_indxs)
-        # apply jnt imp cmds to xbot immediately
-        # self._ros_xbot_adapter.apply_joint_impedances(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
-        self._ros_xbot_adapter.apply_joint_impedances_with_ramp(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
-        # self._ros_xbot_adapter.step()
-
+    
     def _reset_state(self,
             robot_name: str,
             env_indxs: torch.Tensor = None,
