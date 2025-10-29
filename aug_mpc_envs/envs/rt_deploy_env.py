@@ -124,6 +124,9 @@ class RtDeploymentEnv(LRhcEnvBase):
 
         xmj_opts["use_mpc_pos_for_robot"]=True
 
+        xmj_opts["torque_correction"]=1.0 # correction factor for torques sent to real robot
+        # (useful if no torque sensors are available)
+
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         
         xmj_opts["use_gpu_pipeline"]=False
@@ -272,7 +275,7 @@ class RtDeploymentEnv(LRhcEnvBase):
     def _apply_cmds_to_jnt_imp_control(self, robot_name:str):
         super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
         jnt_imp_cmds=self._jnt_imp_controllers[self._robot_names[0]].get_pvesd()
-        jnt_imp_cmds[:, 2]=1.0*jnt_imp_cmds[:, 2] # scaling efforts for real robot
+        jnt_imp_cmds[:, 2]=self._env_opts["torque_correction"]*jnt_imp_cmds[:, 2] # scaling efforts for real robot
         self._ros_xbot_adapter.setJointsImpedanceCommand(jnt_imp_cmds)
         elapsed_since_last_cmd=self._get_world_time(robot_name=robot_name)-\
             self._last_control_time
