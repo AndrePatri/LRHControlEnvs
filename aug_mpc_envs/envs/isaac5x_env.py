@@ -85,8 +85,8 @@ class Isaac5xSimEnv(LRhcEnvBase):
         self._backend="torch"
         enable_livestream = self._env_opts["enable_livestream"]
         enable_viewport = self._env_opts["enable_viewport"]
-        base_isaac_exp = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.aug_mpc_envs.kit'
-        base_isaac_exp_headless = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.aug_mpc_envs.headless.kit'
+        base_isaac_exp = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.aug_mpc_envs.isaac5.1.kit'
+        base_isaac_exp_headless = f'{os.environ["EXP_PATH"]}/omni.isaac.sim.python.aug_mpc_envs.isaac5.1.headless.kit'
 
         experience=base_isaac_exp
         if self._env_opts["headless"]:
@@ -173,29 +173,30 @@ class Isaac5xSimEnv(LRhcEnvBase):
         from pxr import PhysxSchema, UsdGeom, UsdLux, Sdf, Gf, UsdPhysics, PhysicsSchemaTools
         from omni.usd import get_context, get_prim_at_path
 
-        # kit / core
+        # kit / core (Isaac Sim 5.1 namespace)
         import omni.kit as omni_kit
-        from omni.isaac.core.world import World
-        from omni.isaac.core.scenes.scene import Scene
-        from omni.isaac.core.articulations import ArticulationView
-        from omni.isaac.core.utils.extensions import enable_extension
-        from omni.isaac.core.utils.viewports import set_camera_view
-        from omni.isaac.core.utils.stage import get_current_stage
+        from isaacsim.core.world import World
+        from isaacsim.core.scenes.scene import Scene
+        from isaacsim.core.articulations import ArticulationView
+        from isaacsim.core.utils.extensions import enable_extension
+        from isaacsim.core.utils.viewports import set_camera_view
+        from isaacsim.core.utils.stage import get_current_stage
 
         # prims / prim utils
-        from omni.isaac.core.utils.prims import move_prim, get_prim_at_path as prim_get_prim_at_path
-        import omni.isaac.core.utils.prims as prim_utils
+        from isaacsim.core.utils.prims import move_prim, get_prim_at_path as prim_get_prim_at_path
+        import isaacsim.core.utils.prims as prim_utils
 
         # importer, cloner, replicator, sensors
-        from omni.importer.urdf import _urdf
-        from omni.isaac.cloner import GridCloner
+        from isaacsim.asset.importer.urdf import _urdf
+        from isaacsim.cloner import GridCloner
         import omni.replicator.core as rep
-        from omni.isaac.sensor import _sensor
+        from isaacsim.sensor import _sensor
 
         # project-specific
         from aug_mpc_envs.utils.contact_sensor import OmniContactSensors
         from aug_mpc_envs.utils.omni_jnt_imp_cntrl import OmniJntImpCntrl
         from aug_mpc_envs.utils.terrains import RlTerrains
+
 
     def _parse_env_opts(self):
         isaac_opts={}
