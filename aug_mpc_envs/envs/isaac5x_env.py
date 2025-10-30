@@ -166,7 +166,7 @@ class Isaac5xSimEnv(LRhcEnvBase):
         # globals
         global World, omni_kit, get_context, get_prim_at_path, UsdLux, Sdf, Gf, UsdPhysics, PhysicsSchemaTools
         global enable_extension, set_camera_view, _urdf, move_prim, prim_utils, prim_get_prim_at_path
-        global get_current_stage, Scene, ArticulationView, rep, _sensor, GridCloner
+        global get_current_stage, Articulation, rep, _sensor, GridCloner
         global OmniContactSensors, OmniJntImpCntrl, RlTerrains, PhysxSchema, UsdGeom
 
         # pxr + usd
@@ -175,10 +175,10 @@ class Isaac5xSimEnv(LRhcEnvBase):
 
         # kit / core (Isaac Sim 5.1 namespace)
         import omni.kit as omni_kit
-        from isaacsim.core.world import World
-        from isaacsim.core.scenes.scene import Scene
-        from isaacsim.core.articulations import ArticulationView
+        from isaacsim.core.api import World
+        from isaacsim.core.prims import Articulation
         from isaacsim.core.utils.extensions import enable_extension
+
         from isaacsim.core.utils.viewports import set_camera_view
         from isaacsim.core.utils.stage import get_current_stage
 
@@ -188,14 +188,15 @@ class Isaac5xSimEnv(LRhcEnvBase):
 
         # importer, cloner, replicator, sensors
         from isaacsim.asset.importer.urdf import _urdf
-        from isaacsim.cloner import GridCloner
+        from isaacsim.core.cloner import GridCloner
         import omni.replicator.core as rep
-        from isaacsim.sensor import _sensor
+        # from isaacsim.sensor import _sensor
+        # from isaacsim.sensors.physics import IMUSensor
 
         # project-specific
-        from aug_mpc_envs.utils.contact_sensor import OmniContactSensors
-        from aug_mpc_envs.utils.omni_jnt_imp_cntrl import OmniJntImpCntrl
-        from aug_mpc_envs.utils.terrains import RlTerrains
+        from aug_mpc_envs.utils.contact_sensor_isaac5x import OmniContactSensors
+        from aug_mpc_envs.utils.omni_jnt_imp_cntrl_isaac5x import OmniJntImpCntrl
+        from aug_mpc_envs.utils.terrains_isaac5x import RlTerrains
 
 
     def _parse_env_opts(self):
@@ -420,9 +421,9 @@ class Isaac5xSimEnv(LRhcEnvBase):
             "gpu_temp_buffer_capacity: " + str(self._gpu_temp_buffer_capacity) + "\n" + \
             "use_gpu_sim: " + str(self._world.get_physics_context().use_gpu_sim) + "\n" + \
             "use_gpu_pipeline: " + str(self._world.get_physics_context().use_gpu_pipeline) + "\n" + \
-            "use_fabric: " + str(self._world.get_physics_context().use_fabric) + "\n" + \
             "world device: " + str(self._world.get_physics_context().device) + "\n" + \
             "physics context device: " + str(self._world.get_physics_context().device) + "\n" 
+            # "use_fabric: " + str(self._world.get_physics_context().use_fabric) + "\n"
 
         Journal.log(self.__class__.__name__,
             "set_task",
@@ -556,7 +557,7 @@ class Isaac5xSimEnv(LRhcEnvBase):
             if self._env_opts["deduce_base_link"]:
                 base_link_name=self._get_baselink_candidate(robot_name=robot_name)
         
-            self._robots_art_views[robot_name] = ArticulationView(name = robot_name + "ArtView",
+            self._robots_art_views[robot_name] = Articulation(name = robot_name + "ArtView",
                                                         prim_paths_expr = self._env_opts["envs_ns"] + "/env_.*"+ "/" + robot_name + "/" + base_link_name, 
                                                         reset_xform_properties=False)
             self._robots_articulations[robot_name] = self._scene.add(self._robots_art_views[robot_name])
@@ -630,7 +631,7 @@ class Isaac5xSimEnv(LRhcEnvBase):
             LogType.STAT,
             throw_when_excep = True)
         
-        self._is = _sensor.acquire_imu_sensor_interface()
+        # self._is = _sensor.acquire_imu_sensor_interface()
 
     def _set_contact_links_material(self, prim_path: str):
         prim=get_prim_at_path(prim_path)
