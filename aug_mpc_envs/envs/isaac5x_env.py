@@ -19,19 +19,19 @@
 from isaacsim import SimulationApp
 
 import os
-import signal
-import re
 
 import torch
 import numpy as np
 
-from typing import Union, Tuple, Dict, List
+from typing import Dict, List
+
+import xml.etree.ElementTree as ET
 
 from EigenIPC.PyEigenIPC import VLevel
 from EigenIPC.PyEigenIPC import LogType
 from EigenIPC.PyEigenIPC import Journal
 
-from aug_mpc_envs.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
+from aug_mpc_envs.utils.math_utils import quat_to_omega
 
 from aug_mpc.envs.lrhc_remote_env_base import LRhcEnvBase
 from mpc_hive.utilities.math_utils_torch import world2base_frame,world2base_frame3D
@@ -852,13 +852,18 @@ class Isaac5xSimEnv(LRhcEnvBase):
         # import_config.default_position_drive_damping = 52.35988
         # import_config.default_drive_type = _urdf.UrdfJointTargetType.JOINT_DRIVE_POSITION
         # import URDF
+
+        # fixing fucking USD "feature" of not supporting dashes in mesh files
+        modified_urdf_path=self._remove_dashes(self._urdf_dump_paths[robot_name]) 
+
+        from isaacsim.core.utils.extensions import get_extension_path_from_name
         success, robot_prim_path_default = omni_kit.commands.execute(
             "URDFParseAndImportFile",
-            urdf_path=self._urdf_dump_paths[robot_name],
+            urdf_path=modified_urdf_path,
             import_config=import_config, 
             # get_articulation_root=True,
         )
-
+    
         robot_base_prim_path = self._env_opts["template_env_ns"] + "/" + robot_name
 
         if success:
@@ -881,6 +886,165 @@ class Isaac5xSimEnv(LRhcEnvBase):
         print("Imported robot URDF: \n", prim_utils.get_prim_children(robot_base_prim))
 
         return success
+
+    def _remove_dashes(self, urdf_path: str) -> str:
+        """
+        Create underscored symlinks (or fallback copies) for mesh files containing dashes
+        and write a new URDF with updated mesh URIs. Symlinks/copies are placed into
+        <urdf_dir>/usd_mesh_fix/ and the new URDF is written as <original>_usd_fix.<ext>.
+
+        Assumptions:
+        - Mesh URIs are absolute paths or 'file://<absolute path>'.
+        - No package:// resolution.
+        Returns:
+        The filesystem path to the new URDF file (the one with '_usd_fix' suffix).
+        """
+        def make_link_or_copy(src: str, dest: str) -> bool:
+            """
+            Try to create a symlink dest -> src. If symlink fails, copy src -> dest.
+            Returns True on success, False on failure.
+            """
+            try:
+                # If dest already exists and matches target, we're done
+                if os.path.lexists(dest):
+                    if os.path.islink(dest):
+                        if os.path.realpath(dest) == os.path.realpath(src):
+                            return True
+                        else:
+                            os.remove(dest)
+                    else:
+                        # file exists; if identical, ok; else remove if file
+                        if os.path.isfile(dest):
+                            if os.path.realpath(dest) == os.path.realpath(src):
+                                return True
+                            else:
+                                os.remove(dest)
+                        else:
+                            # directory or unexpected object - do not overwrite
+                            return False
+
+                # Try symlink
+                os.symlink(src, dest)
+                return True
+            except (OSError, NotImplementedError) as e:
+                # fallback to copy
+                try:
+                    shutil.copy2(src, dest)
+                    return True
+                except Exception as e2:
+                    print(f"WARNING: failed to create symlink and to copy '{dest}' -> '{src}': {e}; {e2}")
+                    return False
+
+        # Parse the URDF
+        try:
+            tree = ET.parse(urdf_path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to parse URDF '{urdf_path}': {e}")
+
+        root = tree.getroot()
+        urdf_dir = os.path.dirname(os.path.abspath(urdf_path))
+
+        # Prepare usd_mesh_fix folder
+        fix_mesh_dir = os.path.join(urdf_dir, "usd_mesh_fix")
+        os.makedirs(fix_mesh_dir, exist_ok=True)
+
+        modified = False
+
+        # Helper to iterate mesh elements irrespective of namespace
+        def iter_mesh_elements(elem):
+            if elem.tag.split('}')[-1] == 'mesh':
+                yield elem
+            for ch in list(elem):
+                yield from iter_mesh_elements(ch)
+
+        for mesh_elem in iter_mesh_elements(root):
+            orig_uri = None
+            uri_source = None  # 'attr' or 'child'
+            uri_child_elem: Optional[ET.Element] = None
+
+            # Case 1: <mesh filename="..."/>
+            if 'filename' in mesh_elem.attrib:
+                orig_uri = mesh_elem.attrib['filename'].strip()
+                uri_source = 'attr'
+            else:
+                # Case 2: <mesh><uri>...</uri></mesh>
+                for c in mesh_elem:
+                    if c.tag.split('}')[-1] == 'uri' and (c.text and c.text.strip()):
+                        orig_uri = c.text.strip()
+                        uri_source = 'child'
+                        uri_child_elem = c
+                        break
+
+            if not orig_uri:
+                continue
+
+            # Normalize and resolve file:// prefix
+            has_file_prefix = False
+            fs_path = None
+            if orig_uri.startswith('file://'):
+                has_file_prefix = True
+                path_part = orig_uri[len('file://'):]
+                fs_path = path_part
+            else:
+                # assume absolute; if not absolute, resolve relative to URDF dir as a fallback
+                if os.path.isabs(orig_uri):
+                    fs_path = orig_uri
+                else:
+                    fs_path = os.path.join(urdf_dir, orig_uri)
+
+            fs_path = os.path.abspath(fs_path)
+
+            if not os.path.exists(fs_path):
+                print(f"WARNING: mesh file not found at '{fs_path}'. Skipping mesh URI: '{orig_uri}'")
+                continue
+
+            basename = os.path.basename(fs_path)
+            if '-' not in basename:
+                continue  # nothing to change for this mesh
+
+            underscored_basename = basename.replace('-', '_')
+            # Place symlink/copy into usd_mesh_fix folder
+            dest_path = os.path.join(fix_mesh_dir, underscored_basename)
+
+            ok = make_link_or_copy(fs_path, dest_path)
+            if not ok:
+                print(f"WARNING: failed to create link/copy '{dest_path}' -> '{fs_path}'. Leaving URI unchanged.")
+                continue
+
+            # Construct new URI to place into new URDF.
+            # We'll preserve the original scheme: if original had 'file://', use 'file://' + dest_path
+            if has_file_prefix:
+                new_uri = 'file://' + dest_path
+            else:
+                # use absolute path
+                new_uri = dest_path
+
+            # Update the URDF element
+            if uri_source == 'attr':
+                mesh_elem.set('filename', new_uri)
+            else:
+                uri_child_elem.text = new_uri
+
+            modified = True
+            print(f"INFO: replaced mesh basename '{basename}' -> '{underscored_basename}', created '{dest_path}' and updated URDF entry.")
+
+        # Always write out a new URDF named <original>_usd_fix.<ext>
+        base_name = os.path.basename(urdf_path)
+        name, ext = os.path.splitext(base_name)
+        new_name = f"{name}_usd_fix{ext}"
+        new_urdf_path = os.path.join(urdf_dir, new_name)
+
+        try:
+            tree.write(new_urdf_path, encoding='utf-8', xml_declaration=True)
+        except Exception as e:
+            raise RuntimeError(f"Failed to write fixed URDF to '{new_urdf_path}': {e}")
+
+        if modified:
+            print(f"INFO: Wrote fixed URDF with mesh fixes to: {new_urdf_path}")
+        else:
+            print(f"INFO: No mesh basenames with dashes were modified. Still wrote copy to: {new_urdf_path}")
+
+        return new_urdf_path
 
     def apply_collision_filters(self, 
                                 physicscene_path: str, 
