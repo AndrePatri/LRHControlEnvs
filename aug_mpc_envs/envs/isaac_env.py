@@ -79,7 +79,7 @@ class IsaacSimEnv(LRhcEnvBase):
             override_low_lev_controller=override_low_lev_controller)
         # BaseTask.__init__(self,name=self._name,offset=None)
 
-    def _is_running(self):
+    def is_running(self):
         return self._simulation_app.is_running()
 
     def _pre_setup(self):

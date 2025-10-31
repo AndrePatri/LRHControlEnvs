@@ -200,6 +200,8 @@ class RtDeploymentEnv(LRhcEnvBase):
                 self._root_q_offsetm1[robot_name][:, :] = offsetm1.to(self._dtype).to(device)
 
         self._q_offset_acquired = True
+
+        self._isrunning=True
                 
     def _configure_scene(self):
         
@@ -278,7 +280,9 @@ class RtDeploymentEnv(LRhcEnvBase):
                 profile_name="safe")
             
             # resets jnt imp gain to the startups with a ramp
-            self._reset_jnt_imp_control(robot_name=robot_name, impedance_ramp_time=3.0) 
+            self._ros_xbot_adapter.impedance_ramp_time=1.5 # [s]
+            self._reset_jnt_imp_control(robot_name=robot_name) 
+            self._isrunning=False
 
     def _apply_cmds_to_jnt_imp_control(self, robot_name:str):
         super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
@@ -655,7 +659,7 @@ class RtDeploymentEnv(LRhcEnvBase):
     def _robot_jnt_names(self, robot_name: str):
         return self._robot_iface_enabled_jnts
     
-    def _is_running(self):
+    def is_running(self):
         running=self._ros_xbot_adapter.is_ros_control_running()
         if not running:
             Journal.log(self.__class__.__name__,
@@ -663,7 +667,8 @@ class RtDeploymentEnv(LRhcEnvBase):
             "ros_control is not running",
             LogType.WARN,
             throw_when_excep = True)
-        return running
+        
+        return running and self._isrunning
     
     def quat_to_yaw(self, q : torch.Tensor):
         w, x, y, z = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
