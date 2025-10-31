@@ -280,7 +280,7 @@ class RtDeploymentEnv(LRhcEnvBase):
                 profile_name="safe")
             
             # resets jnt imp gain to the startups with a ramp
-            self._ros_xbot_adapter.impedance_ramp_time=1.5 # [s]
+            self._ros_xbot_adapter.impedance_ramp_time=2.5 # [s]
             self._reset_jnt_imp_control(robot_name=robot_name) 
             self._isrunning=False
 
