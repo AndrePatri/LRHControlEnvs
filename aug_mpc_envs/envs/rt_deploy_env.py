@@ -127,6 +127,8 @@ class RtDeploymentEnv(LRhcEnvBase):
         xmj_opts["torque_correction"]=1.0 # correction factor for torques sent to real robot
         # (useful if no torque sensors are available)
 
+        xmj_opts["max_imp_torque"]=180.0 # [Nm]
+
         xmj_opts["jnt_imp_ramp_time"]=0.1
         xmj_opts["jnt_imp_ramp_time_onclose"]=0.2
 
@@ -291,6 +293,7 @@ class RtDeploymentEnv(LRhcEnvBase):
         super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
         jnt_imp_cmds=self._jnt_imp_controllers[self._robot_names[0]].get_pvesd()
         jnt_imp_cmds[:, 2]=self._env_opts["torque_correction"]*jnt_imp_cmds[:, 2] # scaling efforts for real robot
+        jnt_imp_cmds[:, 2]=torch.clamp(jnt_imp_cmds[:, 2], min=-self._env_opts["max_imp_torque"], max=self._env_opts["max_imp_torque"])
         self._ros_xbot_adapter.setJointsImpedanceCommand(jnt_imp_cmds)
         elapsed_since_last_cmd=self._get_world_time(robot_name=robot_name)-\
             self._last_control_time
