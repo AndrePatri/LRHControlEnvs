@@ -270,7 +270,15 @@ class RtDeploymentEnv(LRhcEnvBase):
         pass
 
     def _close(self):
-        pass
+        for i in range(len(self._robot_names)):
+            robot_name = self._robot_names[i]
+            
+            # set filters to safe
+            self._ros_xbot_adapter.set_filters(set_enabled=True, 
+                profile_name="safe")
+            
+            # resets jnt imp gain to the startups with a ramp
+            self._reset_jnt_imp_control(robot_name=robot_name, impedance_ramp_time=3.0) 
 
     def _apply_cmds_to_jnt_imp_control(self, robot_name:str):
         super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
