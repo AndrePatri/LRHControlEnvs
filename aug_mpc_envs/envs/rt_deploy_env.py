@@ -127,6 +127,9 @@ class RtDeploymentEnv(LRhcEnvBase):
         xmj_opts["torque_correction"]=1.0 # correction factor for torques sent to real robot
         # (useful if no torque sensors are available)
 
+        xmj_opts["jnt_imp_ramp_time"]=0.1
+        xmj_opts["jnt_imp_ramp_time_onclose"]=0.2
+
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         
         xmj_opts["use_gpu_pipeline"]=False
@@ -280,7 +283,7 @@ class RtDeploymentEnv(LRhcEnvBase):
                 profile_name="safe")
             
             # resets jnt imp gain to the startups with a ramp
-            self._ros_xbot_adapter.impedance_ramp_time=2.5 # [s]
+            self._ros_xbot_adapter.impedance_ramp_time=self._env_opts["jnt_imp_ramp_time_onclose"] # [s]
             self._reset_jnt_imp_control(robot_name=robot_name) 
             self._isrunning=False
 
@@ -330,7 +333,8 @@ class RtDeploymentEnv(LRhcEnvBase):
 
         self._ros_xbot_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
         
-        self._ros_xbot_adapter.apply_joint_impedances_with_ramp(self._ros_xbot_adapter._commanded_joint_impedances_by_name) # ramps impeances
+        self._ros_xbot_adapter.apply_joint_impedances_with_ramp(self._ros_xbot_adapter._commanded_joint_impedances_by_name,
+                                                    impedance_ramp_time=self._env_opts["jnt_imp_ramp_time"]) # ramps impeances
 
     # def _set_startup_jnt_imp_gains(self,
     #         robot_name:str, 
