@@ -3,8 +3,8 @@ import numpy as np
 
 from typing import List, Dict
 
-from omni.isaac.core.world import World
-from omni.isaac.core.prims import RigidPrimView
+from isaacsim.core.api import World
+from isaacsim.core.prims import RigidPrim
 
 from EigenIPC.PyEigenIPC import LogType
 from EigenIPC.PyEigenIPC import Journal
@@ -121,8 +121,8 @@ class OmniContactSensors:
             if self.contact_geom_prim_views[sensor_idx] is None:        
                 prim_view_regex_path=prim_paths_expr=envs_namespace + "/env_.*/" + robot_name + \
                     "/" + contact_link_names[sensor_idx]                     
-                self.contact_geom_prim_views[sensor_idx] = RigidPrimView(prim_paths_expr=prim_view_regex_path,
-                                                    name=self.name+"ContactRigidPrimView"+contact_link_names[sensor_idx], 
+                self.contact_geom_prim_views[sensor_idx] = RigidPrim(prim_paths_expr=prim_view_regex_path,
+                                                    name=self.name+"ContactRigidPrim"+contact_link_names[sensor_idx], 
                                                     contact_filter_prim_paths_expr= self._filter_paths,
                                                     prepare_contact_sensors=True, 
                                                     track_contact_forces = True,
