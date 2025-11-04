@@ -428,7 +428,8 @@ class XMjSimEnv(LRhcEnvBase):
         numerical_diff: bool = False,
         base_loc: bool = True):
         
-        frame_id, q, omega, linacc = self._xmj_adapter.get_imu_data()
+        self._xmj_adapter.read_imu_data()
+        frame_id, q, omega, linacc = self._xmj_adapter.get_base_link_state()
 
         # in sim we get pos from sim
         self._root_p[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().p).reshape(self._num_envs, -1).to(self._dtype)
