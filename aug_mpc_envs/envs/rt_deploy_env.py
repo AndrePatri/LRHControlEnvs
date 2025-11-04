@@ -642,7 +642,7 @@ class RtDeploymentEnv(LRhcEnvBase):
     def _robot_jnt_names(self, robot_name: str):
         return self._robot_iface_enabled_jnts
     
-    def _is_running(self):
+    def is_running(self):
         running=self._ros_xbot_adapter.is_ros_control_running()
         if not running:
             Journal.log(self.__class__.__name__,
