@@ -127,6 +127,8 @@ class XMjSimEnv(LRhcEnvBase):
 
         xmj_opts["base_link_name"]="base_link"
 
+        xmj_opts["use_mpc_pos_for_robot"]=False
+
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         xmj_opts["rendering_dt"]=1/xmj_opts["render_fps"]        
         
@@ -606,7 +608,7 @@ class XMjSimEnv(LRhcEnvBase):
             self._root_q_prev[robot_name] = self._root_q[robot_name].clone()
             self._root_q_default[robot_name] = self._root_q[robot_name].clone()
             self._root_q_offset[robot_name]=None
-            if  self._env_opts["use_mpc_pos_for_robot"]:
+            if self._env_opts["use_mpc_pos_for_robot"]:
                 self._root_q_offset[robot_name]=self._root_q[robot_name].clone()
                 self._root_q_offsetm1[robot_name]=self._root_q[robot_name].clone()
 

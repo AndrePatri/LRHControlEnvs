@@ -127,7 +127,7 @@ class RtDeploymentEnv(LRhcEnvBase):
         xmj_opts["torque_correction"]=1.0 # correction factor for torques sent to real robot
         # (useful if no torque sensors are available)
 
-        xmj_opts["max_imp_torque"]=180.0 # [Nm]
+        xmj_opts["max_imp_torque"]=150.0 # [Nm]
 
         xmj_opts["jnt_imp_ramp_time"]=0.1
         xmj_opts["jnt_imp_ramp_time_onclose"]=0.2
