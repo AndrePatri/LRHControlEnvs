@@ -124,7 +124,7 @@ class XMjSimEnv(LRhcEnvBase):
         xmj_opts["headless"] = False
         xmj_opts["xmj_files_dir"]=None
         xmj_opts["xmj_timeout"]=1000
-        xmj_opts["xbot2_filter_prof"]="fast"
+        xmj_opts["xbot2_filter_prof"]="medium"
 
         xmj_opts["base_linkname"]="base_link"
 
