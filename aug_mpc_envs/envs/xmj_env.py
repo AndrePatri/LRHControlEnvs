@@ -18,6 +18,7 @@
 
 import torch
 import numpy as np
+import math
 
 from typing import Union, Tuple, Dict, List
 
@@ -123,11 +124,12 @@ class XMjSimEnv(LRhcEnvBase):
         xmj_opts["headless"] = False
         xmj_opts["xmj_files_dir"]=None
         xmj_opts["xmj_timeout"]=1000
-        xmj_opts["xbot2_filter_prof"]="medium"
+        xmj_opts["xbot2_filter_prof"]="fast"
 
-        xmj_opts["base_link_name"]="base_link"
+        xmj_opts["base_linkname"]="base_link"
 
-        xmj_opts["use_mpc_pos_for_robot"]=False
+        xmj_opts["use_mpc_pos_for_robot"]=False # default to using pos from sim
+        xmj_opts["use_rel_q_from_startup"]=True
 
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         xmj_opts["rendering_dt"]=1/xmj_opts["render_fps"]        
@@ -227,7 +229,7 @@ class XMjSimEnv(LRhcEnvBase):
                 fallback_cmd_damping=100.0,
                 allow_fallback=True,
                 enable_filters=True,
-                base_link_name=self._env_opts["base_link_name"],
+                base_link=self._env_opts["base_linkname"],
                 render_to_file=self._env_opts["render_to_file"],
                 render_fps=self._env_opts["render_fps"])
             # self._xmj_adapter.build_scenario()
@@ -342,7 +344,7 @@ class XMjSimEnv(LRhcEnvBase):
                     env_indxs=env_indxs,
                     robot_name=robot_name)
         else:
-            raise NotImplementedError("Getting root state from xbot not implemented yet !")
+            # raise NotImplementedError("Getting root state from xbot not implemented yet !")
             self._get_root_state_xbot(numerical_diff=self._env_opts["use_diff_vels"],
                     env_indxs=env_indxs,
                     robot_name=robot_name)
@@ -454,7 +456,7 @@ class XMjSimEnv(LRhcEnvBase):
             self._root_p[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().p).reshape(self._num_envs, -1).to(self._dtype)
 
         if self._root_q_offset[robot_name] is not None and self._q_offset_acquired:
-
+            
             # extract yaw-only part of incoming q
             yaw_q = self.yaw_quat(self.quat_to_yaw(q))
 
@@ -613,7 +615,7 @@ class XMjSimEnv(LRhcEnvBase):
             self._root_q_prev[robot_name] = self._root_q[robot_name].clone()
             self._root_q_default[robot_name] = self._root_q[robot_name].clone()
             self._root_q_offset[robot_name]=None
-            if self._env_opts["use_mpc_pos_for_robot"]:
+            if self._env_opts["use_rel_q_from_startup"]:
                 self._root_q_offset[robot_name]=self._root_q[robot_name].clone()
                 self._root_q_offsetm1[robot_name]=self._root_q[robot_name].clone()
 
@@ -678,3 +680,17 @@ class XMjSimEnv(LRhcEnvBase):
     
     def _robot_jnt_names(self, robot_name: str):
         return self._xmj_adapter.xmj_env().jnt_names()
+    
+    def quat_to_yaw(self, q : torch.Tensor):
+        w, x, y, z = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
+
+        return math.atan2(2.0*(w*z + x*y), 1.0 - 2.0*(y*y + z*z))
+
+    def yaw_quat(self, yaw):
+        return torch.tensor([math.cos(yaw/2.0), 0.0, 0.0, math.sin(yaw/2.0)], dtype=self._dtype, device=self._device)
+
+    def _quat_inverse(self, q: torch.Tensor) -> torch.Tensor:
+        # inverse for unit quaternion: [w, -x, -y, -z]
+        qi = q.clone()
+        qi[..., 1:] = -qi[..., 1:]
+        return qi

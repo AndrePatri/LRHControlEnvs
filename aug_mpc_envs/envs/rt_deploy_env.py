@@ -123,6 +123,7 @@ class RtDeploymentEnv(LRhcEnvBase):
         xmj_opts["base_linkname"]="base_link"
 
         xmj_opts["use_mpc_pos_for_robot"]=True
+        xmj_opts["use_rel_q_from_startup"]=True
 
         xmj_opts["torque_correction"]=1.0 # correction factor for torques sent to real robot
         # (useful if no torque sensors are available)
@@ -598,7 +599,7 @@ class RtDeploymentEnv(LRhcEnvBase):
             self._root_q_prev[robot_name] = self._root_q[robot_name].clone()
             self._root_q_default[robot_name] = self._root_q[robot_name].clone()
             self._root_q_offset[robot_name]=None
-            if  self._env_opts["use_mpc_pos_for_robot"]:
+            if  self._env_opts["use_rel_q_from_startup"]:
                 self._root_q_offset[robot_name]=self._root_q[robot_name].clone()
                 self._root_q_offsetm1[robot_name]=self._root_q[robot_name].clone()
 
