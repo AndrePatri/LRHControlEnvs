@@ -231,7 +231,12 @@ class XMjSimEnv(LRhcEnvBase):
                 render_to_file=self._env_opts["render_to_file"],
                 render_fps=self._env_opts["render_fps"])
             # self._xmj_adapter.build_scenario()
-            self._xmj_adapter.startup()
+            with open(self._urdf_dump_paths[self._robot_names[0]], "r", encoding="utf-8") as f:
+                urdf_str = f.read()
+            with open(self._srdf_dump_paths[self._robot_names[0]], "r", encoding="utf-8") as f:
+                srdf_str = f.read()
+            self._xmj_adapter.startup(urdf=urdf_str,
+                            srdf=srdf_str)
             self._xmj_adapter.set_filters(set_enabled=True, 
                 profile_name=self._env_opts["xbot2_filter_prof"])
 
