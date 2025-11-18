@@ -956,7 +956,7 @@ class IsaacSimEnv(LRhcEnvBase):
                 # --- Update State Buffers ---
                 # Use boolean indexing to scatter only triggered values
                 active[trigger_mask] = True
-                steps_rem[trigger_mask] = self._pert_durations[robot_name][trigger_mask]
+                steps_rem[trigger_mask] = self._pert_durations[robot_name][trigger_mask, :].flatten()
                 forces_world[trigger_mask, :] = forces_to_apply[trigger_mask, :]
                 torques_world[trigger_mask, :] = torques_to_apply[trigger_mask, :]
 
