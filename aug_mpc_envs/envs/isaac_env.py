@@ -993,8 +993,6 @@ class IsaacSimEnv(LRhcEnvBase):
         
         super()._update_contact_state(robot_name, env_indxs)
         
-        print("gnignigngin")
-        print(self._pert_forces_world[robot_name][env_indxs, :])
         if self._env_opts["use_random_pertub"]:
             # write APPLIED perturbations to root wrench (mainly for debug)
             self.cluster_servers[robot_name].get_state().contact_wrenches_root.set(data=self._pert_forces_world[robot_name][env_indxs, :], 
