@@ -20,8 +20,7 @@ from isaacsim import SimulationApp
 import carb
 
 import os
-import signal
-import re
+import math
 
 import torch
 import numpy as np
@@ -147,6 +146,7 @@ class IsaacSimEnv(LRhcEnvBase):
         self._metadata = None    
 
         self._robots_art_views = {}
+        self._blink_rigid_prim_views = {}
         self._robots_articulations = {}
         self._robots_geom_prim_views = {}
         self.omni_contact_sensors = {}
@@ -169,10 +169,10 @@ class IsaacSimEnv(LRhcEnvBase):
         # access Isaac's kit) and also expose to all methods the imports
         global World, omni_kit, get_context, UsdLux, Sdf, Gf, UsdPhysics, PhysicsSchemaTools
         global enable_extension, set_camera_view, _urdf, move_prim, GridCloner, prim_utils
-        global get_current_stage, Scene, ArticulationView, rep
+        global get_current_stage, Scene, ArticulationView, RigidPrimView, rep
         global OmniContactSensors, RlTerrains,OmniJntImpCntrl
         global PhysxSchema, UsdGeom
-        global _sensor
+        global _sensor, _dynamic_control
         global get_prim_at_path
 
         from pxr import PhysxSchema, UsdGeom
@@ -190,11 +190,15 @@ class IsaacSimEnv(LRhcEnvBase):
         from omni.isaac.core.utils.stage import get_current_stage
         from omni.isaac.core.scenes.scene import Scene
         from omni.isaac.core.articulations import ArticulationView
+        from omni.isaac.core.prims import RigidPrimView
+
         import omni.replicator.core as rep
 
         from omni.isaac.core.utils.prims import get_prim_at_path
 
         from omni.isaac.sensor import _sensor
+
+        from omni.isaac.dynamic_control import _dynamic_control
 
         from aug_mpc_envs.utils.contact_sensor import OmniContactSensors
         from aug_mpc_envs.utils.omni_jnt_imp_cntrl import OmniJntImpCntrl
@@ -271,6 +275,13 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["use_diff_vels"] = False
 
         isaac_opts["render_to_file"]=False
+
+        isaac_opts["use_random_pertub"]=True
+        isaac_opts["lin_pert_max_wrt_weight"]=0.5
+        isaac_opts["ang_pert_max_wrt_weight"]=0.1
+        isaac_opts["pert_wrenches_max_duration"]=0.1
+        isaac_opts["pert_wrenches_min_duration"]=0.05
+        isaac_opts["pert_wrenches_prob"]=0.05
 
         isaac_opts.update(self._env_opts) # update defaults with provided opts
         isaac_opts["rendering_freq"]=int(isaac_opts["rendering_dt"]/isaac_opts["physics_dt"])
@@ -562,6 +573,11 @@ class IsaacSimEnv(LRhcEnvBase):
                                                         prim_paths_expr = self._env_opts["envs_ns"] + "/env_.*"+ "/" + robot_name + "/" + base_link_name, 
                                                         reset_xform_properties=False)
             self._robots_articulations[robot_name] = self._scene.add(self._robots_art_views[robot_name])
+
+            self._blink_rigid_prim_views[robot_name] = RigidPrimView(prim_paths_expr=self._env_opts["envs_ns"] + "/env_.*"+ "/" + robot_name + "/" + base_link_name,
+                                                    name = robot_name + "RigidPrimView") # base link prim views
+            self._scene.add(self._blink_rigid_prim_views[robot_name]) # need to add so it is properly initialized when resetting world 
+
             # self._robots_geom_prim_views[robot_name] = GeometryPrimView(name = robot_name + "GeomView",
             #                                                 prim_paths_expr = self._env_ns + "/env*"+ "/" + robot_name,
             #                                                 # prepare_contact_sensors = True
@@ -633,6 +649,7 @@ class IsaacSimEnv(LRhcEnvBase):
             throw_when_excep = True)
         
         self._is = _sensor.acquire_imu_sensor_interface()
+        self._dyn_control=_dynamic_control.acquire_dynamic_control_interface()
 
     def _set_contact_links_material(self, prim_path: str):
         prim=get_prim_at_path(prim_path)
@@ -828,6 +845,147 @@ class IsaacSimEnv(LRhcEnvBase):
             robot_name=robot_name)
         self._read_jnts_state_from_robot(env_indxs=env_indxs,
             robot_name=robot_name)
+    
+    def _process_perturbations(self):
+
+        # Iterate over each robot view
+        for i in range(len(self._robot_names)):
+            robot_name = self._robot_names[i]
+
+            # tolerate either spelling of the option (backwards compatible)
+            if self._env_opts["use_random_pertub"]:
+
+                # Pre-fetch views for code clarity (references, not copies)
+                active = self._pert_active[robot_name]
+                steps_rem = self._pert_steps_remaining[robot_name]
+                forces_world = self._pert_forces_world[robot_name]
+                torques_world = self._pert_torques_world[robot_name]
+
+                # --- 1. Update Active Counters (In-Place) ---
+                if active.any():
+                    # In-place subtraction
+                    steps_rem[active] -= 1
+
+                # --- 2. Reset Finished Perturbations (In-Place) ---
+                # Logic: Active AND (Steps <= 0)
+                # Note: Creating 'newly_ended' boolean mask is a tiny unavoidable allocation
+                newly_ended = active & (steps_rem <= 0)
+
+                if newly_ended.any():
+                    # Use masked_fill_ for in-place zeroing
+                    active.masked_fill_(newly_ended, False)
+                    forces_world.masked_fill_(newly_ended, 0.0)
+                    torques_world.masked_fill_(newly_ended, 0.0)
+                    steps_rem.masked_fill_(newly_ended, 0)
+
+                # --- 3. Trigger New Perturbations ---
+
+                # Reuse scratch buffer for probability check
+                # Assumes self._pert_scratch is (num_envs, 1) pre-allocated
+                self._pert_scratch[robot_name].uniform_(0.0, 1.0)
+
+                # Check probs against threshold (Broadcasting (N,1) vs scalar)
+                # Flatten scratch to (N,) to match 'active' mask
+                trigger_mask = (self._pert_scratch[robot_name].squeeze(-1) < self._env_opts["pert_wrenches_prob"]) & (~active)
+
+                if trigger_mask.any():
+
+                    # Cache weights (references)
+                    weight = self._weights[robot_name]
+                    lin_max = self._env_opts["lin_pert_max_wrt_weight"] * weight
+                    ang_max = self._env_opts["ang_pert_max_wrt_weight"] * weight
+
+                    # --- Force Generation (Reuse _pert_lindir buffer) ---
+                    lindir = self._pert_lindir[robot_name]  # (N, 3)
+
+                    # 1. Fill with Standard Normal noise in-place
+                    lindir.normal_()
+
+                    # 2. Normalize in-place
+                    norms = torch.norm(lindir, dim=1, keepdim=True).clamp_min_(1e-6)
+                    lindir.div_(norms)
+
+                    # 3. Calculate Magnitudes (Reuse scratch buffer)
+                    # Fill scratch with Uniform [0, 1]
+                    self._pert_scratch[robot_name].uniform_(0.0, 1.0)
+
+                    # 4. Apply Magnitude to Direction in-place
+                    # lindir becomes the final force vector here
+                    # formula: dir * (rand_01 * max_force)
+                    lindir.mul_(self._pert_scratch[robot_name] * lin_max)
+
+                    # --- Torque Generation (Reuse _pert_angdir buffer) ---
+                    angdir = self._pert_angdir[robot_name]  # (N, 3)
+
+                    # 1. Fill with Standard Normal noise
+                    angdir.normal_()
+
+                    # 2. Normalize
+                    norms = torch.norm(angdir, dim=1, keepdim=True).clamp_min_(1e-6)
+                    angdir.div_(norms)
+
+                    # 3. Magnitudes
+                    self._pert_scratch[robot_name].uniform_(0.0, 1.0)
+
+                    # 4. Apply Magnitude
+                    angdir.mul_(self._pert_scratch[robot_name] * ang_max)
+
+                    # --- Duration Generation (Reuse _pert_durations) ---
+                    # Use torch.randint_like to reliably fill integer durations (same shape/device)
+                    self._pert_durations[robot_name] = torch.randint_like(
+                        self._pert_durations[robot_name],
+                        low=self._pert_min_steps,
+                        high=self._pert_max_steps + 1
+                    )
+
+                    # --- Update State Buffers ---
+                    # Use boolean indexing to scatter only triggered values
+                    active[trigger_mask] = True
+                    steps_rem[trigger_mask] = self._pert_durations[robot_name][trigger_mask]
+                    forces_world[trigger_mask] = lindir[trigger_mask]
+                    torques_world[trigger_mask] = angdir[trigger_mask]
+
+                # --- 4. Apply Wrenches (Vectorized) ---
+                # Only call API if there are active perturbations to minimize overhead
+                if active.any():
+                    
+                    self._blink_rigid_prim_views[robot_name].apply_forces_and_torques_at_pos(
+                        forces=forces_world,
+                        torques=torques_world,
+                        positions=None, # body frame origin
+                        is_global=True
+                    )
+                    
+    def _pre_step(self):
+            
+        self._process_perturbations()
+
+        super()._pre_step()
+
+    def _pre_step_db(self):
+            
+        self._process_perturbations()
+
+        super()._pre_step_db()
+
+    def _update_contact_state(self, 
+            robot_name: str, 
+            env_indxs: torch.Tensor = None):
+        
+        super()._update_contact_state(robot_name, env_indxs)
+        
+        if self._env_opts["use_random_pertub"]:
+            # write APPLIED perturbations to root wrench (mainly for debug)
+            self.cluster_servers[robot_name].get_state().contact_wrenches_root.set(data=self._pert_forces_world[robot_name][env_indxs, :], 
+                                    data_type="f",
+                                    contact_name="root", 
+                                    robot_idxs = env_indxs, 
+                                    gpu=self._use_gpu)
+            self.cluster_servers[robot_name].get_state().contact_wrenches_root.set(data=self._pert_torques_world[robot_name][env_indxs, :],
+                                    data_type="t",
+                                    contact_name="root", 
+                                    robot_idxs = env_indxs, 
+                                    gpu=self._use_gpu)
         
     def _import_urdf(self, 
         robot_name: str,
@@ -1232,6 +1390,24 @@ class IsaacSimEnv(LRhcEnvBase):
                 envs_namespace=self._env_opts["envs_ns"])            
     
     def _init_robots_state(self):
+        
+        self._masses = {}
+        self._weights = {}
+
+        self._pert_active = {}            # bool mask: (num_envs,)
+        self._pert_steps_remaining = {}   # int steps: (num_envs,)
+        self._pert_forces_world = {}       # (num_envs,3)
+        self._pert_torques_world = {}      # (num_envs,3)
+        self._pert_force_local = {}       # (num_envs,3)  (if needed)
+        self._pert_torque_local = {}      # (num_envs,3)
+        self._pert_lindir = {}
+        self._pert_angdir = {}
+        self._pert_durations = {}
+        self._pert_scratch = {}
+
+        # convert durations in seconds to integer physics steps (min 1 step)
+        self._pert_min_steps = max(1, int(math.ceil(self._env_opts["pert_wrenches_min_duration"] / self._env_opts["physics_dt"])))
+        self._pert_max_steps = max(self._pert_min_steps, int(math.ceil(self._env_opts["pert_wrenches_max_duration"] / self._env_opts["physics_dt"])))
 
         self._calc_robot_distrib()
 
@@ -1309,6 +1485,28 @@ class IsaacSimEnv(LRhcEnvBase):
 
             self._update_root_offsets(robot_name)
 
+            # boolean active flag per env
+            self._pert_active[robot_name] = torch.zeros((self._num_envs,), dtype=torch.bool, device=self._device)
+            # remaining steps as integer tensor
+            self._pert_steps_remaining[robot_name] = torch.zeros((self._num_envs,), dtype=torch.int32, device=self._device)
+            # world force & torque (N and N*m) stored as floats
+            self._pert_forces_world[robot_name] = torch.zeros((self._num_envs, 3), dtype=self._dtype, device=self._device)
+            self._pert_torques_world[robot_name] = torch.zeros((self._num_envs, 3), dtype=self._dtype, device=self._device)
+            # local frame copies (if you want to store local-frame versions)
+            self._pert_force_local[robot_name] = torch.zeros((self._num_envs, 3), dtype=self._dtype, device=self._device)
+            self._pert_torque_local[robot_name] = torch.zeros((self._num_envs, 3), dtype=self._dtype, device=self._device)
+                
+            self._pert_lindir[robot_name] =  torch.zeros((self._num_envs, 3), dtype=self._dtype, device=self._device)
+            self._pert_angdir[robot_name] =  torch.zeros((self._num_envs, 3), dtype=self._dtype, device=self._device)
+
+            self._pert_durations[robot_name] = torch.zeros((self._num_envs, 1), dtype=torch.int32, device=self._device)
+
+            self._pert_scratch[robot_name] = torch.zeros((self._num_envs, 1), dtype=self._dtype, device=self._device)
+            
+            self._masses[robot_name] = torch.sum(self._robots_art_views[robot_name].get_body_masses(clone=True), dim=1).to(dtype=self._dtype, device=self._device)
+
+            self._weights[robot_name] = self._masses[robot_name] * abs(self._env_opts["gravity"][2].item())
+            
     def current_tstep(self):
         self._world.current_time_step_index
     
