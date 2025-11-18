@@ -277,11 +277,17 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["render_to_file"]=False
 
         isaac_opts["use_random_pertub"]=True
+        isaac_opts["pert_wrenches_max_duration"]=0.2
+        isaac_opts["pert_wrenches_min_duration"]=0.05
+
+        isaac_opts["pert_wrenches_weight_factor"]=1.0 # 0.5 -> 50% of full robot weight
+        isaac_opts["max_lin_impulse_norm"]=isaac_opts["pert_wrenches_weight_factor"]*isaac_opts["pert_wrenches_max_duration"]
+        isaac_opts["max_ang_impulse_lever"]=0.2 # [m]
+        isaac_opts["max_ang_impulse_norm"]=isaac_opts["max_lin_impulse_norm"]*isaac_opts["max_ang_impulse_lever"]
         isaac_opts["lin_pert_max_wrt_weight"]=0.5
         isaac_opts["ang_pert_max_wrt_weight"]=0.1
-        isaac_opts["pert_wrenches_max_duration"]=0.1
-        isaac_opts["pert_wrenches_min_duration"]=0.05
-        isaac_opts["pert_wrenches_prob"]=0.05
+        
+        isaac_opts["pert_wrenches_rate"]=3.0 # on avergare 1 pert every pert_wrenches_rate seconds
 
         isaac_opts.update(self._env_opts) # update defaults with provided opts
         isaac_opts["rendering_freq"]=int(isaac_opts["rendering_dt"]/isaac_opts["physics_dt"])
@@ -852,119 +858,132 @@ class IsaacSimEnv(LRhcEnvBase):
         for i in range(len(self._robot_names)):
             robot_name = self._robot_names[i]
 
-            # tolerate either spelling of the option (backwards compatible)
-            if self._env_opts["use_random_pertub"]:
+            # Pre-fetch views for code clarity (references, not copies)
+            active = self._pert_active[robot_name]
+            steps_rem = self._pert_steps_remaining[robot_name]
+            forces_world = self._pert_forces_world[robot_name]
+            torques_world = self._pert_torques_world[robot_name]
 
-                # Pre-fetch views for code clarity (references, not copies)
-                active = self._pert_active[robot_name]
-                steps_rem = self._pert_steps_remaining[robot_name]
-                forces_world = self._pert_forces_world[robot_name]
-                torques_world = self._pert_torques_world[robot_name]
+            # --- 1. Update Active Counters (In-Place) ---
+            if active.any():
+                # In-place subtraction
+                steps_rem[active] -= 1
 
-                # --- 1. Update Active Counters (In-Place) ---
-                if active.any():
-                    # In-place subtraction
-                    steps_rem[active] -= 1
+            # --- 2. Reset Finished Perturbations (In-Place) ---
+            # Logic: Active AND (Steps <= 0)
+            # Note: Creating 'newly_ended' boolean mask is a tiny unavoidable allocation
+            newly_ended = active & (steps_rem <= 0)
 
-                # --- 2. Reset Finished Perturbations (In-Place) ---
-                # Logic: Active AND (Steps <= 0)
-                # Note: Creating 'newly_ended' boolean mask is a tiny unavoidable allocation
-                newly_ended = active & (steps_rem <= 0)
+            if newly_ended.any():
+                # Use masked_fill_ for in-place zeroing
+                active.masked_fill_(newly_ended, False)
+                forces_world[newly_ended, :]=0
+                torques_world[newly_ended, :]=0
+                steps_rem.masked_fill_(newly_ended, 0)
 
-                if newly_ended.any():
-                    # Use masked_fill_ for in-place zeroing
-                    active.masked_fill_(newly_ended, False)
-                    forces_world.masked_fill_(newly_ended, 0.0)
-                    torques_world.masked_fill_(newly_ended, 0.0)
-                    steps_rem.masked_fill_(newly_ended, 0)
+            # --- 3. Trigger New Perturbations ---
 
-                # --- 3. Trigger New Perturbations ---
+            # Reuse scratch buffer for probability check
+            # Assumes self._pert_scratch is (num_envs, 1) pre-allocated
+            self._pert_scratch[robot_name].uniform_(0.0, 1.0)
 
-                # Reuse scratch buffer for probability check
-                # Assumes self._pert_scratch is (num_envs, 1) pre-allocated
+            # Check probs against threshold (Broadcasting (N,1) vs scalar)
+            # Flatten scratch to (N,) to match 'active' mask
+            trigger_mask = (self._pert_scratch[robot_name].flatten() < self._pert_wrenches_prob) & (~active)
+
+            if trigger_mask.any():
+
+                # Cache weights (references)
+                weight = self._weights[robot_name]
+
+                #   we now treat the configured "max_*_impulse_*" as the maximum **impulse** (N·s or N·m·s),
+                #   and convert impulse -> force/torque by dividing by the sampled duration (seconds).
+                #   Use per-robot weight scaling as before.
+                lin_impulse_max = self._env_opts["max_lin_impulse_norm"] * weight
+                ang_impulse_max = self._env_opts["max_ang_impulse_norm"] * weight
+
+                # --- Force (Impulse) Direction Generation (Reuse _pert_lindir buffer) ---
+                lindir = self._pert_lindir[robot_name]  # (N, 3)
+
+                # 1. Fill with Standard Normal noise in-place
+                lindir.normal_()
+
+                # 2. Normalize in-place
+                norms = torch.norm(lindir, dim=1, keepdim=True).clamp_min_(1e-6)
+                lindir.div_(norms)
+
+                # 3. Sample linear impulse magnitudes (reuse scratch)
+                # scratch has shape (N,1) - uniform [0,1]
                 self._pert_scratch[robot_name].uniform_(0.0, 1.0)
+                # impulse vectors = unit_dir * (rand * lin_impulse_max)
 
-                # Check probs against threshold (Broadcasting (N,1) vs scalar)
-                # Flatten scratch to (N,) to match 'active' mask
-                trigger_mask = (self._pert_scratch[robot_name].squeeze(-1) < self._env_opts["pert_wrenches_prob"]) & (~active)
+                lindir.mul_(self._pert_scratch[robot_name] * lin_impulse_max)  # now contains linear impulses (N,3)
 
-                if trigger_mask.any():
+                # --- Angular (Impulse) Direction Generation (Reuse _pert_angdir buffer) ---
+                angdir = self._pert_angdir[robot_name]  # (N, 3)
 
-                    # Cache weights (references)
-                    weight = self._weights[robot_name]
-                    lin_max = self._env_opts["lin_pert_max_wrt_weight"] * weight
-                    ang_max = self._env_opts["ang_pert_max_wrt_weight"] * weight
+                # 1. Fill with Standard Normal noise
+                angdir.normal_()
 
-                    # --- Force Generation (Reuse _pert_lindir buffer) ---
-                    lindir = self._pert_lindir[robot_name]  # (N, 3)
+                # 2. Normalize
+                norms = torch.norm(angdir, dim=1, keepdim=True).clamp_min_(1e-6)
+                angdir.div_(norms)
 
-                    # 1. Fill with Standard Normal noise in-place
-                    lindir.normal_()
+                # 3. Sample angular impulse magnitudes (reuse scratch)
+                self._pert_scratch[robot_name].uniform_(0.0, 1.0)
+                angdir.mul_(self._pert_scratch[robot_name] * ang_impulse_max)  # now contains angular impulses (N,3)
 
-                    # 2. Normalize in-place
-                    norms = torch.norm(lindir, dim=1, keepdim=True).clamp_min_(1e-6)
-                    lindir.div_(norms)
+                # --- Duration Generation (Reuse _pert_durations) ---
+                # Keep integer steps sampling (same shape/device/dtype)
+                self._pert_durations[robot_name] = torch.randint_like(
+                    self._pert_durations[robot_name],
+                    low=self._pert_min_steps,
+                    high=self._pert_max_steps + 1
+                )
 
-                    # 3. Calculate Magnitudes (Reuse scratch buffer)
-                    # Fill scratch with Uniform [0, 1]
-                    self._pert_scratch[robot_name].uniform_(0.0, 1.0)
+                # --- convert to float
+                duration_steps = self._pert_durations[robot_name].to(dtype=lindir.dtype, device=lindir.device)
+                # duration in seconds (shape (N,))
+                duration_seconds = duration_steps * self.physics_dt()
+                # avoid divide-by-zero
+                duration_seconds = duration_seconds.clamp_min_(1e-6)
 
-                    # 4. Apply Magnitude to Direction in-place
-                    # lindir becomes the final force vector here
-                    # formula: dir * (rand_01 * max_force)
-                    lindir.mul_(self._pert_scratch[robot_name] * lin_max)
+                # compute per-step forces/torques = impulse / duration_seconds
+                # lindir currently holds linear impulses, angdir holds angular impulses
+                forces_to_apply = lindir / duration_seconds
+                torques_to_apply = angdir / duration_seconds
 
-                    # --- Torque Generation (Reuse _pert_angdir buffer) ---
-                    angdir = self._pert_angdir[robot_name]  # (N, 3)
+                # --- Update State Buffers ---
+                # Use boolean indexing to scatter only triggered values
+                active[trigger_mask] = True
+                steps_rem[trigger_mask] = self._pert_durations[robot_name][trigger_mask]
+                forces_world[trigger_mask, :] = forces_to_apply[trigger_mask, :]
+                torques_world[trigger_mask, :] = torques_to_apply[trigger_mask, :]
 
-                    # 1. Fill with Standard Normal noise
-                    angdir.normal_()
-
-                    # 2. Normalize
-                    norms = torch.norm(angdir, dim=1, keepdim=True).clamp_min_(1e-6)
-                    angdir.div_(norms)
-
-                    # 3. Magnitudes
-                    self._pert_scratch[robot_name].uniform_(0.0, 1.0)
-
-                    # 4. Apply Magnitude
-                    angdir.mul_(self._pert_scratch[robot_name] * ang_max)
-
-                    # --- Duration Generation (Reuse _pert_durations) ---
-                    # Use torch.randint_like to reliably fill integer durations (same shape/device)
-                    self._pert_durations[robot_name] = torch.randint_like(
-                        self._pert_durations[robot_name],
-                        low=self._pert_min_steps,
-                        high=self._pert_max_steps + 1
-                    )
-
-                    # --- Update State Buffers ---
-                    # Use boolean indexing to scatter only triggered values
-                    active[trigger_mask] = True
-                    steps_rem[trigger_mask] = self._pert_durations[robot_name][trigger_mask]
-                    forces_world[trigger_mask] = lindir[trigger_mask]
-                    torques_world[trigger_mask] = angdir[trigger_mask]
-
-                # --- 4. Apply Wrenches (Vectorized) ---
-                # Only call API if there are active perturbations to minimize overhead
-                if active.any():
-                    
-                    self._blink_rigid_prim_views[robot_name].apply_forces_and_torques_at_pos(
-                        forces=forces_world,
-                        torques=torques_world,
-                        positions=None, # body frame origin
-                        is_global=True
-                    )
-                    
-    def _pre_step(self):
+            # --- 4. Apply Wrenches (Vectorized) ---
+            # Only call API if there are active perturbations to minimize overhead
             
-        self._process_perturbations()
+            forces_world[~active, :]=0
+            torques_world[~active, :]=0
+
+            self._blink_rigid_prim_views[robot_name].apply_forces_and_torques_at_pos(
+                forces=forces_world,
+                torques=torques_world,
+                positions=None, # body frame origin
+                is_global=True
+                )
+                        
+    def _pre_step(self):
+        
+        if self._env_opts["use_random_pertub"]:
+            self._process_perturbations()
 
         super()._pre_step()
 
     def _pre_step_db(self):
-            
-        self._process_perturbations()
+        
+        if self._env_opts["use_random_pertub"]:
+            self._process_perturbations()
 
         super()._pre_step_db()
 
@@ -974,6 +993,8 @@ class IsaacSimEnv(LRhcEnvBase):
         
         super()._update_contact_state(robot_name, env_indxs)
         
+        print("gnignigngin")
+        print(self._pert_forces_world[robot_name][env_indxs, :])
         if self._env_opts["use_random_pertub"]:
             # write APPLIED perturbations to root wrench (mainly for debug)
             self.cluster_servers[robot_name].get_state().contact_wrenches_root.set(data=self._pert_forces_world[robot_name][env_indxs, :], 
@@ -1406,8 +1427,11 @@ class IsaacSimEnv(LRhcEnvBase):
         self._pert_scratch = {}
 
         # convert durations in seconds to integer physics steps (min 1 step)
-        self._pert_min_steps = max(1, int(math.ceil(self._env_opts["pert_wrenches_min_duration"] / self._env_opts["physics_dt"])))
-        self._pert_max_steps = max(self._pert_min_steps, int(math.ceil(self._env_opts["pert_wrenches_max_duration"] / self._env_opts["physics_dt"])))
+        self._pert_min_steps = max(1, int(math.ceil(self._env_opts["pert_wrenches_min_duration"] / self.physics_dt())))
+        self._pert_max_steps = max(self._pert_min_steps, int(math.ceil(self._env_opts["pert_wrenches_max_duration"] / self.physics_dt())))
+
+        pert_wrenches_step_rate=self._env_opts["pert_wrenches_rate"]/self.physics_dt() # 1 pert every n physics steps
+        self._pert_wrenches_prob=1.0/pert_wrenches_step_rate # sampling prob to be used
 
         self._calc_robot_distrib()
 
@@ -1505,7 +1529,7 @@ class IsaacSimEnv(LRhcEnvBase):
             
             self._masses[robot_name] = torch.sum(self._robots_art_views[robot_name].get_body_masses(clone=True), dim=1).to(dtype=self._dtype, device=self._device)
 
-            self._weights[robot_name] = self._masses[robot_name] * abs(self._env_opts["gravity"][2].item())
+            self._weights[robot_name] = (self._masses[robot_name] * abs(self._env_opts["gravity"][2].item())).reshape((self._num_envs, 1))
             
     def current_tstep(self):
         self._world.current_time_step_index
