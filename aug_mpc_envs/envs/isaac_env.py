@@ -287,7 +287,7 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["lin_pert_max_wrt_weight"]=0.5
         isaac_opts["ang_pert_max_wrt_weight"]=0.1
         
-        isaac_opts["pert_wrenches_rate"]=3.0 # on avergare 1 pert every pert_wrenches_rate seconds
+        isaac_opts["pert_wrenches_rate"]=10.0 # on avergare 1 pert every pert_wrenches_rate seconds
 
         isaac_opts.update(self._env_opts) # update defaults with provided opts
         isaac_opts["rendering_freq"]=int(isaac_opts["rendering_dt"]/isaac_opts["physics_dt"])
