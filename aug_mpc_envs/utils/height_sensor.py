@@ -3,7 +3,7 @@
 # Simple height grid sensor built on top of cached terrain heightfields.
 
 import torch
-
+import torch.nn.functional as F
 
 class HeightGridSensor:
     def __init__(self,
@@ -38,28 +38,24 @@ class HeightGridSensor:
 
         # terrain data cached on device to avoid cpu<->gpu copies during read
         self._heightfield = None
+        self._heightfield_4d = None
         self._horizontal_scale = None
-        self._rot_w2t_2x2 = None
-        self._terrain_xy = None
+        self._rot_w2t_3x3 = None
+        self._terrain_pos = None
 
-        if terrain_utils is not None and getattr(terrain_utils, "_heightfield_world", None) is not None:
-            hf_np = terrain_utils._heightfield_world  # stored in meters
-            self._heightfield = torch.as_tensor(hf_np, device=self._device, dtype=self._dtype)
-            self._horizontal_scale = float(terrain_utils._horizontal_scale)
+        hf_np = terrain_utils.heightfield_world  # stored in meters
 
-            # world to terrain rotation (2x2) and translation
-            quat = torch.as_tensor(terrain_utils._orientation, device=self._device, dtype=self._dtype)
-            rot = self._quat_to_rotmat(quat.unsqueeze(0))[0]  # (3,3)
-            self._rot_w2t_2x2 = rot[:2, :2].t()  # transpose for world->terrain
-            self._terrain_xy = torch.as_tensor(terrain_utils._position[:2], device=self._device, dtype=self._dtype)
+        self._heightfield = torch.as_tensor(hf_np, device=self._device, dtype=self._dtype).contiguous()
+        self._horizontal_scale = float(terrain_utils._horizontal_scale)
 
-            self._h, self._w = self._heightfield.shape
-        else:
-            self._heightfield = None
-            self._horizontal_scale = 1.0
-            self._rot_w2t_2x2 = torch.eye(2, device=self._device, dtype=self._dtype)
-            self._terrain_xy = torch.zeros(2, device=self._device, dtype=self._dtype)
-            self._h, self._w = 1, 1
+        # world to terrain rotation and translation
+        quat = torch.as_tensor(terrain_utils._orientation, device=self._device, dtype=self._dtype)
+        rot = self._quat_xyzw_to_rotmat(quat.unsqueeze(0))[0]  # (3,3)
+        self._rot_w2t_3x3 = rot.t()  # world -> terrain
+        self._terrain_pos = torch.as_tensor(terrain_utils._position, device=self._device, dtype=self._dtype)
+
+        self._h, self._w = self._heightfield.shape
+        self._heightfield_4d = self._heightfield.view(1, 1, self._h, self._w)
 
         self._buffer = torch.zeros((self._n_envs, self._grid_size, self._grid_size),
                                    device=self._device, dtype=self._dtype)
@@ -84,41 +80,23 @@ class HeightGridSensor:
             return heights
 
         # world -> terrain local
-        rel_xy = world_xy - self._terrain_xy
-        local_xy = torch.matmul(rel_xy, self._rot_w2t_2x2)
+        rel = torch.zeros((num_envs, world_xy.shape[1], 3), device=self._device, dtype=self._dtype)
+        rel[..., :2] = world_xy - self._terrain_pos[:2]
+        local = torch.matmul(rel, self._rot_w2t_3x3)
 
-        gx = local_xy[..., 0] / self._horizontal_scale
-        gy = local_xy[..., 1] / self._horizontal_scale
+        gx = local[..., 0] / self._horizontal_scale
+        gy = local[..., 1] / self._horizontal_scale
 
-        # mask inside
-        mask = (gx >= 0) & (gy >= 0) & (gx <= (self._h - 1)) & (gy <= (self._w - 1))
+        # grid_sample expects normalized coordinates [-1,1], order (x,y) = (col,row)
+        u = (gy / (self._w - 1) * 2.0 - 1.0).clamp(-2.0, 2.0)  # width
+        v = (gx / (self._h - 1) * 2.0 - 1.0).clamp(-2.0, 2.0)  # height
 
-        # clamp indices for sampling
-        x0 = torch.floor(gx).long().clamp(0, self._h - 1)
-        y0 = torch.floor(gy).long().clamp(0, self._w - 1)
-        x1 = (x0 + 1).clamp(0, self._h - 1)
-        y1 = (y0 + 1).clamp(0, self._w - 1)
+        grid = torch.stack([u, v], dim=-1)
+        grid = grid.view(num_envs, self._grid_size, self._grid_size, 2)
 
-        fx = (gx - x0).to(self._dtype)
-        fy = (gy - y0).to(self._dtype)
-
-        flat = self._heightfield.view(-1)
-        idx00 = x0 * self._w + y0
-        idx10 = x1 * self._w + y0
-        idx01 = x0 * self._w + y1
-        idx11 = x1 * self._w + y1
-
-        h00 = flat.gather(0, idx00.view(-1)).view_as(idx00)
-        h10 = flat.gather(0, idx10.view(-1)).view_as(idx10)
-        h01 = flat.gather(0, idx01.view(-1)).view_as(idx01)
-        h11 = flat.gather(0, idx11.view(-1)).view_as(idx11)
-
-        hx0 = h00 * (1 - fx) + h10 * fx
-        hx1 = h01 * (1 - fx) + h11 * fx
-        heights = hx0 * (1 - fy) + hx1 * fy
-
-        heights = heights.masked_fill(~mask, 0.0)
-        heights = heights.view(num_envs, self._grid_size, self._grid_size)
+        hf = self._heightfield_4d.expand(num_envs, 1, self._h, self._w)
+        sampled = F.grid_sample(hf, grid, align_corners=True, padding_mode="zeros")
+        heights = sampled.view(num_envs, self._grid_size, self._grid_size)
 
         self._buffer[:num_envs].copy_(heights)
         return self._buffer[:num_envs]
@@ -126,6 +104,20 @@ class HeightGridSensor:
     def _quat_to_rotmat(self, quat: torch.Tensor) -> torch.Tensor:
         # quat: (N,4) -> rot: (N,3,3); assumes [w,x,y,z]
         w, x, y, z = quat.unbind(-1)
+        ww, xx, yy, zz = w * w, x * x, y * y, z * z
+        wx, wy, wz = w * x, w * y, w * z
+        xy, xz, yz = x * y, x * z, y * z
+
+        rot = torch.stack([
+            torch.stack([ww + xx - yy - zz, 2 * (xy - wz),     2 * (xz + wy)], dim=-1),
+            torch.stack([2 * (xy + wz),     ww - xx + yy - zz, 2 * (yz - wx)], dim=-1),
+            torch.stack([2 * (xz - wy),     2 * (yz + wx),     ww - xx - yy + zz], dim=-1)
+        ], dim=-2)
+        return rot
+
+    def _quat_xyzw_to_rotmat(self, quat: torch.Tensor) -> torch.Tensor:
+        # quat: (N,4) -> rot: (N,3,3); assumes [x,y,z,w]
+        x, y, z, w = quat.unbind(-1)
         ww, xx, yy, zz = w * w, x * x, y * y, z * z
         wx, wy, wz = w * x, w * y, w * z
         xy, xz, yz = x * y, x * z, y * z

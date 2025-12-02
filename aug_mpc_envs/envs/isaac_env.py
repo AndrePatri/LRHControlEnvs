@@ -1189,16 +1189,18 @@ class IsaacSimEnv(LRhcEnvBase):
                 robot_name=robot_name)
         
         # height grid sensor readout
-        # if robot_name in self._height_sensors:
-        #     pos_src = self._root_p[robot_name] if env_indxs is None else self._root_p[robot_name][env_indxs]
-        #     quat_src = self._root_q[robot_name] if env_indxs is None else self._root_q[robot_name][env_indxs]
-        #     heights = self._height_sensors[robot_name].read(pos_src, quat_src)
-        #     if env_indxs is None:
-        #         self._height_imgs[robot_name] = heights
-        #     else:
-        #         self._height_imgs[robot_name][env_indxs] = heights
+        if robot_name in self._height_sensors:
+            pos_src = self._root_p[robot_name] if env_indxs is None else self._root_p[robot_name][env_indxs]
+            quat_src = self._root_q[robot_name] if env_indxs is None else self._root_q[robot_name][env_indxs]
+            heights = self._height_sensors[robot_name].read(pos_src, quat_src)
+            if env_indxs is None:
+                self._height_imgs[robot_name] = heights
+            else:
+                self._height_imgs[robot_name][env_indxs] = heights
 
-        
+            print("heights")
+            print(self._height_imgs[robot_name])
+            
     def _read_jnts_state_from_robot(self,
         robot_name: str,
         env_indxs: torch.Tensor = None):

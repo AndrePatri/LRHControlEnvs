@@ -36,7 +36,7 @@ class RlTerrains():
         self._prim_path=prim_path
 
         # cache heightfield info to allow querying terrain height at world positions
-        self._heightfield_world = None  # meters
+        self.heightfield_world = None  # meters
         self._heightfield_raw = None    # original integer grid
         self._horizontal_scale = None
         self._vertical_scale = None
@@ -578,7 +578,7 @@ class RlTerrains():
     def _store_heightfield(self, heightfield, horizontal_scale, vertical_scale, position, orientation):
         """Cache terrain heightfield (in meters) and transform for later queries."""
         self._heightfield_raw = heightfield
-        self._heightfield_world = heightfield.astype(np.float32) * float(vertical_scale)
+        self.heightfield_world = heightfield.astype(np.float32) * float(vertical_scale)
         self._horizontal_scale = float(horizontal_scale)
         self._vertical_scale = float(vertical_scale)
         self._position = np.array(position, dtype=np.float64)
@@ -586,7 +586,7 @@ class RlTerrains():
 
     def get_height_at(self, x_world: float, y_world: float) -> float:
         """Return terrain height (meters) at world coordinates (x_world, y_world)."""
-        if self._heightfield_world is None:
+        if self.heightfield_world is None:
             return 0.0
 
         # inverse transform from world to terrain local frame
@@ -598,7 +598,7 @@ class RlTerrains():
         gx = p_local[0] / self._horizontal_scale
         gy = p_local[1] / self._horizontal_scale
 
-        h, w = self._heightfield_world.shape
+        h, w = self.heightfield_world.shape
         if gx < 0 or gy < 0 or gx > h - 1 or gy > w - 1:
             # outside cached terrain
             return 0.0
@@ -611,10 +611,10 @@ class RlTerrains():
         fx = gx - x0
         fy = gy - y0
 
-        h00 = self._heightfield_world[x0, y0]
-        h10 = self._heightfield_world[x1, y0]
-        h01 = self._heightfield_world[x0, y1]
-        h11 = self._heightfield_world[x1, y1]
+        h00 = self.heightfield_world[x0, y0]
+        h10 = self.heightfield_world[x1, y0]
+        h01 = self.heightfield_world[x0, y1]
+        h11 = self.heightfield_world[x1, y1]
 
         hx0 = h00 * (1 - fx) + h10 * fx
         hx1 = h01 * (1 - fx) + h11 * fx
@@ -622,7 +622,7 @@ class RlTerrains():
 
     def get_heights_at(self, x_world, y_world):
         """Vectorized height query. x_world and y_world must be same shape arrays; returns same shape."""
-        if self._heightfield_world is None:
+        if self.heightfield_world is None:
             return np.zeros_like(x_world, dtype=np.float32)
 
         x_arr = np.asarray(x_world, dtype=np.float64)
@@ -638,7 +638,7 @@ class RlTerrains():
         gx = local[0] / self._horizontal_scale
         gy = local[1] / self._horizontal_scale
 
-        h, w = self._heightfield_world.shape
+        h, w = self.heightfield_world.shape
         mask = (gx >= 0) & (gy >= 0) & (gx <= (h - 1)) & (gy <= (w - 1))
 
         heights = np.zeros_like(gx, dtype=np.float32)
@@ -654,10 +654,10 @@ class RlTerrains():
             fx = gx_m - x0
             fy = gy_m - y0
 
-            h00 = self._heightfield_world[x0, y0]
-            h10 = self._heightfield_world[x1, y0]
-            h01 = self._heightfield_world[x0, y1]
-            h11 = self._heightfield_world[x1, y1]
+            h00 = self.heightfield_world[x0, y0]
+            h10 = self.heightfield_world[x1, y0]
+            h01 = self.heightfield_world[x0, y1]
+            h11 = self.heightfield_world[x1, y1]
 
             hx0 = h00 * (1 - fx) + h10 * fx
             hx1 = h01 * (1 - fx) + h11 * fx
