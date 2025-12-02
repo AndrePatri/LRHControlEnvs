@@ -263,7 +263,7 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["spawning_radius"]=1.0
         isaac_opts["use_flat_ground"]=True
         isaac_opts["ground_type"]="random"
-        isaac_opts["ground_size"]=400
+        isaac_opts["ground_size"]=50
         isaac_opts["terrain_border"]=isaac_opts["ground_size"]/2
         isaac_opts["dh_ground"]=0.03
         isaac_opts["contact_prims"] = []
@@ -481,21 +481,42 @@ class IsaacSimEnv(LRhcEnvBase):
         self._merge_fixed = [self._env_opts["merge_fixed_jnts"]] * len(self._robot_names)
         
         Journal.log(self.__class__.__name__,
-                        "_configure_scene",
-                        "cloning environments...",
-                        LogType.STAT,
-                        throw_when_excep = True)
+            "_configure_scene",
+            "cloning environments...",
+            LogType.STAT,
+            throw_when_excep = True)
         
         self._ground_plane_prim_paths=[]
         self._ground_plane=None
         if not self._env_opts["use_flat_ground"]:
+            # ensure terrain is large enough to contain all env clones
+            spacing = float(self._env_opts["env_spacing"])
+            num_envs = self._num_envs
+            num_per_row = max(1, int(math.sqrt(num_envs)))
+            num_rows = int(math.ceil(num_envs / num_per_row))
+            num_cols = int(math.ceil(num_envs / num_rows))
+            row_offset = 0.5 * spacing * (num_rows - 1)
+            col_offset = 0.5 * spacing * (num_cols - 1)
+            margin = spacing  # leave a full spacing as border cushion
+            required_size = 2.0 * (max(row_offset, col_offset) + margin)
+
+            if required_size > self._env_opts["ground_size"]:
+                old_size = self._env_opts["ground_size"]
+                self._env_opts["ground_size"] = required_size
+                self._env_opts["terrain_border"] = self._env_opts["ground_size"] / 2.0
+                Journal.log(self.__class__.__name__,
+                            "_configure_scene",
+                            f"Ground size increased from {old_size} to {required_size} to fit {num_envs} envs (spacing {spacing}).",
+                            LogType.WARN,
+                            throw_when_excep = True)
+
             min_height=-self._env_opts["dh_ground"]
             max_height=self._env_opts["dh_ground"]
             step=max_height-min_height
             if self._env_opts["ground_type"]=="random":
-                random_prim_path=self._env_opts["ground_plane_prim_path"]+"_random_unif"
-                self._ground_plane_prim_paths.append(random_prim_path)
-                self.terrain_utils = RlTerrains(get_current_stage(), prim_path=random_prim_path)
+                terrain_prim_path=self._env_opts["ground_plane_prim_path"]+"_random_unif"
+                self._ground_plane_prim_paths.append(terrain_prim_path)
+                self.terrain_utils = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
                 self._ground_plane=self.terrain_utils.create_random_uniform_terrain(terrain_size=self._env_opts["ground_size"], 
                     min_height=min_height,
                     max_height=max_height,
@@ -505,9 +526,9 @@ class IsaacSimEnv(LRhcEnvBase):
                     dynamic_friction=self._env_opts["dynamic_friction"], 
                     restitution=self._env_opts["restitution"])
             elif self._env_opts["ground_type"]=="random_patches":
-                random_prim_path=self._env_opts["ground_plane_prim_path"]+"_random_unif_patches"
-                self._ground_plane_prim_paths.append(random_prim_path)
-                self.terrain_utils = RlTerrains(get_current_stage(), prim_path=random_prim_path)
+                terrain_prim_path=self._env_opts["ground_plane_prim_path"]+"_random_unif_patches"
+                self._ground_plane_prim_paths.append(terrain_prim_path)
+                self.terrain_utils = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
                 self._ground_plane=self.terrain_utils.create_random_patched_terrain(terrain_size=self._env_opts["ground_size"], 
                     min_height=min_height,
                     max_height=max_height,
@@ -519,13 +540,84 @@ class IsaacSimEnv(LRhcEnvBase):
                     patch_ratio=0.8,
                     patch_size=10
                     )
+            elif self._env_opts["ground_type"]=="slopes":
+                terrain_prim_path=self._env_opts["ground_plane_prim_path"]+"_slopes"
+                self._ground_plane_prim_paths.append(terrain_prim_path)
+                self.terrain_utils = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
+                self._ground_plane=self.terrain_utils.create_sloped_terrain(terrain_size=self._env_opts["ground_size"], 
+                    slope=-0.5,
+                    position=np.array([0.0, 0.0,0.0]), 
+                    static_friction=self._env_opts["static_friction"], 
+                    dynamic_friction=self._env_opts["dynamic_friction"], 
+                    restitution=self._env_opts["restitution"]
+                    )
+            elif self._env_opts["ground_type"]=="stairs":
+                terrain_prim_path=self._env_opts["ground_plane_prim_path"]+"_stairs"
+                self._ground_plane_prim_paths.append(terrain_prim_path)
+                self.terrain_utils = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
+                self._ground_plane=self.terrain_utils.create_stairs_terrain(terrain_size=self._env_opts["ground_size"],      
+                    position=np.array([0.0, 0.0,0.0]), 
+                    static_friction=self._env_opts["static_friction"], 
+                    dynamic_friction=self._env_opts["dynamic_friction"], 
+                    restitution=self._env_opts["restitution"],
+                    )
+            elif self._env_opts["ground_type"]=="stepup":
+                terrain_prim_path=self._env_opts["ground_plane_prim_path"]+"_stepup"
+                self._ground_plane_prim_paths.append(terrain_prim_path)
+                self.terrain_utils = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
+                self._ground_plane=self.terrain_utils.create_stepup_terrain(
+                    terrain_size=self._env_opts["ground_size"], 
+                    stairs_ratio=0.5,
+                    min_steps=1,
+                    max_steps=1,
+                    # pyramid_platform_size_min=1.0,
+                    # pyramid_platform_size_max=5.0,
+                    position=np.array([0.0, 0.0,0.0]), 
+                    static_friction=self._env_opts["static_friction"], 
+                    dynamic_friction=self._env_opts["dynamic_friction"], 
+                    restitution=self._env_opts["restitution"],
+                    step_height=0.2
+                    )
             else:
                 ground_type=self._env_opts["ground_type"]
                 Journal.log(self.__class__.__name__,
                     "_configure_scene",
                     f"Terrain type {ground_type} not supported. Will default to flat ground.",
-                    LogType.WARN,
+                    LogType.EXCEP,
                     throw_when_excep = True)
+                
+            # add offsets to intial height depending on the terrain heightmap
+            if hasattr(self, "terrain_utils") and hasattr(self.terrain_utils, "get_height_at"):
+                stage = get_current_stage()
+                up_axis = UsdGeom.GetStageUpAxis(stage)
+
+                spacing = self._env_opts["env_spacing"]
+                num_envs = self._num_envs
+
+                num_per_row = max(1, int(np.sqrt(num_envs)))
+                num_rows = int(np.ceil(num_envs / num_per_row))
+                num_cols = int(np.ceil(num_envs / num_rows))
+
+                row_offset = 0.5 * spacing * (num_rows - 1)
+                col_offset = 0.5 * spacing * (num_cols - 1)
+
+                offsets = np.array(self._env_opts["cloning_offset"], dtype=float)
+
+                for env_idx in range(num_envs):
+                    row = env_idx // num_cols
+                    col = env_idx % num_cols
+                    x = row_offset - row * spacing
+                    y = col * spacing - col_offset
+
+                    if up_axis == UsdGeom.Tokens.z:
+                        height = self.terrain_utils.get_height_at(x, y)
+                    else:
+                        height = self.terrain_utils.get_height_at(x, y)
+
+                    offsets[env_idx][2] += height
+
+                self._env_opts["cloning_offset"] = offsets
+
         else:
             defaul_prim_path=self._env_opts["ground_plane_prim_path"]+"_default"
             self._ground_plane_prim_paths.append(defaul_prim_path)

@@ -80,38 +80,60 @@ def sloped_terrain(terrain, slope=1):
     terrain.height_field_raw[:, np.arange(terrain.length)] += (max_height * xx / terrain.width).astype(terrain.height_field_raw.dtype)
     return terrain
 
-def pyramid_sloped_terrain(terrain, slope=1, platform_size=1.):
+def pyramid_stairs_terrain(terrain, step_width, step_height, platform_size=1.0):
     """
-    Generate a sloped terrain
+    Generate pyramid stairs on `terrain` using integer height units.
 
     Parameters:
-        terrain (terrain): the terrain
-        slope (int): positive or negative slope
-        platform_size (float): size of the flat platform at the center of the terrain [meters]
+        terrain: SubTerrain with .width, .length, .horizontal_scale, .vertical_scale and .height_field_raw (integer array expected).
+        step_width: width of each step in meters (float) -- converted to cells internally
+        step_height: height of each step in meters (float) -- converted to vertical units internally
+        platform_size: size of the flat center platform in meters
     Returns:
-        terrain (SubTerrain): update terrain
+        terrain (SubTerrain): modified in place; height_field_raw remains integer units
     """
-    x = np.arange(0, terrain.width)
-    y = np.arange(0, terrain.length)
-    center_x = int(terrain.width / 2)
-    center_y = int(terrain.length / 2)
-    xx, yy = np.meshgrid(x, y, sparse=True)
-    xx = (center_x - np.abs(center_x-xx)) / center_x
-    yy = (center_y - np.abs(center_y-yy)) / center_y
-    xx = xx.reshape(terrain.width, 1)
-    yy = yy.reshape(1, terrain.length)
-    max_height = int(slope * (terrain.horizontal_scale / terrain.vertical_scale) * (terrain.width / 2))
-    terrain.height_field_raw += (max_height * xx * yy).astype(terrain.height_field_raw.dtype)
+    # convert params to discrete cell/vertical units robustly
+    horiz = terrain.horizontal_scale
+    vert = terrain.vertical_scale
 
-    platform_size = int(platform_size / terrain.horizontal_scale / 2)
-    x1 = terrain.width // 2 - platform_size
-    x2 = terrain.width // 2 + platform_size
-    y1 = terrain.length // 2 - platform_size
-    y2 = terrain.length // 2 + platform_size
+    step_w_cells = max(1, int(round(step_width / horiz)))
+    step_h_units = max(1, int(round(abs(step_height) / vert)))  # discrete vertical units (always at least 1)
+    platform_cells = max(1, int(round(platform_size / horiz)))
 
-    min_h = min(terrain.height_field_raw[x1, y1], 0)
-    max_h = max(terrain.height_field_raw[x1, y1], 0)
-    terrain.height_field_raw = np.clip(terrain.height_field_raw, min_h, max_h)
+    # local aliases
+    w = terrain.width
+    l = terrain.length
+
+    # maximum possible concentric rings that fit before hitting the platform
+    min_dim = min(w, l)
+    max_possible_steps = (min_dim - platform_cells) // (2 * step_w_cells)
+    if max_possible_steps <= 0:
+        # nothing fits, return unchanged
+        return terrain
+
+    # start indices (cells)
+    start_x = 0
+    stop_x = w
+    start_y = 0
+    stop_y = l
+
+    # build from outside inward; each ring increases height by step_h_units
+    # keep terrain.height_field_raw as integer type; if it's not integer, convert to int
+    if not np.issubdtype(terrain.height_field_raw.dtype, np.integer):
+        # if it was float meters, convert to integer units
+        terrain.height_field_raw = terrain.height_field_raw.astype(np.int32)
+
+    for k in range(int(max_possible_steps)):
+        start_x += step_w_cells
+        stop_x -= step_w_cells
+        start_y += step_w_cells
+        stop_y -= step_w_cells
+        if start_x >= stop_x or start_y >= stop_y:
+            break
+        # height value in integer units; step increases toward center
+        h_units = (k + 1) * step_h_units
+        terrain.height_field_raw[start_x:stop_x, start_y:stop_y] = h_units
+
     return terrain
 
 def discrete_obstacles_terrain(terrain, max_height, min_size, max_size, num_rects, platform_size=1.):
