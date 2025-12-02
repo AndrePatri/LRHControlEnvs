@@ -567,11 +567,10 @@ class IsaacSimEnv(LRhcEnvBase):
                 self.terrain_utils = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
                 self._ground_plane=self.terrain_utils.create_stepup_terrain(
                     terrain_size=self._env_opts["ground_size"], 
-                    stairs_ratio=0.5,
+                    stairs_ratio=0.3,
                     min_steps=1,
                     max_steps=1,
-                    # pyramid_platform_size_min=1.0,
-                    # pyramid_platform_size_max=5.0,
+                    pyramid_platform_size=5.0,
                     position=np.array([0.0, 0.0,0.0]), 
                     static_friction=self._env_opts["static_friction"], 
                     dynamic_friction=self._env_opts["dynamic_friction"], 
@@ -614,7 +613,7 @@ class IsaacSimEnv(LRhcEnvBase):
                     else:
                         height = self.terrain_utils.get_height_at(x, y)
 
-                    offsets[env_idx][2] += height
+                    offsets[env_idx][2] += height + 0.03  # spawn 1cm above local terrain
 
                 self._env_opts["cloning_offset"] = offsets
 
