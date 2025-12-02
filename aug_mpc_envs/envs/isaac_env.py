@@ -32,6 +32,7 @@ from EigenIPC.PyEigenIPC import LogType
 from EigenIPC.PyEigenIPC import Journal
 
 from aug_mpc_envs.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
+from aug_mpc_envs.utils.height_sensor import HeightGridSensor
 
 from aug_mpc.envs.lrhc_remote_env_base import LRhcEnvBase
 from mpc_hive.utilities.math_utils_torch import world2base_frame,world2base_frame3D
@@ -163,6 +164,8 @@ class IsaacSimEnv(LRhcEnvBase):
         self._robot_dof_names={}
         self._distr_offset={} # decribed how robots within each env are distributed
         self._spawning_radius=self._env_opts["spawning_radius"] # [m] -> default distance between roots of robots in a single 
+        self._height_sensors={}
+        self._height_imgs={}
         
     def _import_isaac_pkgs(self):
         # we use global, so that we can create the simulation app inside (and so
@@ -261,6 +264,8 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["env_spacing"]=10.0
         isaac_opts["spawning_height"]=0.8
         isaac_opts["spawning_radius"]=1.0
+        isaac_opts["height_sensor_resolution"]=0.05
+        isaac_opts["height_sensor_pixels"]=10
         isaac_opts["use_flat_ground"]=True
         isaac_opts["ground_type"]="random"
         isaac_opts["ground_size"]=50
@@ -665,11 +670,20 @@ class IsaacSimEnv(LRhcEnvBase):
             base_link_name=self._env_opts["base_linkname"]
             if self._env_opts["deduce_base_link"]:
                 base_link_name=self._get_baselink_candidate(robot_name=robot_name)
-        
+
             self._robots_art_views[robot_name] = ArticulationView(name = robot_name + "ArtView",
                                                         prim_paths_expr = self._env_opts["envs_ns"] + "/env_.*"+ "/" + robot_name + "/" + base_link_name, 
                                                         reset_xform_properties=False)
             self._robots_articulations[robot_name] = self._scene.add(self._robots_art_views[robot_name])
+
+            # height grid sensor (terrain may be None if using flat ground)
+            self._height_sensors[robot_name] = HeightGridSensor(
+                terrain_utils=getattr(self, "terrain_utils", None),
+                grid_size=int(self._env_opts["height_sensor_pixels"]),
+                resolution=float(self._env_opts["height_sensor_resolution"]),
+                n_envs=self._num_envs,
+                device=self._device,
+                dtype=self._dtype)
 
             self._blink_rigid_prim_views[robot_name] = RigidPrimView(prim_paths_expr=self._env_opts["envs_ns"] + "/env_.*"+ "/" + robot_name + "/" + base_link_name,
                                                     name = robot_name + "RigidPrimView") # base link prim views
@@ -1173,7 +1187,18 @@ class IsaacSimEnv(LRhcEnvBase):
         self._get_root_state(numerical_diff=self._env_opts["use_diff_vels"],
                 env_indxs=env_indxs,
                 robot_name=robot_name)
-    
+        
+        # height grid sensor readout
+        # if robot_name in self._height_sensors:
+        #     pos_src = self._root_p[robot_name] if env_indxs is None else self._root_p[robot_name][env_indxs]
+        #     quat_src = self._root_q[robot_name] if env_indxs is None else self._root_q[robot_name][env_indxs]
+        #     heights = self._height_sensors[robot_name].read(pos_src, quat_src)
+        #     if env_indxs is None:
+        #         self._height_imgs[robot_name] = heights
+        #     else:
+        #         self._height_imgs[robot_name][env_indxs] = heights
+
+        
     def _read_jnts_state_from_robot(self,
         robot_name: str,
         env_indxs: torch.Tensor = None):
@@ -1571,6 +1596,12 @@ class IsaacSimEnv(LRhcEnvBase):
             self._root_a_base_loc[robot_name] = torch.full_like(self._root_a[robot_name], fill_value=0.0)
             self._root_alpha[robot_name] = torch.full_like(self._root_v[robot_name], fill_value=0.0)
             self._root_alpha_base_loc[robot_name] = torch.full_like(self._root_alpha[robot_name], fill_value=0.0)
+
+            # height grid sensor storage
+            grid_sz = int(self._env_opts["height_sensor_pixels"])
+            self._height_imgs[robot_name] = torch.zeros((self._num_envs, grid_sz, grid_sz),
+                                                        dtype=self._dtype,
+                                                        device=self._device)
 
             # joints v (measured, default)
             self._jnts_v[robot_name] = self._robots_art_views[robot_name].get_joint_velocities( 

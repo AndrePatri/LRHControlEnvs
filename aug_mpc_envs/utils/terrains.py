@@ -56,7 +56,7 @@ class RlTerrains():
         num_terrains = 1
         terrain_width = terrain_size
         terrain_length = terrain_size
-        horizontal_scale = 0.25  # [m]
+        horizontal_scale = 0.08  # [m]
         vertical_scale = 0.005  # [m]
 
         num_rows = int(terrain_width/horizontal_scale)
@@ -117,7 +117,7 @@ class RlTerrains():
         num_terrains = 1
         terrain_width = terrain_size
         terrain_length = terrain_size
-        horizontal_scale = 0.25  # [m]
+        horizontal_scale = 0.08  # [m]
         vertical_scale = 0.005  # [m]
 
         num_rows = int(terrain_width/horizontal_scale)
@@ -173,7 +173,7 @@ class RlTerrains():
                     pyramid_platform_size: float = 5.0,
                     step_height: float = 0.5,
                     patch_size: float = 5.0,
-                    res_low: float = 0.25,
+                    res_low: float = 0.08,
                     res_high: float = 0.05,
                     position = np.array([0.0, 0.0, 0.0]),
                     dynamic_friction=0.5,
@@ -367,7 +367,7 @@ class RlTerrains():
         num_terrains = 1
         terrain_width = terrain_size
         terrain_length = terrain_size
-        horizontal_scale = 0.25  # [m]
+        horizontal_scale = 0.08  # [m]
         vertical_scale = 0.005  # [m]
 
         num_rows = int(terrain_width / horizontal_scale)
@@ -525,7 +525,7 @@ class RlTerrains():
         num_terains = 1
         terrain_width = terrain_size
         terrain_length = terrain_size
-        horizontal_scale = 0.25  # [m]
+        horizontal_scale = 0.08  # [m]
         vertical_scale = 0.005  # [m]
         num_rows = int(terrain_width/horizontal_scale)
         num_cols = int(terrain_length/horizontal_scale)
@@ -619,6 +619,51 @@ class RlTerrains():
         hx0 = h00 * (1 - fx) + h10 * fx
         hx1 = h01 * (1 - fx) + h11 * fx
         return float(hx0 * (1 - fy) + hx1 * fy)
+
+    def get_heights_at(self, x_world, y_world):
+        """Vectorized height query. x_world and y_world must be same shape arrays; returns same shape."""
+        if self._heightfield_world is None:
+            return np.zeros_like(x_world, dtype=np.float32)
+
+        x_arr = np.asarray(x_world, dtype=np.float64)
+        y_arr = np.asarray(y_world, dtype=np.float64)
+        orig_shape = x_arr.shape
+        flat_x = x_arr.reshape(-1)
+        flat_y = y_arr.reshape(-1)
+
+        pts = np.stack([flat_x - self._position[0], flat_y - self._position[1], np.zeros_like(flat_x)], axis=0)
+        rot = self._quat_to_rot(self._orientation)
+        local = rot.T @ pts
+
+        gx = local[0] / self._horizontal_scale
+        gy = local[1] / self._horizontal_scale
+
+        h, w = self._heightfield_world.shape
+        mask = (gx >= 0) & (gy >= 0) & (gx <= (h - 1)) & (gy <= (w - 1))
+
+        heights = np.zeros_like(gx, dtype=np.float32)
+        if mask.any():
+            gx_m = gx[mask]
+            gy_m = gy[mask]
+
+            x0 = np.floor(gx_m).astype(np.int64)
+            y0 = np.floor(gy_m).astype(np.int64)
+            x1 = np.clip(x0 + 1, 0, h - 1)
+            y1 = np.clip(y0 + 1, 0, w - 1)
+
+            fx = gx_m - x0
+            fy = gy_m - y0
+
+            h00 = self._heightfield_world[x0, y0]
+            h10 = self._heightfield_world[x1, y0]
+            h01 = self._heightfield_world[x0, y1]
+            h11 = self._heightfield_world[x1, y1]
+
+            hx0 = h00 * (1 - fx) + h10 * fx
+            hx1 = h01 * (1 - fx) + h11 * fx
+            heights[mask] = hx0 * (1 - fy) + hx1 * fy
+
+        return heights.reshape(orig_shape).astype(np.float32)
 
 
     def _quat_to_rot(self, quat: np.ndarray) -> np.ndarray:
