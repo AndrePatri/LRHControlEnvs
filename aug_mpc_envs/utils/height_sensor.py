@@ -7,12 +7,12 @@ import torch.nn.functional as F
 
 class HeightGridSensor:
     def __init__(self,
-                 terrain_utils,
-                 grid_size: int,
-                 resolution: float,
-                 n_envs: int,
-                 device: str = "cpu",
-                 dtype: torch.dtype = torch.float32):
+            terrain_utils,
+            grid_size: int,
+            resolution: float,
+            n_envs: int,
+            device: str = "cpu",
+            dtype: torch.dtype = torch.float32):
         """
         Args:
             terrain_utils: instance of RlTerrains. Uses its cached heightfield if available.
@@ -50,7 +50,7 @@ class HeightGridSensor:
 
         # world to terrain rotation and translation
         quat = torch.as_tensor(terrain_utils._orientation, device=self._device, dtype=self._dtype)
-        rot = self._quat_xyzw_to_rotmat(quat.unsqueeze(0))[0]  # (3,3)
+        rot = self._quat_to_rotmat(quat.unsqueeze(0))[0]  # (3,3) expects (w,x,y,z)
         self._rot_w2t_3x3 = rot.t()  # world -> terrain
         self._terrain_pos = torch.as_tensor(terrain_utils._position, device=self._device, dtype=self._dtype)
 
@@ -68,6 +68,9 @@ class HeightGridSensor:
         num_envs = base_positions.shape[0]
 
         rot_mats = self._quat_to_rotmat(base_quats)  # (N,3,3)
+        print("robot orientation (matrix)")
+        print(rot_mats)
+        
         rot_xy = rot_mats[:, :2, :2]  # planar rotation
 
         offsets = self._grid_offsets.unsqueeze(0).expand(num_envs, -1, -1)

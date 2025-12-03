@@ -665,6 +665,20 @@ class RlTerrains():
 
         return heights.reshape(orig_shape).astype(np.float32)
 
+    def get_max_height_in_rect(self, x_world: float, y_world: float, half_extent: float = 0.3) -> float:
+        """Return max height within a square centered at (x_world, y_world) with given half-extent (meters)."""
+        if self.heightfield_world is None:
+            return 0.0
+
+        # build a small grid around the center and reuse vectorized sampling
+        # choose a coarse 3x3 sample to reduce cost
+        coords = np.linspace(-half_extent, half_extent, 3)
+        dx, dy = np.meshgrid(coords, coords)
+        xs = x_world + dx
+        ys = y_world + dy
+        heights = self.get_heights_at(xs, ys)
+        return float(np.max(heights))
+
 
     def _quat_to_rot(self, quat: np.ndarray) -> np.ndarray:
         """Convert quaternion [w, x, y, z] to 3x3 rotation matrix."""

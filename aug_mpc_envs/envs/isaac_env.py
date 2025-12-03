@@ -264,6 +264,8 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["env_spacing"]=10.0
         isaac_opts["spawning_height"]=0.8
         isaac_opts["spawning_radius"]=1.0
+        isaac_opts["spawn_height_check_half_extent"]=0.2
+        isaac_opts["spawn_height_cushion"]=0.03
         isaac_opts["height_sensor_resolution"]=0.05
         isaac_opts["height_sensor_pixels"]=10
         isaac_opts["use_flat_ground"]=True
@@ -521,8 +523,8 @@ class IsaacSimEnv(LRhcEnvBase):
             if self._env_opts["ground_type"]=="random":
                 terrain_prim_path=self._env_opts["ground_plane_prim_path"]+"_random_unif"
                 self._ground_plane_prim_paths.append(terrain_prim_path)
-                self.terrain_utils = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
-                self._ground_plane=self.terrain_utils.create_random_uniform_terrain(terrain_size=self._env_opts["ground_size"], 
+                self.terrain_generator = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
+                self._ground_plane=self.terrain_generator.create_random_uniform_terrain(terrain_size=self._env_opts["ground_size"], 
                     min_height=min_height,
                     max_height=max_height,
                     step=step,
@@ -533,8 +535,8 @@ class IsaacSimEnv(LRhcEnvBase):
             elif self._env_opts["ground_type"]=="random_patches":
                 terrain_prim_path=self._env_opts["ground_plane_prim_path"]+"_random_unif_patches"
                 self._ground_plane_prim_paths.append(terrain_prim_path)
-                self.terrain_utils = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
-                self._ground_plane=self.terrain_utils.create_random_patched_terrain(terrain_size=self._env_opts["ground_size"], 
+                self.terrain_generator = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
+                self._ground_plane=self.terrain_generator.create_random_patched_terrain(terrain_size=self._env_opts["ground_size"], 
                     min_height=min_height,
                     max_height=max_height,
                     step=step,
@@ -548,8 +550,8 @@ class IsaacSimEnv(LRhcEnvBase):
             elif self._env_opts["ground_type"]=="slopes":
                 terrain_prim_path=self._env_opts["ground_plane_prim_path"]+"_slopes"
                 self._ground_plane_prim_paths.append(terrain_prim_path)
-                self.terrain_utils = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
-                self._ground_plane=self.terrain_utils.create_sloped_terrain(terrain_size=self._env_opts["ground_size"], 
+                self.terrain_generator = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
+                self._ground_plane=self.terrain_generator.create_sloped_terrain(terrain_size=self._env_opts["ground_size"], 
                     slope=-0.5,
                     position=np.array([0.0, 0.0,0.0]), 
                     static_friction=self._env_opts["static_friction"], 
@@ -559,8 +561,8 @@ class IsaacSimEnv(LRhcEnvBase):
             elif self._env_opts["ground_type"]=="stairs":
                 terrain_prim_path=self._env_opts["ground_plane_prim_path"]+"_stairs"
                 self._ground_plane_prim_paths.append(terrain_prim_path)
-                self.terrain_utils = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
-                self._ground_plane=self.terrain_utils.create_stairs_terrain(terrain_size=self._env_opts["ground_size"],      
+                self.terrain_generator = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
+                self._ground_plane=self.terrain_generator.create_stairs_terrain(terrain_size=self._env_opts["ground_size"],      
                     position=np.array([0.0, 0.0,0.0]), 
                     static_friction=self._env_opts["static_friction"], 
                     dynamic_friction=self._env_opts["dynamic_friction"], 
@@ -569,8 +571,8 @@ class IsaacSimEnv(LRhcEnvBase):
             elif self._env_opts["ground_type"]=="stepup":
                 terrain_prim_path=self._env_opts["ground_plane_prim_path"]+"_stepup"
                 self._ground_plane_prim_paths.append(terrain_prim_path)
-                self.terrain_utils = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
-                self._ground_plane=self.terrain_utils.create_stepup_terrain(
+                self.terrain_generator = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
+                self._ground_plane=self.terrain_generator.create_stepup_terrain(
                     terrain_size=self._env_opts["ground_size"], 
                     stairs_ratio=0.3,
                     min_steps=1,
@@ -591,7 +593,7 @@ class IsaacSimEnv(LRhcEnvBase):
                     throw_when_excep = True)
                 
             # add offsets to intial height depending on the terrain heightmap
-            if hasattr(self, "terrain_utils") and hasattr(self.terrain_utils, "get_height_at"):
+            if hasattr(self, "terrain_generator") and hasattr(self.terrain_generator, "get_height_at"):
                 stage = get_current_stage()
                 up_axis = UsdGeom.GetStageUpAxis(stage)
 
@@ -613,12 +615,13 @@ class IsaacSimEnv(LRhcEnvBase):
                     x = row_offset - row * spacing
                     y = col * spacing - col_offset
 
+                    half_extent = self._env_opts.get("spawn_height_check_half_extent", 0.3)
                     if up_axis == UsdGeom.Tokens.z:
-                        height = self.terrain_utils.get_height_at(x, y)
+                        height = self.terrain_generator.get_max_height_in_rect(x, y, half_extent=half_extent)
                     else:
-                        height = self.terrain_utils.get_height_at(x, y)
+                        height = self.terrain_generator.get_max_height_in_rect(x, y, half_extent=half_extent)
 
-                    offsets[env_idx][2] += height + 0.03  # spawn 1cm above local terrain
+                    offsets[env_idx][2] += height + self._env_opts.get("spawn_height_cushion", 0.03)
 
                 self._env_opts["cloning_offset"] = offsets
 
@@ -678,7 +681,7 @@ class IsaacSimEnv(LRhcEnvBase):
 
             # height grid sensor (terrain may be None if using flat ground)
             self._height_sensors[robot_name] = HeightGridSensor(
-                terrain_utils=getattr(self, "terrain_utils", None),
+                terrain_utils=self.terrain_generator,
                 grid_size=int(self._env_opts["height_sensor_pixels"]),
                 resolution=float(self._env_opts["height_sensor_resolution"]),
                 n_envs=self._num_envs,
@@ -1198,9 +1201,19 @@ class IsaacSimEnv(LRhcEnvBase):
             else:
                 self._height_imgs[robot_name][env_indxs] = heights
 
-            print("heights")
-            print(self._height_imgs[robot_name])
-            
+            print("robot position")
+            print(pos_src)
+            print("robot orientation")
+            print(quat_src)
+            print("terrain heightfield raw")
+            print(self.terrain_generator._heightfield_raw)
+            print("terrain heightfield world")
+            print(self.terrain_generator.heightfield_world)
+            print("terrain position")
+            print(self.terrain_generator._position)
+            print("terrrain orientation")
+            print(self.terrain_generator._orientation)
+
     def _read_jnts_state_from_robot(self,
         robot_name: str,
         env_indxs: torch.Tensor = None):
@@ -1226,7 +1239,7 @@ class IsaacSimEnv(LRhcEnvBase):
         
             pose = self._robots_art_views[robot_name].get_world_poses( 
                                             clone = True,
-                                            indices=env_indxs) # tuple: (pos, quat)
+                                            indices=env_indxs) # tuple: (pos, quat), quat is [w, i, j, k] in Isaac4.2
             
             self._root_p[robot_name][env_indxs, :] = pose[0] 
 

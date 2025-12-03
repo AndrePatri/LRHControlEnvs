@@ -477,8 +477,8 @@ class Isaac5xSimEnv(LRhcEnvBase):
             if self._env_opts["ground_type"]=="random":
                 random_prim_path=self._env_opts["ground_plane_prim_path"]+"_random_unif"
                 self._ground_plane_prim_paths.append(random_prim_path)
-                self.terrain_utils = RlTerrains(get_current_stage(), prim_path=random_prim_path)
-                self._ground_plane=self.terrain_utils.create_random_uniform_terrain(terrain_size=self._env_opts["ground_size"], 
+                self.terrain_generator = RlTerrains(get_current_stage(), prim_path=random_prim_path)
+                self._ground_plane=self.terrain_generator.create_random_uniform_terrain(terrain_size=self._env_opts["ground_size"], 
                     min_height=min_height,
                     max_height=max_height,
                     step=step,
@@ -489,8 +489,8 @@ class Isaac5xSimEnv(LRhcEnvBase):
             elif self._env_opts["ground_type"]=="random_patches":
                 random_prim_path=self._env_opts["ground_plane_prim_path"]+"_random_unif_patches"
                 self._ground_plane_prim_paths.append(random_prim_path)
-                self.terrain_utils = RlTerrains(get_current_stage(), prim_path=random_prim_path)
-                self._ground_plane=self.terrain_utils.create_random_patched_terrain(terrain_size=self._env_opts["ground_size"], 
+                self.terrain_generator = RlTerrains(get_current_stage(), prim_path=random_prim_path)
+                self._ground_plane=self.terrain_generator.create_random_patched_terrain(terrain_size=self._env_opts["ground_size"], 
                     min_height=min_height,
                     max_height=max_height,
                     step=step,
