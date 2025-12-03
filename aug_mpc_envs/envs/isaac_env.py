@@ -32,6 +32,7 @@ from EigenIPC.PyEigenIPC import LogType
 from EigenIPC.PyEigenIPC import Journal
 
 from aug_mpc_envs.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
+from aug_mpc_envs.utils.height_grid_visualizer import HeightGridVisualizer
 from aug_mpc_envs.utils.height_sensor import HeightGridSensor
 
 from aug_mpc.envs.lrhc_remote_env_base import LRhcEnvBase
@@ -166,6 +167,10 @@ class IsaacSimEnv(LRhcEnvBase):
         self._spawning_radius=self._env_opts["spawning_radius"] # [m] -> default distance between roots of robots in a single 
         self._height_sensors={}
         self._height_imgs={}
+        self._height_vis={}
+        self._height_vis_step={}
+        self._height_vis_step={}
+        self._height_vis={}
         
     def _import_isaac_pkgs(self):
         # we use global, so that we can create the simulation app inside (and so
@@ -217,6 +222,7 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["physics_prim_path"]="/physicsScene"
         isaac_opts["use_gpu"]=True
         isaac_opts["use_gpu_pipeline"]=True
+        isaac_opts["render_to_file"]=False
         isaac_opts["device"]="cuda"
         isaac_opts["is_fixed_base"]=False
         isaac_opts["merge_fixed_jnts"]=True
@@ -261,13 +267,19 @@ class IsaacSimEnv(LRhcEnvBase):
         # isaac_opts["gpu_heap_capacity"] = 64 * 1024 * 1024
         # isaac_opts["gpu_temp_buffer_capacity"] = 16 * 1024 * 1024
         # isaac_opts["gpu_max_num_partitions"] = 8
+
         isaac_opts["env_spacing"]=3.0
         isaac_opts["spawning_height"]=0.8
         isaac_opts["spawning_radius"]=1.0
         isaac_opts["spawn_height_check_half_extent"]=0.2
         isaac_opts["spawn_height_cushion"]=0.03
-        isaac_opts["height_sensor_resolution"]=0.10
-        isaac_opts["height_sensor_pixels"]=16
+
+        isaac_opts["height_sensor_resolution"]=0.16
+        isaac_opts["height_sensor_pixels"]=10
+        isaac_opts["enable_height_vis"]=True
+        isaac_opts["height_vis_radius"]=0.03
+        isaac_opts["height_vis_update_period"]=1
+
         isaac_opts["use_flat_ground"]=True
         isaac_opts["ground_type"]="random"
         isaac_opts["ground_size"]=50
@@ -279,11 +291,10 @@ class IsaacSimEnv(LRhcEnvBase):
         
         isaac_opts["enable_livestream"] = False
         isaac_opts["enable_viewport"] = False
+
         isaac_opts["use_diff_vels"] = False
 
-        isaac_opts["render_to_file"]=False
-
-        isaac_opts["use_random_pertub"]=True
+        isaac_opts["use_random_pertub"]=False
         isaac_opts["pert_wrenches_max_duration"]=0.2
         isaac_opts["pert_wrenches_min_duration"]=0.05
 
@@ -687,6 +698,16 @@ class IsaacSimEnv(LRhcEnvBase):
                 n_envs=self._num_envs,
                 device=self._device,
                 dtype=self._dtype)
+            self._height_vis_step[robot_name] = 0
+            if self._env_opts.get("enable_height_vis", False):
+                self._height_vis[robot_name] = HeightGridVisualizer(
+                    robot_name=robot_name,
+                    num_envs=self._num_envs,
+                    grid_size=int(self._env_opts["height_sensor_pixels"]),
+                    resolution=float(self._env_opts["height_sensor_resolution"]),
+                    marker_radius=float(self._env_opts["height_vis_radius"]),
+                    device=self._device,
+                    dtype=self._dtype)
 
             self._blink_rigid_prim_views[robot_name] = RigidPrimView(prim_paths_expr=self._env_opts["envs_ns"] + "/env_.*"+ "/" + robot_name + "/" + base_link_name,
                                                     name = robot_name + "RigidPrimView") # base link prim views
@@ -821,6 +842,30 @@ class IsaacSimEnv(LRhcEnvBase):
 
         if mode == "human":
             self._world.render()
+            # optional height grid visualization
+            if self._env_opts.get("enable_height_vis", False):
+                for robot_name, vis in self._height_vis.items():
+                    # use latest stored states
+                    if robot_name not in self._height_imgs or robot_name not in self._height_sensors:
+                        continue
+                    heights = self._height_imgs.get(robot_name, None)
+                    if heights is None or heights.numel() == 0:
+                        continue
+                    pos_src = self._root_p.get(robot_name, None)
+                    quat_src = self._root_q.get(robot_name, None)
+                    if pos_src is None or quat_src is None:
+                        continue
+                    step = self._height_vis_step.get(robot_name, 0)
+                    period = max(1, int(self._env_opts.get("height_vis_update_period", 1)))
+                    if step % period == 0:
+                        try:
+                            vis.update(
+                                base_positions=pos_src,
+                                base_quats=quat_src,
+                                heights=heights)
+                        except Exception as exc:
+                            print(f"[height_vis] update failed for {robot_name}: {exc}")
+                    self._height_vis_step[robot_name] = step + 1
             return None
         elif mode == "rgb_array":
             # check if viewport is enabled -- if not, then complain because we won't get any data
