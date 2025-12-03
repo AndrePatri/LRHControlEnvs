@@ -261,13 +261,13 @@ class IsaacSimEnv(LRhcEnvBase):
         # isaac_opts["gpu_heap_capacity"] = 64 * 1024 * 1024
         # isaac_opts["gpu_temp_buffer_capacity"] = 16 * 1024 * 1024
         # isaac_opts["gpu_max_num_partitions"] = 8
-        isaac_opts["env_spacing"]=10.0
+        isaac_opts["env_spacing"]=3.0
         isaac_opts["spawning_height"]=0.8
         isaac_opts["spawning_radius"]=1.0
         isaac_opts["spawn_height_check_half_extent"]=0.2
         isaac_opts["spawn_height_cushion"]=0.03
-        isaac_opts["height_sensor_resolution"]=0.05
-        isaac_opts["height_sensor_pixels"]=10
+        isaac_opts["height_sensor_resolution"]=0.10
+        isaac_opts["height_sensor_pixels"]=16
         isaac_opts["use_flat_ground"]=True
         isaac_opts["ground_type"]="random"
         isaac_opts["ground_size"]=50
@@ -574,15 +574,15 @@ class IsaacSimEnv(LRhcEnvBase):
                 self.terrain_generator = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
                 self._ground_plane=self.terrain_generator.create_stepup_terrain(
                     terrain_size=self._env_opts["ground_size"], 
-                    stairs_ratio=0.3,
+                    stairs_ratio=0.2,
                     min_steps=1,
                     max_steps=1,
-                    pyramid_platform_size=5.0,
-                    position=np.array([0.0, 0.0,0.0]), 
+                    pyramid_platform_size=15.0,
+                    position=np.array([0.0, 0.0, 0.0]), 
                     static_friction=self._env_opts["static_friction"], 
                     dynamic_friction=self._env_opts["dynamic_friction"], 
                     restitution=self._env_opts["restitution"],
-                    step_height=0.2
+                    step_height=0.15
                     )
             else:
                 ground_type=self._env_opts["ground_type"]
@@ -1199,20 +1199,11 @@ class IsaacSimEnv(LRhcEnvBase):
             if env_indxs is None:
                 self._height_imgs[robot_name] = heights
             else:
-                self._height_imgs[robot_name][env_indxs] = heights
+                # clone to avoid overlapping write/read views
+                self._height_imgs[robot_name][env_indxs] = heights.clone()
 
-            print("robot position")
-            print(pos_src)
-            print("robot orientation")
-            print(quat_src)
-            print("terrain heightfield raw")
-            print(self.terrain_generator._heightfield_raw)
-            print("terrain heightfield world")
-            print(self.terrain_generator.heightfield_world)
-            print("terrain position")
-            print(self.terrain_generator._position)
-            print("terrrain orientation")
-            print(self.terrain_generator._orientation)
+            # print("height image")
+            # print(self._height_imgs[robot_name][3, :, : ])
 
     def _read_jnts_state_from_robot(self,
         robot_name: str,

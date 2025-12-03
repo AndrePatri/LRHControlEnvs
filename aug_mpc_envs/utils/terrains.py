@@ -40,8 +40,8 @@ class RlTerrains():
         self._heightfield_raw = None    # original integer grid
         self._horizontal_scale = None
         self._vertical_scale = None
-        self._position = None
-        self._orientation = None
+        self.position = None
+        self.orientation = None
 
     def create_wave_terrain(self, 
             terrain_size = 40,
@@ -80,9 +80,9 @@ class RlTerrains():
                                     vertical_scale=vertical_scale, 
                                     slope_threshold=1.5)
 
-        position = np.array([-terrain_width/2.0, terrain_length/2.0, 0]) + position
+        position = np.array([-terrain_width/2.0, -terrain_length/2.0, 0]) + position
 
-        orientation = np.array([0.70711, 0.0, 0.0, -0.70711])
+        orientation = np.array([1.0, 0.0, 0.0, 0.0])
 
         terrain_prim = add_terrain_to_stage(stage=self._stage, 
                     vertices=vertices, 
@@ -143,9 +143,9 @@ class RlTerrains():
                                     vertical_scale=vertical_scale, 
                                     slope_threshold=1.5)
 
-        position = np.array([-terrain_width/2.0, terrain_length/2.0, 0]) + position
+        position = np.array([-terrain_width/2.0, -terrain_length/2.0, 0]) + position
 
-        orientation = np.array([0.70711, 0.0, 0.0, -0.70711])
+        orientation = np.array([1.0, 0.0, 0.0, 0.0])
 
         terrain_prim = add_terrain_to_stage(stage=self._stage, 
                     vertices=vertices, 
@@ -170,10 +170,10 @@ class RlTerrains():
                     stairs_ratio: float = 0.2,
                     min_steps: int = 1,
                     max_steps: int = 8,
-                    pyramid_platform_size: float = 5.0,
+                    pyramid_platform_size: float = 10.0,
                     step_height: float = 0.5,
                     patch_size: float = 5.0,
-                    res_low: float = 0.08,
+                    res_low: float = 0.25,
                     res_high: float = 0.05,
                     position = np.array([0.0, 0.0, 0.0]),
                     dynamic_friction=0.5,
@@ -327,8 +327,8 @@ class RlTerrains():
                                                             vertical_scale=vertical_scale,
                                                             slope_threshold=1.5)
 
-        position = np.array([-terrain_width / 2.0, terrain_length / 2.0, 0]) + position
-        orientation = np.array([0.70711, 0.0, 0.0, -0.70711])
+        position = np.array([-terrain_width / 2.0, -terrain_length / 2.0, 0]) + position
+        orientation = np.array([1.0, 0.0, 0.0, 0.0])
 
         terrain_prim = add_terrain_to_stage(stage=self._stage,
                                     vertices=vertices,
@@ -416,8 +416,8 @@ class RlTerrains():
                                                             vertical_scale=vertical_scale, 
                                                             slope_threshold=1.5)
 
-        position = np.array([-terrain_width / 2.0, terrain_length / 2.0, 0]) + position
-        orientation = np.array([0.70711, 0.0, 0.0, -0.70711])
+        position = np.array([-terrain_width / 2.0, -terrain_length / 2.0, 0]) + position
+        orientation = np.array([1.0, 0.0, 0.0, 0.0])
 
         terrain_prim = add_terrain_to_stage(stage=self._stage, 
                                     vertices=vertices, 
@@ -489,8 +489,8 @@ class RlTerrains():
                                                             vertical_scale=vertical_scale, 
                                                             slope_threshold=1.5)
 
-        position = np.array([-terrain_width / 2.0, terrain_length / 2.0, 0]) + position
-        orientation = np.array([0.70711, 0.0, 0.0, -0.70711])
+        position = np.array([-terrain_width / 2.0, -terrain_length / 2.0, 0]) + position
+        orientation = np.array([1.0, 0.0, 0.0, 0.0])
 
         terrain_prim = add_terrain_to_stage(stage=self._stage, 
                                     vertices=vertices, 
@@ -542,9 +542,9 @@ class RlTerrains():
 
         vertices, triangles = convert_heightfield_to_trimesh(heightfield, horizontal_scale=horizontal_scale, vertical_scale=vertical_scale, slope_threshold=1.5)
 
-        position = np.array([-terrain_width/2.0, terrain_length/2.0, 0]) + position
+        position = np.array([-terrain_width/2.0, -terrain_length/2.0, 0]) + position
 
-        orientation = np.array([0.70711, 0.0, 0.0, -0.70711])
+        orientation = np.array([1.0, 0.0, 0.0, 0.0])
         terrain_prim = add_terrain_to_stage(stage=self._stage, 
                     vertices=vertices, 
                     triangles=triangles, 
@@ -581,8 +581,8 @@ class RlTerrains():
         self.heightfield_world = heightfield.astype(np.float32) * float(vertical_scale)
         self._horizontal_scale = float(horizontal_scale)
         self._vertical_scale = float(vertical_scale)
-        self._position = np.array(position, dtype=np.float64)
-        self._orientation = np.array(orientation, dtype=np.float64) if orientation is not None else np.array([1.0, 0.0, 0.0, 0.0])
+        self.position = np.array(position, dtype=np.float64)
+        self.orientation = np.array(orientation, dtype=np.float64) if orientation is not None else np.array([1.0, 0.0, 0.0, 0.0])
 
     def get_height_at(self, x_world: float, y_world: float) -> float:
         """Return terrain height (meters) at world coordinates (x_world, y_world)."""
@@ -590,8 +590,8 @@ class RlTerrains():
             return 0.0
 
         # inverse transform from world to terrain local frame
-        p = np.array([x_world, y_world, 0.0], dtype=np.float64) - self._position
-        rot = self._quat_to_rot(self._orientation)
+        p = np.array([x_world, y_world, 0.0], dtype=np.float64) - self.position
+        rot = self._quat_to_rot(self.orientation)
         p_local = rot.T @ p
 
         # convert to grid indices
@@ -631,8 +631,8 @@ class RlTerrains():
         flat_x = x_arr.reshape(-1)
         flat_y = y_arr.reshape(-1)
 
-        pts = np.stack([flat_x - self._position[0], flat_y - self._position[1], np.zeros_like(flat_x)], axis=0)
-        rot = self._quat_to_rot(self._orientation)
+        pts = np.stack([flat_x - self.position[0], flat_y - self.position[1], np.zeros_like(flat_x)], axis=0)
+        rot = self._quat_to_rot(self.orientation)
         local = rot.T @ pts
 
         gx = local[0] / self._horizontal_scale

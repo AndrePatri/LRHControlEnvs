@@ -415,8 +415,8 @@ def add_terrain_to_stage(stage, vertices, triangles, position=None, orientation=
     # if not success:
     #     raise Exception(f"Failed to add RigidBodyMaterial to prim at {prim_path}")
     physics_material=UsdPhysics.MaterialAPI.Apply(terrain.prim)
-    physics_material.CreateDynamicFrictionAttr().Set(static_friction)
-    physics_material.CreateStaticFrictionAttr().Set(dynamic_friction)
+    physics_material.CreateDynamicFrictionAttr().Set(dynamic_friction)
+    physics_material.CreateStaticFrictionAttr().Set(static_friction)
     physics_material.CreateRestitutionAttr().Set(restitution)
     physxMaterialAPI=PhysxSchema.PhysxMaterialAPI.Apply(terrain.prim)
     physxMaterialAPI.CreateFrictionCombineModeAttr().Set("multiply") # average, min, multiply, max 

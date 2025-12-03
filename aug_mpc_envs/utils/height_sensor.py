@@ -49,10 +49,10 @@ class HeightGridSensor:
         self._horizontal_scale = float(terrain_utils._horizontal_scale)
 
         # world to terrain rotation and translation
-        quat = torch.as_tensor(terrain_utils._orientation, device=self._device, dtype=self._dtype)
+        quat = torch.as_tensor(terrain_utils.orientation, device=self._device, dtype=self._dtype)
         rot = self._quat_to_rotmat(quat.unsqueeze(0))[0]  # (3,3) expects (w,x,y,z)
         self._rot_w2t_3x3 = rot.t()  # world -> terrain
-        self._terrain_pos = torch.as_tensor(terrain_utils._position, device=self._device, dtype=self._dtype)
+        self._terrain_pos = torch.as_tensor(terrain_utils.position, device=self._device, dtype=self._dtype)
 
         self._h, self._w = self._heightfield.shape
         self._heightfield_4d = self._heightfield.view(1, 1, self._h, self._w)
@@ -60,22 +60,21 @@ class HeightGridSensor:
         self._buffer = torch.zeros((self._n_envs, self._grid_size, self._grid_size),
                                    device=self._device, dtype=self._dtype)
 
-    def read(self, base_positions: torch.Tensor, base_quats: torch.Tensor) -> torch.Tensor:
+    def read(self, basepositions: torch.Tensor, base_quats: torch.Tensor) -> torch.Tensor:
         """Return height images of shape (N, grid, grid) for provided bases.
 
         base_quats are expected in [w, x, y, z] order (consistent with the env).
         """
-        num_envs = base_positions.shape[0]
+        num_envs = basepositions.shape[0]
 
         rot_mats = self._quat_to_rotmat(base_quats)  # (N,3,3)
-        print("robot orientation (matrix)")
-        print(rot_mats)
-        
+
         rot_xy = rot_mats[:, :2, :2]  # planar rotation
 
         offsets = self._grid_offsets.unsqueeze(0).expand(num_envs, -1, -1)
+
         world_xy = torch.bmm(offsets, rot_xy.transpose(1, 2))
-        world_xy += base_positions[:, :2].unsqueeze(1)
+        world_xy += basepositions[:, :2].unsqueeze(1)
 
         if self._heightfield is None:
             heights = self._buffer[:num_envs]
@@ -107,20 +106,6 @@ class HeightGridSensor:
     def _quat_to_rotmat(self, quat: torch.Tensor) -> torch.Tensor:
         # quat: (N,4) -> rot: (N,3,3); assumes [w,x,y,z]
         w, x, y, z = quat.unbind(-1)
-        ww, xx, yy, zz = w * w, x * x, y * y, z * z
-        wx, wy, wz = w * x, w * y, w * z
-        xy, xz, yz = x * y, x * z, y * z
-
-        rot = torch.stack([
-            torch.stack([ww + xx - yy - zz, 2 * (xy - wz),     2 * (xz + wy)], dim=-1),
-            torch.stack([2 * (xy + wz),     ww - xx + yy - zz, 2 * (yz - wx)], dim=-1),
-            torch.stack([2 * (xz - wy),     2 * (yz + wx),     ww - xx - yy + zz], dim=-1)
-        ], dim=-2)
-        return rot
-
-    def _quat_xyzw_to_rotmat(self, quat: torch.Tensor) -> torch.Tensor:
-        # quat: (N,4) -> rot: (N,3,3); assumes [x,y,z,w]
-        x, y, z, w = quat.unbind(-1)
         ww, xx, yy, zz = w * w, x * x, y * y, z * z
         wx, wy, wz = w * x, w * y, w * z
         xy, xz, yz = x * y, x * z, y * z
