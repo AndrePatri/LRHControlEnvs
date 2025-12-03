@@ -279,7 +279,7 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["enable_height_vis"]=True
         isaac_opts["height_vis_radius"]=0.03
         isaac_opts["height_vis_update_period"]=1
-
+            
         isaac_opts["use_flat_ground"]=True
         isaac_opts["ground_type"]="random"
         isaac_opts["ground_size"]=50
@@ -333,7 +333,12 @@ class IsaacSimEnv(LRhcEnvBase):
         # update device flag based on sim opts
         self._device=isaac_opts["device"]
         self._use_gpu=isaac_opts["use_gpu"]
-        
+
+        # height sensor shared data
+        if isaac_opts["enable_height_vis"]:
+            self._env_opts["enable_height_shared_data"] = True
+            self._env_opts["height_shared_grid"]=isaac_opts["height_sensor_pixels"]
+
     def _calc_robot_distrib(self):
 
         import math
@@ -596,6 +601,7 @@ class IsaacSimEnv(LRhcEnvBase):
                     step_height=0.15
                     )
             else:
+                self.terrain_generator=None
                 ground_type=self._env_opts["ground_type"]
                 Journal.log(self.__class__.__name__,
                     "_configure_scene",
@@ -1247,8 +1253,8 @@ class IsaacSimEnv(LRhcEnvBase):
                 # clone to avoid overlapping write/read views
                 self._height_imgs[robot_name][env_indxs] = heights.clone()
 
-            # print("height image")
-            # print(self._height_imgs[robot_name][3, :, : ])
+            print("height image")
+            print(self._height_imgs[robot_name][0, :, : ])
 
     def _read_jnts_state_from_robot(self,
         robot_name: str,
