@@ -1253,8 +1253,8 @@ class IsaacSimEnv(LRhcEnvBase):
                 # clone to avoid overlapping write/read views
                 self._height_imgs[robot_name][env_indxs] = heights.clone()
 
-            print("height image")
-            print(self._height_imgs[robot_name][0, :, : ])
+            # print("height image")
+            # print(self._height_imgs[robot_name][0, :, : ])
 
     def _read_jnts_state_from_robot(self,
         robot_name: str,
