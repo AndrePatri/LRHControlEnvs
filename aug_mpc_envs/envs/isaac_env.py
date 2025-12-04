@@ -274,9 +274,7 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["spawn_height_check_half_extent"]=0.2
         isaac_opts["spawn_height_cushion"]=0.03
 
-        isaac_opts["height_sensor_resolution"]=0.16
-        isaac_opts["height_sensor_pixels"]=10
-        isaac_opts["enable_height_vis"]=True
+        isaac_opts["enable_height_vis"]=False
         isaac_opts["height_vis_radius"]=0.03
         isaac_opts["height_vis_update_period"]=1
             
@@ -334,10 +332,9 @@ class IsaacSimEnv(LRhcEnvBase):
         self._device=isaac_opts["device"]
         self._use_gpu=isaac_opts["use_gpu"]
 
-        # height sensor shared data
-        if isaac_opts["enable_height_vis"]:
-            self._env_opts["enable_height_shared_data"] = True
-            self._env_opts["height_shared_grid"]=isaac_opts["height_sensor_pixels"]
+        # override height sensor shared data
+        self._env_opts["height_shared_grid"]=10
+        self._env_opts["height_shared_resolution"]=0.16
 
     def _calc_robot_distrib(self):
 
@@ -704,6 +701,12 @@ class IsaacSimEnv(LRhcEnvBase):
                 n_envs=self._num_envs,
                 device=self._device,
                 dtype=self._dtype)
+            # ensure shared-data flags are set if a height sensor is active
+            self._env_opts["height_shared_grid"] = int(self._env_opts["height_sensor_pixels"])
+            self._env_opts["height_shared_resolution"] = float(self._env_opts["height_sensor_resolution"])
+            self._enable_height_shared = True
+            self._height_shared_grid = self._env_opts["height_shared_grid"]
+            self._height_shared_resolution = self._env_opts["height_shared_resolution"]
             self._height_vis_step[robot_name] = 0
             if self._env_opts.get("enable_height_vis", False):
                 self._height_vis[robot_name] = HeightGridVisualizer(
