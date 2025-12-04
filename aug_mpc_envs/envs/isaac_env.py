@@ -280,7 +280,7 @@ class IsaacSimEnv(LRhcEnvBase):
             
         isaac_opts["use_flat_ground"]=True
         isaac_opts["ground_type"]="random"
-        isaac_opts["ground_size"]=50
+        isaac_opts["ground_size"]=100
         isaac_opts["terrain_border"]=isaac_opts["ground_size"]/2
         isaac_opts["dh_ground"]=0.03
         isaac_opts["contact_prims"] = []
@@ -583,7 +583,7 @@ class IsaacSimEnv(LRhcEnvBase):
                 self.terrain_generator = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
                 self._ground_plane=self.terrain_generator.create_stepup_terrain(
                     terrain_size=self._env_opts["ground_size"], 
-                    stairs_ratio=0.2,
+                    stairs_ratio=0.3,
                     min_steps=1,
                     max_steps=1,
                     pyramid_platform_size=15.0,
