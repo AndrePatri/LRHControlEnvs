@@ -296,14 +296,14 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["pert_wrenches_max_duration"]=0.2
         isaac_opts["pert_wrenches_min_duration"]=0.05
 
-        isaac_opts["pert_wrenches_weight_factor"]=1.0 # 0.5 -> 50% of full robot weight
+        isaac_opts["pert_wrenches_weight_factor"]=0.3 # 0.5 -> 50% of full robot weight
         isaac_opts["max_lin_impulse_norm"]=isaac_opts["pert_wrenches_weight_factor"]*isaac_opts["pert_wrenches_max_duration"]
         isaac_opts["max_ang_impulse_lever"]=0.2 # [m]
         isaac_opts["max_ang_impulse_norm"]=isaac_opts["max_lin_impulse_norm"]*isaac_opts["max_ang_impulse_lever"]
         isaac_opts["lin_pert_max_wrt_weight"]=0.5
         isaac_opts["ang_pert_max_wrt_weight"]=0.1
         
-        isaac_opts["pert_wrenches_rate"]=10.0 # on avergare 1 pert every pert_wrenches_rate seconds
+        isaac_opts["pert_wrenches_rate"]=15.0 # on avergare 1 pert every pert_wrenches_rate seconds
 
         isaac_opts.update(self._env_opts) # update defaults with provided opts
         isaac_opts["rendering_freq"]=int(isaac_opts["rendering_dt"]/isaac_opts["physics_dt"])
