@@ -248,9 +248,9 @@ class IsaacSimEnv(LRhcEnvBase):
         # Per-actor settings ( can override in actor_options )
         isaac_opts["solver_position_iteration_count"] = 4 # defaults to 4
         isaac_opts["solver_velocity_iteration_count"] = 3 # defaults to 1
-        isaac_opts["sleep_threshold"] = 0.0 # Mass-normalized kinetic energy threshold below which an actor may go to sleep.
+        isaac_opts["sleep_threshold"] = 1e-5 # Mass-normalized kinetic energy threshold below which an actor may go to sleep.
         # Allowed range [0, max_float).
-        isaac_opts["stabilization_threshold"] = 1e-5
+        isaac_opts["stabilization_threshold"] = 1e-4
         # Per-body settings ( can override in actor_options )
         # isaac_opts["enable_gyroscopic_forces"] = True
         # isaac_opts["density"] = 1000 # density to be used for bodies that do not specify mass or density
@@ -277,10 +277,11 @@ class IsaacSimEnv(LRhcEnvBase):
         isaac_opts["enable_height_vis"]=False
         isaac_opts["height_vis_radius"]=0.03
         isaac_opts["height_vis_update_period"]=1
+        isaac_opts["collision_refinement_level"]=3  # increase cylinder tesselation for smoother wheel contacts
             
         isaac_opts["use_flat_ground"]=True
         isaac_opts["ground_type"]="random"
-        isaac_opts["ground_size"]=100
+        isaac_opts["ground_size"]=10
         isaac_opts["terrain_border"]=isaac_opts["ground_size"]/2
         isaac_opts["dh_ground"]=0.03
         isaac_opts["contact_prims"] = []
@@ -1221,7 +1222,35 @@ class IsaacSimEnv(LRhcEnvBase):
         robot_base_prim = prim_utils.get_prim_at_path(robot_base_prim_path)
         print("Imported robot URDF: \n", prim_utils.get_prim_children(robot_base_prim))
 
+        # improve collision tesselation for cylinders (e.g., wheels) if requested
+        # self._apply_collision_refinement(robot_base_prim_path,
+        #                                  self._env_opts["collision_refinement_level"])
+
         return success
+
+    def _apply_collision_refinement(self, robot_base_prim_path: str, refinement_level: int):
+        """Set refinement level on collision cylinders to avoid coarse faceting."""
+        if refinement_level is None:
+            return
+        stage = get_current_stage()
+        coll_prefix = robot_base_prim_path + "/collisions"
+        count = 0
+        for prim in stage.Traverse():
+            if not prim.IsValid():
+                continue
+            path_str = prim.GetPath().pathString
+            if not path_str.startswith(coll_prefix):
+                continue
+            if prim.GetTypeName() == "Cylinder":
+                attr = prim.GetAttribute("refinementLevel")
+                if not attr.IsValid():
+                    attr = prim.CreateAttribute("refinementLevel", Sdf.ValueTypeNames.Int)
+                attr.Set(int(refinement_level))
+                count += 1
+        Journal.log(self.__class__.__name__,
+            "_apply_collision_refinement",
+            f"Applied refinement level {refinement_level} to {count} cylinder collision prims under {coll_prefix}",
+            LogType.STAT)
 
     def apply_collision_filters(self, 
                                 physicscene_path: str, 
