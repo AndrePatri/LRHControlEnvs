@@ -43,19 +43,27 @@ class HeightGridSensor:
         self._rot_w2t_3x3 = None
         self._terrain_pos = None
 
-        hf_np = terrain_utils.heightfield_world  # stored in meters
+        if terrain_utils is not None:
+            hf_np = terrain_utils.heightfield_world  # stored in meters
 
-        self._heightfield = torch.as_tensor(hf_np, device=self._device, dtype=self._dtype).contiguous()
-        self._horizontal_scale = float(terrain_utils._horizontal_scale)
+            self._heightfield = torch.as_tensor(hf_np, device=self._device, dtype=self._dtype).contiguous()
+            self._horizontal_scale = float(terrain_utils._horizontal_scale)
 
-        # world to terrain rotation and translation
-        quat = torch.as_tensor(terrain_utils.orientation, device=self._device, dtype=self._dtype)
-        rot = self._quat_to_rotmat(quat.unsqueeze(0))[0]  # (3,3) expects (w,x,y,z)
-        self._rot_w2t_3x3 = rot.t()  # world -> terrain
-        self._terrain_pos = torch.as_tensor(terrain_utils.position, device=self._device, dtype=self._dtype)
+            # world to terrain rotation and translation
+            quat = torch.as_tensor(terrain_utils.orientation, device=self._device, dtype=self._dtype)
+            rot = self._quat_to_rotmat(quat.unsqueeze(0))[0]  # (3,3) expects (w,x,y,z)
+            self._rot_w2t_3x3 = rot.t()  # world -> terrain
+            self._terrain_pos = torch.as_tensor(terrain_utils.position, device=self._device, dtype=self._dtype)
 
-        self._h, self._w = self._heightfield.shape
-        self._heightfield_4d = self._heightfield.view(1, 1, self._h, self._w)
+            self._h, self._w = self._heightfield.shape
+            self._heightfield_4d = self._heightfield.view(1, 1, self._h, self._w)
+        else:
+            # flat ground fallback
+            self._horizontal_scale = 1.0
+            self._rot_w2t_3x3 = torch.eye(3, device=self._device, dtype=self._dtype)
+            self._terrain_pos = torch.zeros(3, device=self._device, dtype=self._dtype)
+            self._h, self._w = 1, 1
+            self._heightfield_4d = None
 
         self._buffer = torch.zeros((self._n_envs, self._grid_size, self._grid_size),
                                    device=self._device, dtype=self._dtype)

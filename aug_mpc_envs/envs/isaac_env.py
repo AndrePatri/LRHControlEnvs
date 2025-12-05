@@ -281,7 +281,7 @@ class IsaacSimEnv(LRhcEnvBase):
             
         isaac_opts["use_flat_ground"]=True
         isaac_opts["ground_type"]="random"
-        isaac_opts["ground_size"]=100
+        isaac_opts["ground_size"]=30
         isaac_opts["terrain_border"]=isaac_opts["ground_size"]/2
         isaac_opts["dh_ground"]=0.03
         isaac_opts["contact_prims"] = []
@@ -505,6 +505,7 @@ class IsaacSimEnv(LRhcEnvBase):
         
         self._ground_plane_prim_paths=[]
         self._ground_plane=None
+        self.terrain_generator = None
         if not self._env_opts["use_flat_ground"]:
             # ensure terrain is large enough to contain all env clones
             spacing = float(self._env_opts["env_spacing"])
@@ -595,7 +596,6 @@ class IsaacSimEnv(LRhcEnvBase):
                     step_height=0.15
                     )
             else:
-                self.terrain_generator=None
                 ground_type=self._env_opts["ground_type"]
                 Journal.log(self.__class__.__name__,
                     "_configure_scene",
@@ -604,7 +604,7 @@ class IsaacSimEnv(LRhcEnvBase):
                     throw_when_excep = True)
                 
             # add offsets to intial height depending on the terrain heightmap
-            if hasattr(self, "terrain_generator") and hasattr(self.terrain_generator, "get_height_at"):
+            if self.terrain_generator is not None:
                 stage = get_current_stage()
                 up_axis = UsdGeom.GetStageUpAxis(stage)
 
@@ -632,7 +632,7 @@ class IsaacSimEnv(LRhcEnvBase):
                     else:
                         height = self.terrain_generator.get_max_height_in_rect(x, y, half_extent=half_extent)
 
-                    offsets[env_idx][2] += height + self._env_opts.get("spawn_height_cushion", 0.03)
+                    offsets[env_idx][2] += height + self._env_opts["spawn_height_cushion"]
 
                 self._env_opts["cloning_offset"] = offsets
 
@@ -692,7 +692,7 @@ class IsaacSimEnv(LRhcEnvBase):
 
             # height grid sensor (terrain may be None if using flat ground)
             self._height_sensors[robot_name] = HeightGridSensor(
-                terrain_utils=self.terrain_generator,
+                terrain_utils=self.terrain_generator if not self._env_opts["use_flat_ground"] else None,
                 grid_size=int(self._env_opts["height_sensor_pixels"]),
                 resolution=float(self._env_opts["height_sensor_resolution"]),
                 n_envs=self._num_envs,
@@ -1275,6 +1275,8 @@ class IsaacSimEnv(LRhcEnvBase):
             pos_src = self._root_p[robot_name] if env_indxs is None else self._root_p[robot_name][env_indxs]
             quat_src = self._root_q[robot_name] if env_indxs is None else self._root_q[robot_name][env_indxs]
             heights = self._height_sensors[robot_name].read(pos_src, quat_src)
+            if self._env_opts["use_flat_ground"]:
+                heights.zero_()
             if env_indxs is None:
                 self._height_imgs[robot_name] = heights
             else:
