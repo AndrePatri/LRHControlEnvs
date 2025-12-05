@@ -281,7 +281,7 @@ class IsaacSimEnv(LRhcEnvBase):
             
         isaac_opts["use_flat_ground"]=True
         isaac_opts["ground_type"]="random"
-        isaac_opts["ground_size"]=10
+        isaac_opts["ground_size"]=100
         isaac_opts["terrain_border"]=isaac_opts["ground_size"]/2
         isaac_opts["dh_ground"]=0.03
         isaac_opts["contact_prims"] = []
