@@ -23,7 +23,7 @@ import numpy as np
 
 from aug_mpc_envs.utils.terrain_utils import *
 
-from pxr import Usd
+from pxr import Usd, UsdGeom, Gf, UsdPhysics, PhysxSchema
 
 class RlTerrains():
 
@@ -101,6 +101,180 @@ class RlTerrains():
                                 orientation=orientation)
 
         return terrain_prim
+
+    def create_stepup_prim_terrain(self,
+                    terrain_size=30,
+                    stairs_ratio: float = 0.2,
+                    platform_size: float = 5.0,
+                    step_height: float = 0.2,
+                    wall_height: float = 2.0,
+                    res_low: float = 0.1,
+                    res_high: float = 0.03,
+                    position = np.array([0.0, 0.0, 0.0]),
+                    dynamic_friction=0.5,
+                    static_friction=0.5,
+                    restitution=0.1):
+        """
+        Create a random tiled step-up terrain using only primitive colliders (boxes + base slab).
+        Each tile of size ``platform_size`` has probability ``stairs_ratio`` of being raised
+        by ``step_height``. A matching synthetic heightfield is generated for sensing.
+        """
+        # Choose resolution: use high resolution when we expect steps
+        use_high_res = stairs_ratio > 0.0
+        horizontal_scale = res_high if use_high_res else res_low
+        vertical_scale = 0.005
+
+        terrain_width = terrain_size
+        terrain_length = terrain_size
+
+        num_rows = max(1, int(round(terrain_width / horizontal_scale)))
+        num_cols = max(1, int(round(terrain_length / horizontal_scale)))
+
+        heightfield = np.zeros((num_rows, num_cols), dtype=np.int32)
+
+        # Tile layout based on metric platform size to keep colliders within bounds
+        n_tiles_x = max(1, int(np.ceil(terrain_width / platform_size)))
+        n_tiles_y = max(1, int(np.ceil(terrain_length / platform_size)))
+
+        terrain_center = position
+
+        step_h_units = max(1, int(round(step_height / vertical_scale)))
+        wall_h_units = max(1, int(round(wall_height / vertical_scale)))
+        ground_thickness = 0.1
+        ground_top = terrain_center[2] + 0.5 * ground_thickness
+
+        terrain_low_corner = position + np.array([-terrain_width/2.0, -terrain_length/2.0, 0.0])
+        orientation = np.array([1.0, 0.0, 0.0, 0.0])
+
+        # base slab
+        ground_prim_path = self._prim_path + "_slab"
+        ground_prim = UsdGeom.Cube.Define(self._stage, ground_prim_path)
+        ground_prim.CreateSizeAttr(1.0)
+        # scale then translate so translation is not scaled
+        ground_prim.AddTranslateOp().Set(Gf.Vec3f(terrain_center[0],
+                                                  terrain_center[1],
+                                                  terrain_center[2]))
+        ground_prim.AddScaleOp().Set(Gf.Vec3f(terrain_width, terrain_length, ground_thickness))
+        UsdPhysics.CollisionAPI.Apply(ground_prim.GetPrim())
+        PhysxSchema.PhysxCollisionAPI.Apply(ground_prim.GetPrim())
+        mat_api = UsdPhysics.MaterialAPI.Apply(ground_prim.GetPrim())
+        mat_api.CreateDynamicFrictionAttr(dynamic_friction)
+        mat_api.CreateStaticFrictionAttr(static_friction)
+        mat_api.CreateRestitutionAttr(restitution)
+
+        # Raised tiles
+        for ix in range(n_tiles_x):
+            for iy in range(n_tiles_y):
+                # tile extents in meters
+                start_x_m = ix * platform_size
+                end_x_m = min(terrain_width, (ix + 1) * platform_size)
+                start_y_m = iy * platform_size
+                end_y_m = min(terrain_length, (iy + 1) * platform_size)
+
+                # convert to heightfield indices
+                start_row = int(round(start_x_m / horizontal_scale))
+                end_row = min(num_rows, int(round(end_x_m / horizontal_scale)))
+                start_col = int(round(start_y_m / horizontal_scale))
+                end_col = min(num_cols, int(round(end_y_m / horizontal_scale)))
+                cells_x = max(1, end_row - start_row)
+                cells_y = max(1, end_col - start_col)
+
+                if np.random.rand() >= stairs_ratio:
+                    continue  # keep this tile flat
+
+                # Update heightfield
+                heightfield[start_row:end_row, start_col:end_col] = step_h_units
+
+                # Collider dimensions in meters (match tile extent)
+                size_x = end_x_m - start_x_m
+                size_y = end_y_m - start_y_m
+                if size_x <= 0.0 or size_y <= 0.0:
+                    continue
+                center_x = terrain_low_corner[0] + start_x_m + 0.5 * size_x
+                center_y = terrain_low_corner[1] + start_y_m + 0.5 * size_y
+                center_z = ground_top + 0.5 * step_height
+
+                tile_prim_path = f"{self._prim_path}/tile_{ix}_{iy}"
+                tile_prim = UsdGeom.Cube.Define(self._stage, tile_prim_path)
+                tile_prim.CreateSizeAttr(1.0)
+                tile_prim.AddTranslateOp().Set(Gf.Vec3f(center_x, center_y, center_z))
+                tile_prim.AddScaleOp().Set(Gf.Vec3f(size_x, size_y, step_height))
+                UsdPhysics.CollisionAPI.Apply(tile_prim.GetPrim())
+                PhysxSchema.PhysxCollisionAPI.Apply(tile_prim.GetPrim())
+                tile_mat = UsdPhysics.MaterialAPI.Apply(tile_prim.GetPrim())
+                tile_mat.CreateDynamicFrictionAttr(dynamic_friction)
+                tile_mat.CreateStaticFrictionAttr(static_friction)
+                tile_mat.CreateRestitutionAttr(restitution)
+
+        # store synthetic heightfield for sensors
+        # add walls to heightfield borders
+        heightfield[0, :] = wall_h_units
+        heightfield[-1, :] = wall_h_units
+        heightfield[:, 0] = wall_h_units
+        heightfield[:, -1] = wall_h_units
+
+        self._store_heightfield(heightfield=heightfield,
+                                horizontal_scale=horizontal_scale,
+                                vertical_scale=vertical_scale,
+                                position=np.array([terrain_low_corner[0],
+                                                   terrain_low_corner[1],
+                                                   ground_top]),
+                                orientation=orientation)
+
+        # Perimeter walls (optional, thin boxes)
+        wall_thickness = 0.1
+        wall_z = ground_top + 0.5 * wall_height
+
+        # +X wall
+        wall_xp_path = f"{self._prim_path}/wall_xp"
+        wall_xp = UsdGeom.Cube.Define(self._stage, wall_xp_path)
+        wall_xp.CreateSizeAttr(1.0)
+        wall_xp.AddTranslateOp().Set(Gf.Vec3f(terrain_center[0] + terrain_width * 0.5 + wall_thickness * 0.5,
+                                              terrain_center[1],
+                                              wall_z))
+        wall_xp.AddScaleOp().Set(Gf.Vec3f(wall_thickness, terrain_length, wall_height))
+
+        UsdPhysics.CollisionAPI.Apply(wall_xp.GetPrim())
+        PhysxSchema.PhysxCollisionAPI.Apply(wall_xp.GetPrim())
+
+        # -X wall
+        wall_xm_path = f"{self._prim_path}/wall_xm"
+        wall_xm = UsdGeom.Cube.Define(self._stage, wall_xm_path)
+        wall_xm.CreateSizeAttr(1.0)
+        wall_xm.AddTranslateOp().Set(Gf.Vec3f(terrain_center[0] - terrain_width * 0.5 - wall_thickness * 0.5,
+                                              terrain_center[1],
+                                              wall_z))
+        wall_xm.AddScaleOp().Set(Gf.Vec3f(wall_thickness, terrain_length, wall_height))
+
+        UsdPhysics.CollisionAPI.Apply(wall_xm.GetPrim())
+        PhysxSchema.PhysxCollisionAPI.Apply(wall_xm.GetPrim())
+
+        # +Y wall
+        wall_yp_path = f"{self._prim_path}/wall_yp"
+        wall_yp = UsdGeom.Cube.Define(self._stage, wall_yp_path)
+        wall_yp.CreateSizeAttr(1.0)
+        wall_yp.AddTranslateOp().Set(Gf.Vec3f(terrain_center[0],
+                                              terrain_center[1] + terrain_length * 0.5 + wall_thickness * 0.5,
+                                              wall_z))
+        wall_yp.AddScaleOp().Set(Gf.Vec3f(terrain_width, wall_thickness, wall_height))
+        UsdPhysics.CollisionAPI.Apply(wall_yp.GetPrim())
+        PhysxSchema.PhysxCollisionAPI.Apply(wall_yp.GetPrim())
+
+        # -Y wall
+        wall_ym_path = f"{self._prim_path}/wall_ym"
+        wall_ym = UsdGeom.Cube.Define(self._stage, wall_ym_path)
+        wall_ym.CreateSizeAttr(1.0)
+        wall_ym.AddTranslateOp().Set(Gf.Vec3f(terrain_center[0],
+                                              terrain_center[1] - terrain_length * 0.5 - wall_thickness * 0.5,
+                                              wall_z))
+        wall_ym.AddScaleOp().Set(Gf.Vec3f(terrain_width, wall_thickness, wall_height))
+        UsdPhysics.CollisionAPI.Apply(wall_ym.GetPrim())
+        PhysxSchema.PhysxCollisionAPI.Apply(wall_ym.GetPrim())
+
+        ground_wrapper = type("GroundWrapper", (), {})()
+        ground_wrapper.prim = ground_prim.GetPrim()
+        ground_wrapper.prim_path = str(ground_prim.GetPath())
+        return ground_wrapper
     
     
     
@@ -578,7 +752,8 @@ class RlTerrains():
     def _store_heightfield(self, heightfield, horizontal_scale, vertical_scale, position, orientation):
         """Cache terrain heightfield (in meters) and transform for later queries."""
         self._heightfield_raw = heightfield
-        self.heightfield_world = heightfield.astype(np.float32) * float(vertical_scale)
+        base_z = float(position[2]) if position is not None else 0.0
+        self.heightfield_world = heightfield.astype(np.float32) * float(vertical_scale) + base_z
         self._horizontal_scale = float(horizontal_scale)
         self._vertical_scale = float(vertical_scale)
         self.position = np.array(position, dtype=np.float64)

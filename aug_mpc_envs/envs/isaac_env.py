@@ -281,7 +281,7 @@ class IsaacSimEnv(LRhcEnvBase):
             
         isaac_opts["use_flat_ground"]=True
         isaac_opts["ground_type"]="random"
-        isaac_opts["ground_size"]=30
+        isaac_opts["ground_size"]=300
         isaac_opts["terrain_border"]=isaac_opts["ground_size"]/2
         isaac_opts["dh_ground"]=0.03
         isaac_opts["contact_prims"] = []
@@ -595,6 +595,20 @@ class IsaacSimEnv(LRhcEnvBase):
                     restitution=self._env_opts["restitution"],
                     step_height=0.15
                     )
+            elif self._env_opts["ground_type"]=="stepup_prim":
+                terrain_prim_path=self._env_opts["ground_plane_prim_path"]+"_stepup_prim"
+                self._ground_plane_prim_paths.append(terrain_prim_path)
+                self.terrain_generator = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
+                self._ground_plane=self.terrain_generator.create_stepup_prim_terrain(
+                    terrain_size=self._env_opts["ground_size"], 
+                    stairs_ratio=0.5,
+                    platform_size=10.0,
+                    step_height=0.15,
+                    position=np.array([0.0, 0.0, 0.0]), 
+                    static_friction=self._env_opts["static_friction"], 
+                    dynamic_friction=self._env_opts["dynamic_friction"], 
+                    restitution=self._env_opts["restitution"],
+                    )
             else:
                 ground_type=self._env_opts["ground_type"]
                 Journal.log(self.__class__.__name__,
@@ -705,7 +719,7 @@ class IsaacSimEnv(LRhcEnvBase):
             self._height_sensor_pixels = self._env_opts["height_sensor_pixels"]
             self._height_sensor_resolution = self._env_opts["height_sensor_resolution"]
             self._height_vis_step[robot_name] = 0
-            if self._env_opts.get("enable_height_vis", False):
+            if self._env_opts["enable_height_vis"]:
                 self._height_vis[robot_name] = HeightGridVisualizer(
                     robot_name=robot_name,
                     num_envs=self._num_envs,
