@@ -268,7 +268,7 @@ class IsaacSimEnv(LRhcEnvBase):
         # isaac_opts["gpu_temp_buffer_capacity"] = 16 * 1024 * 1024
         # isaac_opts["gpu_max_num_partitions"] = 8
 
-        isaac_opts["env_spacing"]=3.0
+        isaac_opts["env_spacing"]=8.0
         isaac_opts["spawning_height"]=0.8
         isaac_opts["spawning_radius"]=1.0
         isaac_opts["spawn_height_check_half_extent"]=0.2
