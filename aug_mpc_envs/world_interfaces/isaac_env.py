@@ -35,7 +35,7 @@ from aug_mpc_envs.utils.math_utils import quat_to_omega
 from aug_mpc_envs.utils.height_grid_visualizer import HeightGridVisualizer
 from aug_mpc_envs.utils.height_sensor import HeightGridSensor
 
-from aug_mpc.envs.world_interface_base import AugMPCWorldInterfaceBase
+from aug_mpc.world_interfaces.world_interface_base import AugMPCWorldInterfaceBase
 from mpc_hive.utilities.math_utils_torch import world2base_frame,world2base_frame3D
 
 class IsaacSimEnv(AugMPCWorldInterfaceBase):
