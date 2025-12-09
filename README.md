@@ -11,6 +11,9 @@ Available interfaces:
 - `XMjSimEnv`: non-vectorized MuJoCo interface on CPU via [xbot2_mujoco](https://github.com/AndrePatri/xbot2_mujoco) for sim-to-sim validation before hardware deployment.
 - `RtDeploymentEnv`: real-time deployment through [xbot2](https://advrhumanoids.github.io/xbot2/master/index.html) and [adarl_ros](git@gitlab.com:crzz/adarl_ros.git).
 
+<p align="center">
+  <img src="docs/imgs/centauro_sims.png" alt="Centauro simulations" width="420">
+</p>
 
 ## Training environments
 Training environment definitions live in `aug_mpc_envs/training_envs/`. Training environments essentially define the MDP for the task at hand (actions, observations, rewards, terminations, truncations) and use shared memory to communicate with the world interface. All environments inherit from [AugMPC](https://github.com/AndrePatri/AugMPC)'s `AugMPCTrainingEnvBase` class.
@@ -22,6 +25,11 @@ Available environments:
 - `PhaseParametrizationEnv`: built on top of `TwistTrackingEnv`, overrides the *instantaneous* contact actions in favour of a *phase* parametrization, allowing the agent to control per-leg gait frequency/phase offsets (and optionally flight properties).
 - `FakePosTrackEnvPhaseControl`: built on top of `FlightPhaseControl`, adds waypoint tracking (as in `FakePosTrackingEnv`) on top of flight-parameter control.
 - `FakePosEnvPhaseParam`: built on top of `PhaseParametrizationEnv`, additionally implements waypoint tracking (as in `FakePosTrackingEnv`).
+<p align="center">
+  <img src="docs/hybrid_quadruped_fake_pos_track.gif" alt="Hybrid Quadruped - FakePosTrackingEnv" width="420">
+</p>
+![MPCViz demo]()
+
 
 ## Installation
 
