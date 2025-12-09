@@ -20,25 +20,23 @@ import torch
 import numpy as np
 import math
 
-import time
-from perf_sleep.pyperfsleep import PerfSleep
-from typing import Union, Tuple, Dict, List
+from typing import Dict, List
 
 from EigenIPC.PyEigenIPC import VLevel
 from EigenIPC.PyEigenIPC import LogType
 from EigenIPC.PyEigenIPC import Journal
 
-from aug_mpc_envs.utils.math_utils import quat_to_omega, quaternion_difference, rel_vel
+from aug_mpc_envs.utils.math_utils import quat_to_omega
 from aug_mpc_envs.utils.xmj_jnt_imp_cntrl import XMjJntImpCntrl
-from aug_mpc.envs.lrhc_remote_env_base import LRhcEnvBase
+from aug_mpc.envs.world_interface_base import AugMPCWorldInterfaceBase
 from adarl_ros.adapters.XbotMjAdapter import RosXbotAdapter
-from xbot2_mujoco.PyXbotMjSim import LoadingUtils
-from mpc_hive.utilities.math_utils_torch import world2base_frame,world2base_frame3D
+from mpc_hive.utilities.math_utils_torch import world2base_frame3D
 
-from mpc_hive.utilities.math_utils_torch import quaternion_multiply, normalize_quaternion
+from mpc_hive.utilities.math_utils_torch import quaternion_multiply
 
 import rospy
-class RtDeploymentEnv(LRhcEnvBase):
+
+class RtDeploymentEnv(AugMPCWorldInterfaceBase):
 
     def __init__(self,
         robot_names: List[str],
