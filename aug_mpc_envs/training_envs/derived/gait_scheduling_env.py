@@ -3,7 +3,7 @@ from typing import Dict
 
 from EigenIPC.PyEigenIPC import VLevel
 
-from aug_mpc_envs.training_envs.fake_pos_tracking_env_with_demo import FakePosTrackingEnvWithDemo
+from aug_mpc_envs.training_envs.derived.fake_pos_tracking_env_with_demo import FakePosTrackingEnvWithDemo
 
 
 class GaitSchedulingEnv(FakePosTrackingEnvWithDemo):
