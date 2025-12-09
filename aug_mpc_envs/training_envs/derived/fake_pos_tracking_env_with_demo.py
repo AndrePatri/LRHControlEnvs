@@ -11,6 +11,7 @@ from aug_mpc.utils.signal_smoother import ExponentialSignalSmoother
 from AugMPCEnvs.aug_mpc_envs.training_envs.fake_pos_tracking_env import FakePosTrackingEnv
 
 class FakePosTrackingEnvWithDemo(FakePosTrackingEnv):
+    """Blends position-tracking RL with scripted gait demonstrations that override contacts (and optionally twist) for a subset of environments."""
 
     def __init__(self,
             namespace: str,

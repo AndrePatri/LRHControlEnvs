@@ -12,6 +12,7 @@ from mpc_hive.utilities.shared_data.rhc_data import RobotState
 from aug_mpc_envs.training_envs.twist_tracking_env import TwistTrackingEnv
 
 class FlightPhaseControl(TwistTrackingEnv):
+    """Extends twist tracking with per-contact flight length/apex/end actions so agents learn to modulate aerial phases alongside base velocity tracking."""
 
     def __init__(self,
             namespace: str,
@@ -175,5 +176,4 @@ class FlightPhaseControl(TwistTrackingEnv):
             next_idx+=len(self._contact_names)
 
         return action_names
-
 

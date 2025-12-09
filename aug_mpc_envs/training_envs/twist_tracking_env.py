@@ -17,6 +17,7 @@ from aug_mpc.utils.math_utils import check_capsize
 from aug_mpc.training_envs.training_env_base import AugMPCTrainingEnvBase
 
 class TwistTrackingEnv(AugMPCTrainingEnvBase):
+    """Base AugMPC training env that tracks commanded twists by pushing velocity and contact targets into the RHC controller while handling locomotion rewards/resets."""
 
     def __init__(self,
             namespace: str,

@@ -12,6 +12,7 @@ from mpc_hive.utilities.math_utils_torch import base2world_frame, w2hor_frame
 from aug_mpc_envs.training_envs.twist_tracking_env import TwistTrackingEnv
 
 class PhaseParametrizationEnv(TwistTrackingEnv):
+    """Lets the policy drive twist commands while scheduling gait phase frequency/offset per contact and optionally shaping flight trajectories."""
 
     def __init__(self,
             namespace: str,
@@ -231,5 +232,4 @@ class PhaseParametrizationEnv(TwistTrackingEnv):
             next_idx+=len(self._contact_names)
 
         return action_names
-
 

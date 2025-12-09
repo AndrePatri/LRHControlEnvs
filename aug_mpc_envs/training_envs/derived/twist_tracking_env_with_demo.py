@@ -11,6 +11,7 @@ from aug_mpc_envs.training_envs.twist_tracking_env import TwistTrackingEnv
 from typing import Dict
 
 class TwistTrackingEnvWithDemo(TwistTrackingEnv):
+    """Twist-tracking task that injects imitation environments using gait schedulers and optional twist smoothing to guide learning."""
 
     def __init__(self,
             namespace: str,

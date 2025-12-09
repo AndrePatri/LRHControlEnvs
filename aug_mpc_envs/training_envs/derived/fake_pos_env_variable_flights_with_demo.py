@@ -10,6 +10,7 @@ from aug_mpc_envs.training_envs.fake_pos_track_env_phase_control import FakePosT
 from typing import Dict
 
 class FakePosTrackEnvPhaseControlWithDemo(FakePosTrackEnvPhaseControl):
+    """Adds demo-driven gait sequencing and optional default flight settings to the position-tracking flight-control environment."""
 
     def __init__(self,
             namespace: str,
@@ -268,4 +269,3 @@ class FakePosTrackEnvPhaseControlWithDemo(FakePosTrackEnvPhaseControl):
                     if self._env_opts["control_fend"]:
                         start=self._actions_map["flight_end_start"]
                         agent_action[self._demo_envs_idxs, start:(start+self._n_contacts)]=self._env_opts["default_fdend"]
-

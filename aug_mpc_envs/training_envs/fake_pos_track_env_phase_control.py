@@ -11,6 +11,7 @@ from mpc_hive.utilities.math_utils_torch import world2base_frame
 from aug_mpc_envs.training_envs.flight_phase_control_env import FlightPhaseControl
 
 class FakePosTrackEnvPhaseControl(FlightPhaseControl):
+    """Adds positional goals to the flight-parameter control env so agents chase waypoints while directly setting gait contact flags and flight profiles."""
 
     def __init__(self,
             namespace: str,
@@ -195,4 +196,3 @@ class FakePosTrackEnvPhaseControl(FlightPhaseControl):
                     self._bernoulli_coeffs_omega[~env_indxs, :]=1
 
         self._compute_twist_ref_w(env_indxs=env_indxs) # update linear vel twist refs based on pos error
-

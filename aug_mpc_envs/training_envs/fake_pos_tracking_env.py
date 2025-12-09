@@ -11,6 +11,7 @@ from mpc_hive.utilities.math_utils_torch import world2base_frame
 from aug_mpc_envs.training_envs.twist_tracking_env import TwistTrackingEnv
 
 class FakePosTrackingEnv(TwistTrackingEnv):
+    """Converts random planar position goals into twist references so the agent learns to drive the robot toward targets while managing contact scheduling."""
 
     def __init__(self,
             namespace: str,

@@ -12,6 +12,7 @@ import os
 from aug_mpc_envs.training_envs.phase_parametrization_env import PhaseParametrizationEnv
 
 class FakePosEnvPhaseParam(PhaseParametrizationEnv):
+    """Positions the robot toward sampled planar targets while the agent parameterizes gait phase frequency/offset (and optionally flight shapes)."""
 
     def __init__(self,
             namespace: str,
@@ -159,4 +160,3 @@ class FakePosEnvPhaseParam(PhaseParametrizationEnv):
                     self._trgt_d[integer_idxs, :]*torch.sin(self._trgt_theta[integer_idxs, :])
         
         self._compute_twist_ref_w(env_indxs=env_indxs)
-

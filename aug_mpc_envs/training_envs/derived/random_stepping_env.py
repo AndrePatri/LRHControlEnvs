@@ -10,6 +10,7 @@ from mpc_hive.utilities.math_utils_torch import w2hor_frame
 from aug_mpc_envs.training_envs.twist_tracking_env import TwistTrackingEnv
 
 class RandomSteppingEnv(TwistTrackingEnv):
+    """Debug environment that forwards twist refs but replaces contact actions with random pulses to stress-test stepping robustness."""
 
     def __init__(self,
             namespace: str,

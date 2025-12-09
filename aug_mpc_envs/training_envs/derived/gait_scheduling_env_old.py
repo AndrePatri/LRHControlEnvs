@@ -13,6 +13,7 @@ from aug_mpc.utils.gait_scheduler import QuadrupedGaitPatternGenerator, GaitSche
 from aug_mpc_envs.training_envs.twist_tracking_env import TwistTrackingEnv
 
 class GaitSchedulingEnvOld(TwistTrackingEnv):
+    """Legacy gait-scheduling variant that drives MPC twist refs while internally switching between walk and trot contact patterns."""
 
     def __init__(self,
             namespace: str,
