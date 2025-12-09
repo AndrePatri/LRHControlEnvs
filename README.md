@@ -20,16 +20,15 @@ Training environment definitions live in `aug_mpc_envs/training_envs/`. Training
 
 Available environments:
 - `TwistTrackingEnv`: main task for tracking commanded base twists. The agent chooses contact schedules and twist commands for the underlying MPC controllers. A new flight phase is injected, for each leg, when the corresponding actions *instantaneously* exceed a given thresholds. Interestingly, this parametrization requires no clock in the observations.
-- `FakePosTrackingEnv`: built on top of `TwistTrackingEnv`, it samples planar position targets and converts them into twist references for goal seeking. The agent it's still tracking twist references (that's why it's a "fake" position), but compared to `TwistTrackingEnv` provides more informative experience for training.
+- `FakePosTrackingEnv`: built on top of `TwistTrackingEnv`, it samples planar position targets and converts them into twist references for goal seeking. The agent it's still tracking twist references (that's why it's a "fake" position), but compared to `TwistTrackingEnv` provides more informative experience for training:
+<p align="center">
+  <img src="docs/hybrid_quadruped_fake_pos_track.gif" alt="Hybrid Quadruped - FakePosTrackingEnv" width="320">
+</p>
+
 - `FlightPhaseControl`: extends `TwistTrackingEnv` exposing additional agent actions allowing it to also specify flight phases properties (length, apex, end). More control over flights becomes necessary when moving from flat terrain to more complex ones.
 - `PhaseParametrizationEnv`: built on top of `TwistTrackingEnv`, overrides the *instantaneous* contact actions in favour of a *phase* parametrization, allowing the agent to control per-leg gait frequency/phase offsets (and optionally flight properties).
 - `FakePosTrackEnvPhaseControl`: built on top of `FlightPhaseControl`, adds waypoint tracking (as in `FakePosTrackingEnv`) on top of flight-parameter control.
 - `FakePosEnvPhaseParam`: built on top of `PhaseParametrizationEnv`, additionally implements waypoint tracking (as in `FakePosTrackingEnv`).
-<p align="center">
-  <img src="docs/hybrid_quadruped_fake_pos_track.gif" alt="Hybrid Quadruped - FakePosTrackingEnv" width="420">
-</p>
-![MPCViz demo]()
-
 
 ## Installation
 
