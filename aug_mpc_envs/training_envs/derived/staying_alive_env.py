@@ -26,7 +26,7 @@ class StayingAliveEnv(TwistTrackingEnv):
             env_opts: Dict = {}):
 
         # force tracking weights to favour yaw stabilization while keeping linear terms small
-        env_opts["task_track_front_weight"]=0.05
+        env_opts["task_track_front_weight"]=0.5
         env_opts["task_track_lat_weight"]=0.05
         env_opts["task_track_vert_weight"]=0.05
         env_opts["task_track_omega_x_weight"]=1.0
