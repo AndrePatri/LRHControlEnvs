@@ -159,8 +159,9 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         self._add_env_opt(env_opts, "add_fail_idx_to_obs", default=True) # we need to obserse mpc failure idx to correlate it with terminations
         
         self._add_env_opt(env_opts, "use_linvel_from_rhc", default=True) # no lin vel meas available, we use est. from mpc
-        self._add_env_opt(env_opts, "add_flight_info", default=True) # add feedback info on pos and length of flight phases from mpc
-        self._add_env_opt(env_opts, "add_flight_settings", default=True) # add feedback info on flight params from mpc
+        self._add_env_opt(env_opts, "add_flight_info", default=True) # add feedback info on pos, remamining duration, length, 
+        # apex and landing height of flight phases
+        self._add_env_opt(env_opts, "add_flight_settings", default=False) # add feedback info on current flight requests for mpc
 
         self._add_env_opt(env_opts, "use_prob_based_stepping", default=False) # interpret actions as stepping prob (never worked)
 
@@ -202,7 +203,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         self._contact_names = robot_state_tmp.contact_names()
         self._n_contacts = len(self._contact_names)
         self._flight_info_size=rhc_refs_tmp.flight_info.n_cols
-        self._flight_setting_size=rhc_refs_tmp.flight_settings.n_cols
+        self._flight_setting_size=rhc_refs_tmp.flight_settings_req.n_cols
         # height sensor metadata (if present)
         self._height_grid_size = None
         self._height_flat_dim = 0
@@ -227,7 +228,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
             obs_dim+=3 # gravity vec from mpc
         if env_opts["use_rhc_avrg_vel_tracking"]:
             obs_dim+=6 # mpc avrg twist
-        if env_opts["add_flight_info"]: # contact pos and len
+        if env_opts["add_flight_info"]: # contact pos, remaining duration, length, apex and landing height
             obs_dim+=self._flight_info_size
         if env_opts["add_flight_settings"]:
             obs_dim+=self._flight_setting_size
@@ -767,7 +768,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         robot_jnt_eff_rhc_applied_next=self._rhc_cmds.jnts_state.get(data_type="eff",gpu=self._use_gpu)
 
         flight_info_now = self._rhc_refs.flight_info.get(data_type="all",gpu=self._use_gpu)
-        flight_settings_now = self._rhc_refs.flight_settings.get(data_type="all",gpu=self._use_gpu)
+        flight_settings_now = self._rhc_refs.flight_settings_req.get(data_type="all",gpu=self._use_gpu)
         
         # refs
         agent_twist_ref = self._agent_refs.rob_refs.root_state.get(data_type="twist",gpu=self._use_gpu)
@@ -785,12 +786,13 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         if self._env_opts["add_term_mpc_capsize"]:
             obs[:, self._obs_map["gn_base_mpc"]:(self._obs_map["gn_base_mpc"]+3)] = self._rhc_cmds.root_state.get(data_type="gn",gpu=self._use_gpu)
         if self._env_opts["use_rhc_avrg_vel_tracking"]:
-            self._get_avrg_rhc_root_twist(out=self._root_twist_avrg_rhc_base_loc,base_loc=True)
+            self._get_avrg_rhc_root_twist(out=self._root_twist_avrg_rhc_base_loc, base_loc=True)
             obs[:, self._obs_map["avrg_twist_mpc"]:(self._obs_map["avrg_twist_mpc"]+6)] = self._root_twist_avrg_rhc_base_loc
         if self._env_opts["add_flight_info"]:
             obs[:, self._obs_map["flight_info"]:(self._obs_map["flight_info"]+self._flight_info_size)] = flight_info_now
         if self._env_opts["add_flight_settings"]:
-            obs[:, self._obs_map["flight_settings"]:(self._obs_map["flight_settings"]+self._flight_setting_size)] = flight_settings_now
+            obs[:, self._obs_map["flight_settings_req"]:(self._obs_map["flight_settings_req"]+self._flight_setting_size)] = \
+                flight_settings_now
 
         if self._env_opts["add_rhc_cmds_to_obs"]:
             obs[:, self._obs_map["rhc_cmds_q"]:(self._obs_map["rhc_cmds_q"]+self._n_jnts)] = robot_jnt_q_rhc_applied_next
@@ -1154,19 +1156,28 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
                 obs_names[next_idx+i] = "flight_pos_"+ self._contact_names[i]
             next_idx+=len(self._contact_names)
             for i in range(len(self._contact_names)):
-                obs_names[next_idx+i] = "flight_len_"+ self._contact_names[i]
+                obs_names[next_idx+i] = "flight_len_remaining_"+ self._contact_names[i]
+            next_idx+=len(self._contact_names)
+            for i in range(len(self._contact_names)):
+                obs_names[next_idx+i] = "flight_len_nominal_"+ self._contact_names[i]
+            next_idx+=len(self._contact_names)
+            for i in range(len(self._contact_names)):
+                obs_names[next_idx+i] = "flight_apex_nominal_"+ self._contact_names[i]
+            next_idx+=len(self._contact_names)
+            for i in range(len(self._contact_names)):
+                obs_names[next_idx+i] = "flight_end_nominal_"+ self._contact_names[i]
             next_idx+=len(self._contact_names)
         
         if self._env_opts["add_flight_settings"]:
-            self._obs_map["flight_settings"]=next_idx
+            self._obs_map["flight_settings_req"]=next_idx
             for i in range(len(self._contact_names)):
-                obs_names[next_idx+i] = "flight_len_cmd_"+ self._contact_names[i]
+                obs_names[next_idx+i] = "flight_len_req_"+ self._contact_names[i]
             next_idx+=len(self._contact_names)
             for i in range(len(self._contact_names)):
-                obs_names[next_idx+i] = "flight_apex_cmd_"+ self._contact_names[i]
+                obs_names[next_idx+i] = "flight_apex_req_"+ self._contact_names[i]
             next_idx+=len(self._contact_names)
             for i in range(len(self._contact_names)):
-                obs_names[next_idx+i] = "flight_end_cmd_"+ self._contact_names[i]
+                obs_names[next_idx+i] = "flight_end_req_"+ self._contact_names[i]
             next_idx+=len(self._contact_names)
 
         if self._env_opts["add_rhc_cmds_to_obs"]:

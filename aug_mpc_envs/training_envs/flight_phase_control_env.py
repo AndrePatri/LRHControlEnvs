@@ -118,27 +118,27 @@ class FlightPhaseControl(TwistTrackingEnv):
         
         if self._env_opts["control_flength"]:
             idx=self._actions_map["flight_len_start"]
-            flen_now=self._rhc_refs.flight_settings.get(data_type="len", gpu=self._use_gpu)
+            flen_now=self._rhc_refs.flight_settings_req.get(data_type="len_remain", gpu=self._use_gpu)
             flen_now[:, :]=action_to_be_applied[:, idx:(idx+self._n_contacts)]
-            self._rhc_refs.flight_settings.set(data=flen_now, data_type="len", gpu=self._use_gpu)
+            self._rhc_refs.flight_settings_req.set(data=flen_now, data_type="len_remain", gpu=self._use_gpu)
 
         if self._env_opts["control_fapex"]:
             idx=self._actions_map["flight_apex_start"]
-            fapex_now=self._rhc_refs.flight_settings.get(data_type="apex_dpos", gpu=self._use_gpu)
+            fapex_now=self._rhc_refs.flight_settings_req.get(data_type="apex_dpos", gpu=self._use_gpu)
             fapex_now[:, :]=action_to_be_applied[:, idx:(idx+self._n_contacts)]
-            self._rhc_refs.flight_settings.set(data=fapex_now, data_type="apex_dpos", gpu=self._use_gpu)
+            self._rhc_refs.flight_settings_req.set(data=fapex_now, data_type="apex_dpos", gpu=self._use_gpu)
             
         if self._env_opts["control_fend"]:
             idx=self._actions_map["flight_end_start"]
-            fend_now=self._rhc_refs.flight_settings.get(data_type="end_dpos", gpu=self._use_gpu)
+            fend_now=self._rhc_refs.flight_settings_req.get(data_type="end_dpos", gpu=self._use_gpu)
             fend_now[:, :]=action_to_be_applied[:, idx:(idx+self._n_contacts)]
-            self._rhc_refs.flight_settings.set(data=fend_now, data_type="end_dpos", gpu=self._use_gpu)
+            self._rhc_refs.flight_settings_req.set(data=fend_now, data_type="end_dpos", gpu=self._use_gpu)
 
     def _write_rhc_refs(self):
         TwistTrackingEnv._write_rhc_refs(self)
         if self._use_gpu:
-            self._rhc_refs.flight_settings.synch_mirror(from_gpu=True,non_blocking=False)
-        self._rhc_refs.flight_settings.synch_all(read=False, retry=True)
+            self._rhc_refs.flight_settings_req.synch_mirror(from_gpu=True,non_blocking=False)
+        self._rhc_refs.flight_settings_req.synch_all(read=False, retry=True)
         
     def _get_action_names(self):
 
