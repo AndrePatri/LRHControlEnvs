@@ -294,8 +294,8 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["use_diff_vels"] = False
 
         isaac_opts["use_random_pertub"]=False
-        isaac_opts["pert_wrenches_max_duration"]=0.2
-        isaac_opts["pert_wrenches_min_duration"]=0.05
+        isaac_opts["pert_wrenches_max_duration"]=2.0
+        isaac_opts["pert_wrenches_min_duration"]=0.8
 
         isaac_opts["pert_wrenches_weight_factor"]=0.3 # 0.5 -> 50% of full robot weight
         isaac_opts["max_lin_impulse_norm"]=isaac_opts["pert_wrenches_weight_factor"]*isaac_opts["pert_wrenches_max_duration"]
@@ -304,7 +304,9 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["lin_pert_max_wrt_weight"]=0.5
         isaac_opts["ang_pert_max_wrt_weight"]=0.1
         
-        isaac_opts["pert_wrenches_rate"]=15.0 # on avergare 1 pert every pert_wrenches_rate seconds
+        isaac_opts["pert_wrenches_rate"]=15.0 # on average 1 pert every pert_wrenches_rate seconds
+        isaac_opts["pert_planar_only"]=True # if True, linear pushes only in xy plane and torque only around z
+        isaac_opts["pert_duration_scale"]=1.0 # multiply min/max duration without changing defaults
 
         isaac_opts.update(self._env_opts) # update defaults with provided opts
         isaac_opts["rendering_freq"]=int(isaac_opts["rendering_dt"]/isaac_opts["physics_dt"])
@@ -1036,6 +1038,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
             steps_rem = self._pert_steps_remaining[robot_name]
             forces_world = self._pert_forces_world[robot_name]
             torques_world = self._pert_torques_world[robot_name]
+            planar_only = self._env_opts["pert_planar_only"] if "pert_planar_only" in self._env_opts else False
 
             # --- 1. Update Active Counters (In-Place) ---
             if active.any():
@@ -1078,12 +1081,18 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 # --- Force (Impulse) Direction Generation (Reuse _pert_lindir buffer) ---
                 lindir = self._pert_lindir[robot_name]  # (N, 3)
 
-                # 1. Fill with Standard Normal noise in-place
-                lindir.normal_()
-
-                # 2. Normalize in-place
-                norms = torch.norm(lindir, dim=1, keepdim=True).clamp_min_(1e-6)
-                lindir.div_(norms)
+                if planar_only:
+                    # planar push direction from random yaw
+                    yaw_angles = self._pert_scratch[robot_name].uniform_(0.0, 2*math.pi).flatten()
+                    lindir[:, 0] = torch.cos(yaw_angles)
+                    lindir[:, 1] = torch.sin(yaw_angles)
+                    lindir[:, 2] = 0.0
+                else:
+                    # 1. Fill with Standard Normal noise in-place
+                    lindir.normal_()
+                    # 2. Normalize in-place
+                    norms = torch.norm(lindir, dim=1, keepdim=True).clamp_min_(1e-6)
+                    lindir.div_(norms)
 
                 # 3. Sample linear impulse magnitudes (reuse scratch)
                 # scratch has shape (N,1) - uniform [0,1]
@@ -1095,12 +1104,14 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 # --- Angular (Impulse) Direction Generation (Reuse _pert_angdir buffer) ---
                 angdir = self._pert_angdir[robot_name]  # (N, 3)
 
-                # 1. Fill with Standard Normal noise
-                angdir.normal_()
-
-                # 2. Normalize
-                norms = torch.norm(angdir, dim=1, keepdim=True).clamp_min_(1e-6)
-                angdir.div_(norms)
+                if planar_only:
+                    angdir.zero_()  # no torque when planar-only is requested
+                else:
+                    # 1. Fill with Standard Normal noise
+                    angdir.normal_()
+                    # 2. Normalize
+                    norms = torch.norm(angdir, dim=1, keepdim=True).clamp_min_(1e-6)
+                    angdir.div_(norms)
 
                 # 3. Sample angular impulse magnitudes (reuse scratch)
                 self._pert_scratch[robot_name].uniform_(0.0, 1.0)
@@ -1642,8 +1653,11 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         self._pert_scratch = {}
 
         # convert durations in seconds to integer physics steps (min 1 step)
-        self._pert_min_steps = max(1, int(math.ceil(self._env_opts["pert_wrenches_min_duration"] / self.physics_dt())))
-        self._pert_max_steps = max(self._pert_min_steps, int(math.ceil(self._env_opts["pert_wrenches_max_duration"] / self.physics_dt())))
+        duration_scale=self._env_opts["pert_duration_scale"] if "pert_duration_scale" in self._env_opts else 1.0
+        pert_min_duration=self._env_opts["pert_wrenches_min_duration"]*duration_scale
+        pert_max_duration=self._env_opts["pert_wrenches_max_duration"]*duration_scale
+        self._pert_min_steps = max(1, int(math.ceil(pert_min_duration / self.physics_dt())))
+        self._pert_max_steps = max(self._pert_min_steps, int(math.ceil(pert_max_duration / self.physics_dt())))
 
         pert_wrenches_step_rate=self._env_opts["pert_wrenches_rate"]/self.physics_dt() # 1 pert every n physics steps
         self._pert_wrenches_prob=1.0/pert_wrenches_step_rate # sampling prob to be used
