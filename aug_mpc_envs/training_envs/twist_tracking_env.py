@@ -481,14 +481,14 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
                 prev_actions_std_idx=next((i for i, s in enumerate(obs_names) if "_std_act" in s), None)
 
                 if prev_actions_idx is not None:
-                    self._obs_lb[:, prev_actions_idx:prev_actions_idx+self.actions_dim()]=self._actions_lb
-                    self._obs_ub[:, prev_actions_idx:prev_actions_idx+self.actions_dim()]=self._actions_ub
+                    self._obs_lb[:, prev_actions_idx:prev_actions_idx+self.actions_dim()]=-1.0
+                    self._obs_ub[:, prev_actions_idx:prev_actions_idx+self.actions_dim()]=1.0
                 if prev_actions_mean_idx is not None:
-                    self._obs_lb[:, prev_actions_mean_idx:prev_actions_mean_idx+self.actions_dim()]=self._actions_lb
-                    self._obs_ub[:, prev_actions_mean_idx:prev_actions_mean_idx+self.actions_dim()]=self._actions_ub
+                    self._obs_lb[:, prev_actions_mean_idx:prev_actions_mean_idx+self.actions_dim()]=-1.0
+                    self._obs_ub[:, prev_actions_mean_idx:prev_actions_mean_idx+self.actions_dim()]=1.0
                 if prev_actions_std_idx is not None:
                     self._obs_lb[:, prev_actions_std_idx:prev_actions_std_idx+self.actions_dim()]=0
-                    self._obs_ub[:, prev_actions_std_idx:prev_actions_std_idx+self.actions_dim()]=self.get_actions_scale()
+                    self._obs_ub[:, prev_actions_std_idx:prev_actions_std_idx+self.actions_dim()]=1.0
                 
             else: # full history
                 i=0
@@ -496,8 +496,8 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
                 if first_action_mem_buffer_idx is not None:
                     action_idx_start_idx_counter=first_action_mem_buffer_idx
                     for j in range(self._env_opts["actions_history_size"]):
-                        self._obs_lb[:, action_idx_start_idx_counter:action_idx_start_idx_counter+self.actions_dim()]=self._actions_lb
-                        self._obs_ub[:, action_idx_start_idx_counter:action_idx_start_idx_counter+self.actions_dim()]=self._actions_ub
+                        self._obs_lb[:, action_idx_start_idx_counter:action_idx_start_idx_counter+self.actions_dim()]=-1.0
+                        self._obs_ub[:, action_idx_start_idx_counter:action_idx_start_idx_counter+self.actions_dim()]=1.0
                         action_idx_start_idx_counter+=self.actions_dim()
 
         # some aux data to avoid allocations at training runtime
@@ -810,7 +810,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
                     next_idx+=self.actions_dim()
 
         if self._env_opts["use_action_smoothing"]: # adding smoothed actions
-            obs[:, self._obs_map["action_smoothing"]:(self._obs_map["action_smoothing"]+self.actions_dim())]=self.get_actual_actions()
+            obs[:, self._obs_map["action_smoothing"]:(self._obs_map["action_smoothing"]+self.actions_dim())]=self.get_actual_actions(normalized=True)
             next_idx+=self.actions_dim()
         
         if self._env_opts["add_periodic_clock_to_obs"]:
@@ -852,7 +852,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         n_d_actions=discrete_actions.sum().item()
         actions_prev=self._act_mem_buffer.get(idx=1) 
         actions_now=self._act_mem_buffer.get(idx=0)
-        actions_rate=(actions_now-actions_prev)/self.get_actions_scale() # scaling to remove dependence on actions range
+        actions_rate=(actions_now-actions_prev) # actions already normalized
         actions_rate_c=actions_rate[:, continuous_actions]
         actions_rate_d=actions_rate[:, discrete_actions]
 
