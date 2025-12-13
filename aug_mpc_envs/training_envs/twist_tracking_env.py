@@ -479,7 +479,8 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
                 prev_actions_idx = next((i for i, s in enumerate(obs_names) if "_prev_act" in s), None)
                 prev_actions_mean_idx=next((i for i, s in enumerate(obs_names) if "_avrg_act" in s), None)
                 prev_actions_std_idx=next((i for i, s in enumerate(obs_names) if "_std_act" in s), None)
-
+                
+                # assume actions are always normalized in [-1, 1] by agent
                 if prev_actions_idx is not None:
                     self._obs_lb[:, prev_actions_idx:prev_actions_idx+self.actions_dim()]=-1.0
                     self._obs_ub[:, prev_actions_idx:prev_actions_idx+self.actions_dim()]=1.0
