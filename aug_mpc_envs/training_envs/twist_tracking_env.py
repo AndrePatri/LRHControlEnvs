@@ -44,7 +44,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
             True # if True, the task ref is constant over the episode (ie
             # episodes are truncated when task is changed) 
             )
-        self._add_env_opt(env_opts, "add_angvel_ref_rand", default=True) # randomize also agular vel ref (just z component)
+        self._add_env_opt(env_opts, "add_angvel_ref_rand", default=False) # randomize also agular vel ref (just z component)
 
         self._add_env_opt(env_opts, "episode_timeout_lb", 
             1024)
@@ -91,6 +91,13 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
 
         # rewards
         self._reward_map={}
+        reward_lb_default = -0.5
+        self._add_env_opt(env_opts, "task_error_reward_lb", reward_lb_default)
+        self._add_env_opt(env_opts, "CoT_reward_lb", reward_lb_default)
+        self._add_env_opt(env_opts, "power_reward_lb", reward_lb_default)
+        self._add_env_opt(env_opts, "action_rate_reward_lb", reward_lb_default)
+        self._add_env_opt(env_opts, "jnt_vel_reward_lb", reward_lb_default)
+        self._add_env_opt(env_opts, "rhc_avrg_vel_reward_lb", reward_lb_default)
 
         self._add_env_opt(env_opts, "add_power_reward", False)
         self._add_env_opt(env_opts, "add_CoT_reward", True)
@@ -132,7 +139,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
 
         # energy penalties
         self._add_env_opt(env_opts, "CoT_offset", default=0.1)
-        self._add_env_opt(env_opts, "CoT_scale", default=0.1)
+        self._add_env_opt(env_opts, "CoT_scale", default=0.2)
         self._add_env_opt(env_opts, "power_offset", default=0.1)
         self._add_env_opt(env_opts, "power_scale", default=8e-4)
 
@@ -389,7 +396,18 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         subr_names=self._get_rewards_names() # initializes
         
         # reward clipping
-        self._reward_thresh_lb[:, :]=-1e6 # (neg rewards can be nasty, especially if they all become negative)
+        self._reward_thresh_lb[:, :] = reward_lb_default
+        reward_lb_env_map = {
+            "task_error": "task_error_reward_lb",
+            "CoT": "CoT_reward_lb",
+            "mech_pow": "power_reward_lb",
+            "action_rate": "action_rate_reward_lb",
+            "jnt_v": "jnt_vel_reward_lb",
+            "rhc_avrg_vel_error": "rhc_avrg_vel_reward_lb",
+        }
+        for reward_name, env_opt_key in reward_lb_env_map.items():
+            if reward_name in self._reward_map:
+                self._reward_thresh_lb[:, self._reward_map[reward_name]] = self._env_opts[env_opt_key]
         self._reward_thresh_ub[:, :]=1e6
         # self._reward_thresh_lb[:, 1]=-1e6
         # self._reward_thresh_ub[:, 1]=1e6
