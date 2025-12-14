@@ -91,13 +91,17 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
 
         # rewards
         self._reward_map={}
-        reward_lb_default = -0.5
-        self._add_env_opt(env_opts, "task_error_reward_lb", reward_lb_default)
-        self._add_env_opt(env_opts, "CoT_reward_lb", reward_lb_default)
-        self._add_env_opt(env_opts, "power_reward_lb", reward_lb_default)
-        self._add_env_opt(env_opts, "action_rate_reward_lb", reward_lb_default)
-        self._add_env_opt(env_opts, "jnt_vel_reward_lb", reward_lb_default)
-        self._add_env_opt(env_opts, "rhc_avrg_vel_reward_lb", reward_lb_default)
+        self._reward_lb_map={}
+
+        self._add_env_opt(env_opts, "reward_lb_default", -0.5)
+        self._add_env_opt(env_opts, "reward_ub_default", 1e6)
+
+        self._add_env_opt(env_opts, "task_error_reward_lb", -0.5)
+        self._add_env_opt(env_opts, "CoT_reward_lb", -0.5)
+        self._add_env_opt(env_opts, "power_reward_lb", -0.5)
+        self._add_env_opt(env_opts, "action_rate_reward_lb", -0.5)
+        self._add_env_opt(env_opts, "jnt_vel_reward_lb", -0.5)
+        self._add_env_opt(env_opts, "rhc_avrg_vel_reward_lb", -0.5)
 
         self._add_env_opt(env_opts, "add_power_reward", False)
         self._add_env_opt(env_opts, "add_CoT_reward", True)
@@ -396,21 +400,12 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         subr_names=self._get_rewards_names() # initializes
         
         # reward clipping
-        self._reward_thresh_lb[:, :] = reward_lb_default
-        reward_lb_env_map = {
-            "task_error": "task_error_reward_lb",
-            "CoT": "CoT_reward_lb",
-            "mech_pow": "power_reward_lb",
-            "action_rate": "action_rate_reward_lb",
-            "jnt_v": "jnt_vel_reward_lb",
-            "rhc_avrg_vel_error": "rhc_avrg_vel_reward_lb",
-        }
-        for reward_name, env_opt_key in reward_lb_env_map.items():
+        self._reward_thresh_lb[:, :] = self._env_opts["reward_lb_default"]
+        self._reward_thresh_ub[:, :]= self._env_opts["reward_ub_default"]
+
+        for reward_name, env_opt_key in self._reward_lb_map.items():
             if reward_name in self._reward_map:
                 self._reward_thresh_lb[:, self._reward_map[reward_name]] = self._env_opts[env_opt_key]
-        self._reward_thresh_ub[:, :]=1e6
-        # self._reward_thresh_lb[:, 1]=-1e6
-        # self._reward_thresh_ub[:, 1]=1e6
 
         # obs bounds
         self._obs_threshold_lb = -1e3 # used for clipping observations
@@ -1310,6 +1305,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         # adding rewards
         reward_names.append("task_error")
         self._reward_map["task_error"]=counter
+        self._reward_lb_map["task_error"]="task_error_reward_lb"
         counter+=1
         if self._env_opts["add_power_reward"] and self._env_opts["add_CoT_reward"]:
             Journal.log(self.__class__.__name__,
@@ -1320,22 +1316,27 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         if self._env_opts["add_CoT_reward"]:
             reward_names.append("CoT")
             self._reward_map["CoT"]=counter
+            self._reward_lb_map["CoT"]="CoT_reward_lb"
             counter+=1
         if self._env_opts["add_power_reward"]:
             reward_names.append("mech_pow")
             self._reward_map["mech_pow"]=counter
+            self._reward_lb_map["mech_pow"]="power_reward_lb"
             counter+=1
         if self._env_opts["add_action_rate_reward"]:
             reward_names.append("action_rate")   
             self._reward_map["action_rate"]=counter
+            self._reward_lb_map["action_rate"]="action_rate_reward_lb"
             counter+=1   
         if self._env_opts["add_jnt_v_reward"]:
             reward_names.append("jnt_v")   
             self._reward_map["jnt_v"]=counter
+            self._reward_lb_map["jnt_v"]="jnt_vel_reward_lb"
             counter+=1   
         if self._env_opts["use_rhc_avrg_vel_tracking"]:
             reward_names.append("rhc_avrg_vel_error")   
             self._reward_map["rhc_avrg_vel_error"]=counter
+            self._reward_lb_map["rhc_avrg_vel_error"]="rhc_avrg_vel_reward_lb"
             counter+=1   
 
         return reward_names
