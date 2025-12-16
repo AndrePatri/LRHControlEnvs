@@ -610,6 +610,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                     static_friction=self._env_opts["static_friction"], 
                     dynamic_friction=self._env_opts["dynamic_friction"], 
                     restitution=self._env_opts["restitution"],
+                    n_steps=3
                     )
             else:
                 ground_type=self._env_opts["ground_type"]

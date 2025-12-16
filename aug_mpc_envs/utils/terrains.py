@@ -20,6 +20,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(SCRIPT_DIR)
 
 import numpy as np
+import math
 
 from aug_mpc_envs.utils.terrain_utils import *
 
@@ -107,6 +108,8 @@ class RlTerrains():
                     stairs_ratio: float = 0.2,
                     platform_size: float = 5.0,
                     step_height: float = 0.2,
+                    n_steps: int = 1,
+                    area_factor: float = 0.5,
                     wall_height: float = 2.0,
                     res_low: float = 0.1,
                     res_high: float = 0.03,
@@ -120,7 +123,7 @@ class RlTerrains():
         by ``step_height``. A matching synthetic heightfield is generated for sensing.
         """
         # Choose resolution: use high resolution when we expect steps
-        use_high_res = stairs_ratio > 0.0
+        use_high_res = (stairs_ratio > 0.0) or (n_steps > 1)
         horizontal_scale = res_high if use_high_res else res_low
         vertical_scale = 0.005
 
@@ -162,7 +165,8 @@ class RlTerrains():
         mat_api.CreateStaticFrictionAttr(static_friction)
         mat_api.CreateRestitutionAttr(restitution)
 
-        # Raised tiles
+        # Raised tiles / pyramid
+        area_factor = max(min(area_factor, 0.9999), 1e-3)  # keep meaningful decay
         for ix in range(n_tiles_x):
             for iy in range(n_tiles_y):
                 # tile extents in meters
@@ -182,29 +186,69 @@ class RlTerrains():
                 if np.random.rand() >= stairs_ratio:
                     continue  # keep this tile flat
 
-                # Update heightfield
-                heightfield[start_row:end_row, start_col:end_col] = step_h_units
-
-                # Collider dimensions in meters (match tile extent)
                 size_x = end_x_m - start_x_m
                 size_y = end_y_m - start_y_m
                 if size_x <= 0.0 or size_y <= 0.0:
                     continue
-                center_x = terrain_low_corner[0] + start_x_m + 0.5 * size_x
-                center_y = terrain_low_corner[1] + start_y_m + 0.5 * size_y
-                center_z = ground_top + 0.5 * step_height
 
-                tile_prim_path = f"{self._prim_path}/tile_{ix}_{iy}"
-                tile_prim = UsdGeom.Cube.Define(self._stage, tile_prim_path)
-                tile_prim.CreateSizeAttr(1.0)
-                tile_prim.AddTranslateOp().Set(Gf.Vec3f(center_x, center_y, center_z))
-                tile_prim.AddScaleOp().Set(Gf.Vec3f(size_x, size_y, step_height))
-                UsdPhysics.CollisionAPI.Apply(tile_prim.GetPrim())
-                PhysxSchema.PhysxCollisionAPI.Apply(tile_prim.GetPrim())
-                tile_mat = UsdPhysics.MaterialAPI.Apply(tile_prim.GetPrim())
-                tile_mat.CreateDynamicFrictionAttr(dynamic_friction)
-                tile_mat.CreateStaticFrictionAttr(static_friction)
-                tile_mat.CreateRestitutionAttr(restitution)
+                tile_center_x = terrain_low_corner[0] + start_x_m + 0.5 * size_x
+                tile_center_y = terrain_low_corner[1] + start_y_m + 0.5 * size_y
+
+                if n_steps <= 1:
+                    # single raised tile
+                    heightfield[start_row:end_row, start_col:end_col] = step_h_units
+                    center_z = ground_top + 0.5 * step_height
+                    tile_prim_path = f"{self._prim_path}/tile_{ix}_{iy}"
+                    tile_prim = UsdGeom.Cube.Define(self._stage, tile_prim_path)
+                    tile_prim.CreateSizeAttr(1.0)
+                    tile_prim.AddTranslateOp().Set(Gf.Vec3f(tile_center_x, tile_center_y, center_z))
+                    tile_prim.AddScaleOp().Set(Gf.Vec3f(size_x, size_y, step_height))
+                    UsdPhysics.CollisionAPI.Apply(tile_prim.GetPrim())
+                    PhysxSchema.PhysxCollisionAPI.Apply(tile_prim.GetPrim())
+                    tile_mat = UsdPhysics.MaterialAPI.Apply(tile_prim.GetPrim())
+                    tile_mat.CreateDynamicFrictionAttr(dynamic_friction)
+                    tile_mat.CreateStaticFrictionAttr(static_friction)
+                    tile_mat.CreateRestitutionAttr(restitution)
+                else:
+                    shrink_factor = math.sqrt(area_factor)
+                    steps_for_tile = np.random.randint(1, n_steps + 1)
+                    for level in range(steps_for_tile):
+                        level_size_x = size_x * (shrink_factor ** level)
+                        level_size_y = size_y * (shrink_factor ** level)
+                        if level_size_x < horizontal_scale or level_size_y < horizontal_scale:
+                            break
+
+                        # center the reduced platform within the tile bounds
+                        level_start_x = start_x_m + 0.5 * (size_x - level_size_x)
+                        level_start_y = start_y_m + 0.5 * (size_y - level_size_y)
+                        level_end_x = level_start_x + level_size_x
+                        level_end_y = level_start_y + level_size_y
+
+                        level_start_row = int(round(level_start_x / horizontal_scale))
+                        level_end_row = min(num_rows, int(round(level_end_x / horizontal_scale)))
+                        level_start_col = int(round(level_start_y / horizontal_scale))
+                        level_end_col = min(num_cols, int(round(level_end_y / horizontal_scale)))
+                        if level_end_row <= level_start_row or level_end_col <= level_start_col:
+                            continue
+
+                        level_units = step_h_units * (level + 1)
+                        heightfield[level_start_row:level_end_row, level_start_col:level_end_col] = level_units
+
+                        level_center_x = terrain_low_corner[0] + level_start_x + 0.5 * level_size_x
+                        level_center_y = terrain_low_corner[1] + level_start_y + 0.5 * level_size_y
+                        level_center_z = ground_top + (level + 0.5) * step_height
+
+                        tile_prim_path = f"{self._prim_path}/tile_{ix}_{iy}_lvl{level}"
+                        tile_prim = UsdGeom.Cube.Define(self._stage, tile_prim_path)
+                        tile_prim.CreateSizeAttr(1.0)
+                        tile_prim.AddTranslateOp().Set(Gf.Vec3f(level_center_x, level_center_y, level_center_z))
+                        tile_prim.AddScaleOp().Set(Gf.Vec3f(level_size_x, level_size_y, step_height))
+                        UsdPhysics.CollisionAPI.Apply(tile_prim.GetPrim())
+                        PhysxSchema.PhysxCollisionAPI.Apply(tile_prim.GetPrim())
+                        tile_mat = UsdPhysics.MaterialAPI.Apply(tile_prim.GetPrim())
+                        tile_mat.CreateDynamicFrictionAttr(dynamic_friction)
+                        tile_mat.CreateStaticFrictionAttr(static_friction)
+                        tile_mat.CreateRestitutionAttr(restitution)
 
         # store synthetic heightfield for sensors
         # add walls to heightfield borders
