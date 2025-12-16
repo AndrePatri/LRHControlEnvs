@@ -8,9 +8,9 @@ from EigenIPC.PyEigenIPC import VLevel
 
 from mpc_hive.utilities.math_utils_torch import world2base_frame
 
-from aug_mpc_envs.training_envs.twist_tracking_env import TwistTrackingEnv
+from aug_mpc_envs.training_envs.flight_phase_control_env import FlightPhaseControl
 
-class StayingAliveEnv(TwistTrackingEnv):
+class StayingAliveEnv(FlightPhaseControl):
     """Simply env where the agent has to try to stay alive and as still as possible (useful to test disturbance rejection capabilities)."""
 
     def __init__(self,
@@ -33,7 +33,11 @@ class StayingAliveEnv(TwistTrackingEnv):
         env_opts["task_track_omega_y_weight"]=1.0
         env_opts["task_track_omega_z_weight"]=1.0
 
-        TwistTrackingEnv.__init__(self, 
+        env_opts["control_flength"]=True
+        env_opts["control_fapex"]=True
+        env_opts["control_fend"]=True
+
+        FlightPhaseControl.__init__(self, 
             namespace=namespace,
             actions_dim=actions_dim, # twist + contact flags
             verbose=verbose,
@@ -46,7 +50,7 @@ class StayingAliveEnv(TwistTrackingEnv):
             env_opts=env_opts)
 
     def get_file_paths(self):
-        paths=TwistTrackingEnv.get_file_paths(self)
+        paths=FlightPhaseControl.get_file_paths(self)
         paths.append(os.path.abspath(__file__))        
         return paths
 
