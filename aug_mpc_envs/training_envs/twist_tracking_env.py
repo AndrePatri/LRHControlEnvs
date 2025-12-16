@@ -142,8 +142,8 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         self._add_env_opt(env_opts, "task_pred_track_scale", default=3.0)
 
         # energy penalties
-        self._add_env_opt(env_opts, "CoT_offset", default=0.1)
-        self._add_env_opt(env_opts, "CoT_scale", default=0.2)
+        self._add_env_opt(env_opts, "CoT_offset", default=0.3)
+        self._add_env_opt(env_opts, "CoT_scale", default=0.6)
         self._add_env_opt(env_opts, "power_offset", default=0.1)
         self._add_env_opt(env_opts, "power_scale", default=8e-4)
 
