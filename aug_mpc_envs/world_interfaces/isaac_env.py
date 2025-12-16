@@ -604,7 +604,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 self._ground_plane=self.terrain_generator.create_stepup_prim_terrain(
                     terrain_size=self._env_opts["ground_size"], 
                     stairs_ratio=0.5,
-                    platform_size=5.0,
+                    platform_size=4.0,
                     step_height=0.10,
                     position=np.array([0.0, 0.0, 0.0]), 
                     static_friction=self._env_opts["static_friction"], 
