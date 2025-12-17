@@ -16,9 +16,12 @@
 # along with AugMPCEnvs.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
+import os
+import math
+import xml.etree.ElementTree as ET
+
 import torch
 import numpy as np
-import math
 
 from typing import Dict, List
 
@@ -28,6 +31,7 @@ from EigenIPC.PyEigenIPC import Journal
 
 from aug_mpc_envs.utils.math_utils import quat_to_omega
 
+from aug_mpc_envs.utils.height_sensor import HeightGridSensor
 from aug_mpc_envs.utils.xmj_jnt_imp_cntrl import XMjJntImpCntrl
 from adarl_ros.adapters.XbotMjAdapter import XbotMjAdapter
 from xbot2_mujoco.PyXbotMjSim import LoadingUtils
@@ -107,6 +111,9 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
     def _pre_setup(self):
         
         self._render = (not self._env_opts["headless"])
+        self._height_sensors = {}
+        self._height_imgs = {}
+        self._height_field_data = None
 
     def _parse_env_opts(self):
         xmj_opts={}
@@ -131,9 +138,25 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
 
         xmj_opts["use_mpc_pos_for_robot"]=False # default to using pos from sim
         xmj_opts["use_rel_q_from_startup"]=True
+        xmj_opts["height_map_resolution"]=0.05
+        xmj_opts["height_map_margin"]=0.5
+        xmj_opts["generate_stepup_terrain"]=True
+        xmj_opts["stepup_terrain_size"]=30.0
+        xmj_opts["stepup_stairs_ratio"]=0.2
+        xmj_opts["stepup_platform_size"]=5.0
+        xmj_opts["stepup_step_height"]=0.2
+        xmj_opts["stepup_n_steps"]=1
+        xmj_opts["stepup_area_factor"]=0.5
+        xmj_opts["stepup_wall_height"]=2.0
+        xmj_opts["stepup_res_low"]=0.1
+        xmj_opts["stepup_res_high"]=0.03
+        xmj_opts["stepup_position"]=np.array([-5.0, -5.0, 0.0])
+        xmj_opts["stepup_seed"]=None
 
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         xmj_opts["rendering_dt"]=1/xmj_opts["render_fps"]        
+        xmj_opts["height_sensor_pixels"]=int(xmj_opts["height_sensor_pixels"])
+        xmj_opts["height_sensor_resolution"]=float(xmj_opts["height_sensor_resolution"])
         
         if not xmj_opts["use_gpu"]: # don't use GPU at all
             xmj_opts["use_gpu_pipeline"]=False
@@ -183,6 +206,12 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         self._fix_base = [False] * len(self._robot_names)
         self._self_collide = [False] * len(self._robot_names)
         self._merge_fixed = [True] * len(self._robot_names)
+
+        # prepare world XML (optionally augment with procedurally generated terrain)
+        self._world_xml_path = self._prepare_world_xml()
+
+        # pre-compute static height map from world.xml (used by height sensor)
+        self._height_field_data = self._build_static_heightmap_from_world(world_path=self._world_xml_path)
         
         for i in range(len(self._robot_names)):
             robot_name = self._robot_names[i]
@@ -204,7 +233,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                     LogType.EXCEP,
                     throw_when_excep = True)
             self._xmj_helper.set_simopt_path(xmj_files_dir+"/sim_opt.xml")
-            self._xmj_helper.set_world_path(xmj_files_dir+"/world.xml")
+            self._xmj_helper.set_world_path(self._world_xml_path)
             self._xmj_helper.set_sites_path(xmj_files_dir+"/sites.xml")
             
             self._xmj_helper.set_urdf_path(self._urdf_dump_paths[self._robot_names[0]])
@@ -255,6 +284,15 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                         "finishing sim pre-setup...",
                         LogType.STAT,
                         throw_when_excep = True)
+
+            # height grid sensor (static height map parsed from world.xml)
+            self._height_sensors[robot_name] = HeightGridSensor(
+                terrain_utils=self._height_field_data,
+                grid_size=int(self._env_opts["height_sensor_pixels"]),
+                resolution=float(self._env_opts["height_sensor_resolution"]),
+                n_envs=self._num_envs,
+                device=self._device,
+                dtype=self._dtype)
      
             self._reset_sim()
             self._fill_robot_info_from_world() 
@@ -349,6 +387,16 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             self._get_root_state_xbot(numerical_diff=self._env_opts["use_diff_vels"],
                     env_indxs=env_indxs,
                     robot_name=robot_name)
+
+        # height grid sensor readout
+        if robot_name in self._height_sensors:
+            pos_src = self._root_p[robot_name] if env_indxs is None else self._root_p[robot_name][env_indxs]
+            quat_src = self._root_q[robot_name] if env_indxs is None else self._root_q[robot_name][env_indxs]
+            heights = self._height_sensors[robot_name].read(pos_src, quat_src)
+            if env_indxs is None:
+                self._height_imgs[robot_name] = heights
+            else:
+                self._height_imgs[robot_name][env_indxs] = heights.clone()
             
     def _read_jnts_state_from_robot(self,
         robot_name: str,
@@ -643,6 +691,12 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             self._root_alpha[robot_name] = torch.full_like(self._root_v[robot_name], fill_value=0.0)
             self._root_alpha_base_loc[robot_name] = torch.full_like(self._root_alpha[robot_name], fill_value=0.0)
 
+            # height grid sensor storage
+            grid_sz = int(self._env_opts["height_sensor_pixels"])
+            self._height_imgs[robot_name] = torch.zeros((self._num_envs, grid_sz, grid_sz),
+                                                        dtype=self._dtype,
+                                                        device=self._device)
+
             # joints v (measured, default)
             self._jnts_v[robot_name] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_v.copy()).reshape(self._num_envs, -1).to(self._dtype)
             self._jnts_v_default[robot_name] = self._jnts_v[robot_name].clone()
@@ -695,3 +749,385 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         qi = q.clone()
         qi[..., 1:] = -qi[..., 1:]
         return qi
+
+    def _prepare_world_xml(self):
+        """Optionally augment the base world.xml with procedural step-up tiles and return the path to use."""
+        world_dir = self._env_opts.get("xmj_files_dir", None)
+        if world_dir is None:
+            Journal.log(self.__class__.__name__,
+                "_prepare_world_xml",
+                "xmj_files_dir not provided: using default world.xml.",
+                LogType.WARN,
+                throw_when_excep = False)
+            return None
+
+        base_world_path = os.path.join(world_dir, "world.xml")
+        if not self._env_opts.get("generate_stepup_terrain", False):
+            return base_world_path
+
+        if not os.path.isfile(base_world_path):
+            Journal.log(self.__class__.__name__,
+                "_prepare_world_xml",
+                f"world.xml not found at {base_world_path}: cannot generate procedural terrain.",
+                LogType.WARN,
+                throw_when_excep = False)
+            return base_world_path
+
+        try:
+            tree = ET.parse(base_world_path)
+            root = tree.getroot()
+        except Exception as exc:
+            Journal.log(self.__class__.__name__,
+                "_prepare_world_xml",
+                f"Failed parsing {base_world_path}: {exc}",
+                LogType.WARN,
+                throw_when_excep = False)
+            return base_world_path
+
+        worldbody = root.find("worldbody")
+        if worldbody is None:
+            Journal.log(self.__class__.__name__,
+                "_prepare_world_xml",
+                f"No <worldbody> found in {base_world_path}: cannot inject procedural terrain.",
+                LogType.WARN,
+                throw_when_excep = False)
+            return base_world_path
+
+        step_boxes = self._generate_stepup_boxes()
+        if len(step_boxes) == 0:
+            Journal.log(self.__class__.__name__,
+                "_prepare_world_xml",
+                "Procedural step-up generation returned no boxes: using base world.xml.",
+                LogType.WARN,
+                throw_when_excep = False)
+            return base_world_path
+
+        # remove previous autogenerated body if present
+        for child in list(worldbody):
+            if child.tag == "body" and child.get("name") == "auto_stepup_prim":
+                worldbody.remove(child)
+
+        step_body = ET.SubElement(worldbody, "body", {"name": "auto_stepup_prim", "pos": "0 0 0"})
+        for idx, box in enumerate(step_boxes):
+            size = box["size"]
+            pos = box["pos"]
+            name = box.get("name", f"stepup_{idx}")
+            geom_attrib = {
+                "name": name,
+                "type": "box",
+                "size": " ".join([f"{v:.5f}" for v in size]),
+                "pos": " ".join([f"{v:.5f}" for v in pos]),
+                "quat": "1 0 0 0",
+                "material": "groundplane",
+                "friction": "1.0 0.005 0.0001",
+                "solref": "0.02 1",
+                "solimp": "0.9 0.95 0.001 0.5 2",
+                "group": "2",
+                "contype": "1",
+                "conaffinity": "1"
+            }
+            ET.SubElement(step_body, "geom", geom_attrib)
+
+        out_path = os.path.join(world_dir, "world_autogen.xml")
+        tree.write(out_path, encoding="utf-8", xml_declaration=True)
+
+        Journal.log(self.__class__.__name__,
+            "_prepare_world_xml",
+            f"Generated procedural step-up terrain -> {out_path}",
+            LogType.STAT,
+            throw_when_excep = False)
+
+        return out_path
+
+    def _generate_stepup_boxes(self):
+        """Create step-up style boxes similar to Isaac stepup_prim terrain."""
+        opts = self._env_opts
+        terrain_size = float(opts.get("stepup_terrain_size", 30.0))
+        stairs_ratio = float(opts.get("stepup_stairs_ratio", 0.0))
+        platform_size = float(opts.get("stepup_platform_size", 5.0))
+        step_height = float(opts.get("stepup_step_height", 0.2))
+        n_steps = max(1, int(opts.get("stepup_n_steps", 1)))
+        area_factor = float(opts.get("stepup_area_factor", 0.5))
+        wall_height = float(opts.get("stepup_wall_height", 2.0))
+        res_low = float(opts.get("stepup_res_low", 0.1))
+        res_high = float(opts.get("stepup_res_high", 0.03))
+        pos = np.array(opts.get("stepup_position", [0.0, 0.0, 0.0]), dtype=float)
+        seed = opts.get("stepup_seed", None)
+
+        rng = np.random.default_rng(seed) if seed is not None else np.random.default_rng()
+
+        use_high_res = (stairs_ratio > 0.0) or (n_steps > 1)
+        _horizontal_scale = res_high if use_high_res else res_low
+
+        boxes = []
+
+        ground_thickness = 0.1
+        base_size = np.array([terrain_size / 2.0, terrain_size / 2.0, ground_thickness / 2.0])
+        base_pos = pos + np.array([0.0, 0.0, ground_thickness / 2.0])
+        boxes.append({"name": "stepup_base", "size": base_size, "pos": base_pos})
+
+        terrain_low_corner = pos + np.array([-terrain_size / 2.0, -terrain_size / 2.0, 0.0])
+        ground_top = pos[2] + ground_thickness
+
+        n_tiles_x = max(1, int(math.ceil(terrain_size / platform_size)))
+        n_tiles_y = max(1, int(math.ceil(terrain_size / platform_size)))
+        shrink_factor = math.sqrt(area_factor) if area_factor > 0.0 else 1.0
+
+        for ix in range(n_tiles_x):
+            for iy in range(n_tiles_y):
+                start_x_m = ix * platform_size
+                end_x_m = min(terrain_size, (ix + 1) * platform_size)
+                start_y_m = iy * platform_size
+                end_y_m = min(terrain_size, (iy + 1) * platform_size)
+
+                size_x = end_x_m - start_x_m
+                size_y = end_y_m - start_y_m
+                if size_x <= 0.0 or size_y <= 0.0:
+                    continue
+
+                if rng.random() >= stairs_ratio:
+                    continue
+
+                steps_for_tile = 1 if n_steps <= 1 else int(rng.integers(1, n_steps + 1))
+
+                world_start_x = terrain_low_corner[0] + start_x_m
+                world_start_y = terrain_low_corner[1] + start_y_m
+
+                for level in range(steps_for_tile):
+                    level_size_x = size_x * (shrink_factor ** level)
+                    level_size_y = size_y * (shrink_factor ** level)
+                    if level_size_x <= _horizontal_scale or level_size_y <= _horizontal_scale:
+                        break
+
+                    level_start_x = world_start_x + 0.5 * (size_x - level_size_x)
+                    level_start_y = world_start_y + 0.5 * (size_y - level_size_y)
+
+                    center_x = level_start_x + 0.5 * level_size_x
+                    center_y = level_start_y + 0.5 * level_size_y
+                    center_z = ground_top + (level + 0.5) * step_height
+
+                    boxes.append({
+                        "name": f"stepup_tile_{ix}_{iy}_lvl{level}",
+                        "size": np.array([level_size_x / 2.0, level_size_y / 2.0, step_height / 2.0]),
+                        "pos": np.array([center_x, center_y, center_z])
+                    })
+
+        # optional simple perimeter walls (heightfield equivalent) -- four thin boxes
+        if wall_height > 0.0:
+            wall_thickness = _horizontal_scale
+            # +X wall
+            boxes.append({
+                "name": "stepup_wall_posx",
+                "size": np.array([wall_thickness / 2.0, terrain_size / 2.0, wall_height / 2.0]),
+                "pos": pos + np.array([terrain_size / 2.0 + wall_thickness / 2.0, 0.0, wall_height / 2.0])
+            })
+            # -X wall
+            boxes.append({
+                "name": "stepup_wall_negx",
+                "size": np.array([wall_thickness / 2.0, terrain_size / 2.0, wall_height / 2.0]),
+                "pos": pos + np.array([-terrain_size / 2.0 - wall_thickness / 2.0, 0.0, wall_height / 2.0])
+            })
+            # +Y wall
+            boxes.append({
+                "name": "stepup_wall_posy",
+                "size": np.array([terrain_size / 2.0, wall_thickness / 2.0, wall_height / 2.0]),
+                "pos": pos + np.array([0.0, terrain_size / 2.0 + wall_thickness / 2.0, wall_height / 2.0])
+            })
+            # -Y wall
+            boxes.append({
+                "name": "stepup_wall_negy",
+                "size": np.array([terrain_size / 2.0, wall_thickness / 2.0, wall_height / 2.0]),
+                "pos": pos + np.array([0.0, -terrain_size / 2.0 - wall_thickness / 2.0, wall_height / 2.0])
+            })
+
+        return boxes
+
+    def _build_static_heightmap_from_world(self, world_path: str = None):
+        """Parse world.xml and build a static heightfield using box geoms only."""
+        if world_path is None:
+            world_dir = self._env_opts.get("xmj_files_dir", None)
+            if world_dir is None:
+                Journal.log(self.__class__.__name__,
+                    "_build_static_heightmap_from_world",
+                    "xmj_files_dir not provided: heightmap sensor will be flat.",
+                    LogType.WARN,
+                    throw_when_excep = False)
+                return None
+            world_path = os.path.join(world_dir, "world.xml")
+
+        if not os.path.isfile(world_path):
+            Journal.log(self.__class__.__name__,
+                "_build_static_heightmap_from_world",
+                f"world.xml not found at {world_path}: heightmap sensor will be flat.",
+                LogType.WARN,
+                throw_when_excep = False)
+            return None
+
+        try:
+            tree = ET.parse(world_path)
+            root = tree.getroot()
+        except Exception as exc:
+            Journal.log(self.__class__.__name__,
+                "_build_static_heightmap_from_world",
+                f"Failed parsing {world_path}: {exc}",
+                LogType.WARN,
+                throw_when_excep = False)
+            return None
+
+        worldbody = root.find("worldbody")
+        if worldbody is None:
+            Journal.log(self.__class__.__name__,
+                "_build_static_heightmap_from_world",
+                f"No <worldbody> found in {world_path}: heightmap sensor will be flat.",
+                LogType.WARN,
+                throw_when_excep = False)
+            return None
+
+        boxes = []
+
+        def parse_vec(attr_val, default):
+            if attr_val is None:
+                return np.array(default, dtype=float)
+            vals = [float(x) for x in attr_val.strip().split()]
+            if len(vals) == 0:
+                return np.array(default, dtype=float)
+            return np.array(vals, dtype=float)
+
+        def parse_quat(attr_val):
+            return parse_vec(attr_val, [1.0, 0.0, 0.0, 0.0])
+
+        def quat_multiply(q1, q2):
+            w1, x1, y1, z1 = q1
+            w2, x2, y2, z2 = q2
+            return np.array([
+                w1*w2 - x1*x2 - y1*y2 - z1*z2,
+                w1*x2 + x1*w2 + y1*z2 - z1*y2,
+                w1*y2 - x1*z2 + y1*w2 + z1*x2,
+                w1*z2 + x1*y2 - y1*x2 + z1*w2
+            ], dtype=float)
+
+        def quat_to_rot(q):
+            w, x, y, z = q
+            ww, xx, yy, zz = w*w, x*x, y*y, z*z
+            wx, wy, wz = w*x, w*y, w*z
+            xy, xz, yz = x*y, x*z, y*z
+            return np.array([
+                [ww + xx - yy - zz, 2*(xy - wz),     2*(xz + wy)],
+                [2*(xy + wz),     ww - xx + yy - zz, 2*(yz - wx)],
+                [2*(xz - wy),     2*(yz + wx),     ww - xx - yy + zz]
+            ], dtype=float)
+
+        def quat_rotate(q, v):
+            # rotate vector v by quaternion q (w, x, y, z)
+            qvec = q[1:]
+            uv = np.cross(qvec, v)
+            uuv = np.cross(qvec, uv)
+            return v + 2.0 * (q[0] * uv + uuv)
+
+        def collect_from_element(elem, parent_pos, parent_quat):
+            local_pos = parse_vec(elem.get("pos"), [0.0, 0.0, 0.0])
+            local_quat = parse_quat(elem.get("quat"))
+
+            world_pos = parent_pos + quat_rotate(parent_quat, local_pos)
+            world_quat = quat_multiply(parent_quat, local_quat)
+
+            for geom in elem.findall("geom"):
+                if geom.get("type", "").lower() != "box":
+                    continue
+                size = parse_vec(geom.get("size"), [0.0, 0.0, 0.0])
+                geom_pos = parse_vec(geom.get("pos"), [0.0, 0.0, 0.0])
+                geom_quat = parse_quat(geom.get("quat"))
+                center = world_pos + quat_rotate(world_quat, geom_pos)
+                quat_abs = quat_multiply(world_quat, geom_quat)
+                boxes.append((center, size, quat_abs))
+
+            for child in elem.findall("body"):
+                collect_from_element(child, world_pos, world_quat)
+
+        # top-level geoms directly inside worldbody (with world frame)
+        collect_from_element(worldbody, np.zeros(3, dtype=float), np.array([1.0, 0.0, 0.0, 0.0], dtype=float))
+
+        if len(boxes) == 0:
+            Journal.log(self.__class__.__name__,
+                "_build_static_heightmap_from_world",
+                "No box geometries found in world.xml: heightmap sensor will be flat.",
+                LogType.WARN,
+                throw_when_excep = False)
+            return None
+
+        # compute global bounds from all box corners
+        min_x = float("+inf")
+        max_x = float("-inf")
+        min_y = float("+inf")
+        max_y = float("-inf")
+        boxes_bounds = []
+
+        for center, size, quat_abs in boxes:
+            rot = quat_to_rot(quat_abs)
+            # all 8 corners
+            corners = []
+            for sx in (-size[0], size[0]):
+                for sy in (-size[1], size[1]):
+                    for sz in (-size[2], size[2]):
+                        local = np.array([sx, sy, sz], dtype=float)
+                        corners.append(center + rot @ local)
+            corners = np.array(corners)
+            cmin = corners.min(axis=0)
+            cmax = corners.max(axis=0)
+            min_x = min(min_x, cmin[0])
+            max_x = max(max_x, cmax[0])
+            min_y = min(min_y, cmin[1])
+            max_y = max(max_y, cmax[1])
+            boxes_bounds.append((cmin, cmax))
+
+        margin = float(self._env_opts.get("height_map_margin", 0.0))
+        min_x -= margin
+        max_x += margin
+        min_y -= margin
+        max_y += margin
+
+        resolution = float(self._env_opts.get("height_map_resolution", 0.1))
+
+        if not (resolution > 0.0):
+            Journal.log(self.__class__.__name__,
+                "_build_static_heightmap_from_world",
+                f"Invalid height_map_resolution={resolution}, falling back to 0.1.",
+                LogType.WARN,
+                throw_when_excep = False)
+            resolution = 0.1
+
+        extent_x = max(max_x - min_x, resolution)
+        extent_y = max(max_y - min_y, resolution)
+
+        n_rows = int(math.ceil(extent_x / resolution)) + 1
+        n_cols = int(math.ceil(extent_y / resolution)) + 1
+
+        heightfield = np.zeros((n_rows, n_cols), dtype=np.float32)
+        origin = np.array([min_x, min_y, 0.0], dtype=np.float64)
+
+        for (cmin, cmax) in boxes_bounds:
+            x_start = max(0, int(math.floor((cmin[0] - min_x) / resolution)))
+            x_end = min(n_rows, int(math.ceil((cmax[0] - min_x) / resolution)) + 1)
+            y_start = max(0, int(math.floor((cmin[1] - min_y) / resolution)))
+            y_end = min(n_cols, int(math.ceil((cmax[1] - min_y) / resolution)) + 1)
+            h_val = cmax[2]
+            heightfield[x_start:x_end, y_start:y_end] = np.maximum(heightfield[x_start:x_end, y_start:y_end], h_val)
+
+        class StaticHeightField:
+            def __init__(self, hf, horiz_scale, pos, orient):
+                self.heightfield_world = hf
+                self._horizontal_scale = horiz_scale
+                self._vertical_scale = 1.0
+                self.position = pos
+                self.orientation = orient
+
+        height_data = StaticHeightField(heightfield, resolution, origin, np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64))
+
+        info = f"Parsed static heightmap from {world_path}: grid {heightfield.shape} at res {resolution} m."
+        Journal.log(self.__class__.__name__,
+            "_build_static_heightmap_from_world",
+            info,
+            LogType.STAT,
+            throw_when_excep = False)
+
+        return height_data
