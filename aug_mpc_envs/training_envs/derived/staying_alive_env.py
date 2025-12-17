@@ -15,7 +15,6 @@ class StayingAliveEnv(FlightPhaseControl):
 
     def __init__(self,
             namespace: str,
-            actions_dim: int = 10,
             verbose: bool = False,
             vlevel: VLevel = VLevel.V1,
             use_gpu: bool = True,
@@ -39,7 +38,6 @@ class StayingAliveEnv(FlightPhaseControl):
 
         FlightPhaseControl.__init__(self, 
             namespace=namespace,
-            actions_dim=actions_dim, # twist + contact flags
             verbose=verbose,
             vlevel=vlevel,
             use_gpu=use_gpu,
