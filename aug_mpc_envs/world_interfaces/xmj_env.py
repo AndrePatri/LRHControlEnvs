@@ -140,14 +140,13 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["use_rel_q_from_startup"]=True
         xmj_opts["height_map_resolution"]=0.05
         xmj_opts["height_map_margin"]=0.5
-        xmj_opts["generate_stepup_terrain"]=True
+        xmj_opts["generate_stepup_terrain"]=False
         xmj_opts["stepup_terrain_size"]=30.0
         xmj_opts["stepup_stairs_ratio"]=0.2
         xmj_opts["stepup_platform_size"]=5.0
-        xmj_opts["stepup_step_height"]=0.2
-        xmj_opts["stepup_n_steps"]=1
+        xmj_opts["stepup_step_height"]=0.1
+        xmj_opts["stepup_n_steps"]=3
         xmj_opts["stepup_area_factor"]=0.5
-        xmj_opts["stepup_wall_height"]=2.0
         xmj_opts["stepup_res_low"]=0.1
         xmj_opts["stepup_res_high"]=0.03
         xmj_opts["stepup_position"]=np.array([-5.0, -5.0, 0.0])
@@ -157,6 +156,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["rendering_dt"]=1/xmj_opts["render_fps"]        
         xmj_opts["height_sensor_pixels"]=int(xmj_opts["height_sensor_pixels"])
         xmj_opts["height_sensor_resolution"]=float(xmj_opts["height_sensor_resolution"])
+        xmj_opts["enable_height_sensor"]=bool(xmj_opts.get("enable_height_sensor", False))
+        xmj_opts["enable_height_vis"]=bool(xmj_opts.get("enable_height_vis", False))
         
         if not xmj_opts["use_gpu"]: # don't use GPU at all
             xmj_opts["use_gpu_pipeline"]=False
@@ -211,7 +212,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         self._world_xml_path = self._prepare_world_xml()
 
         # pre-compute static height map from world.xml (used by height sensor)
-        self._height_field_data = self._build_static_heightmap_from_world(world_path=self._world_xml_path)
+        if self._env_opts["enable_height_sensor"]:
+            self._height_field_data = self._build_static_heightmap_from_world(world_path=self._world_xml_path)
         
         for i in range(len(self._robot_names)):
             robot_name = self._robot_names[i]
@@ -285,14 +287,15 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                         LogType.STAT,
                         throw_when_excep = True)
 
-            # height grid sensor (static height map parsed from world.xml)
-            self._height_sensors[robot_name] = HeightGridSensor(
-                terrain_utils=self._height_field_data,
-                grid_size=int(self._env_opts["height_sensor_pixels"]),
-                resolution=float(self._env_opts["height_sensor_resolution"]),
-                n_envs=self._num_envs,
-                device=self._device,
-                dtype=self._dtype)
+            if self._env_opts["enable_height_sensor"]:
+                # height grid sensor (static height map parsed from world.xml)
+                self._height_sensors[robot_name] = HeightGridSensor(
+                    terrain_utils=self._height_field_data,
+                    grid_size=int(self._env_opts["height_sensor_pixels"]),
+                    resolution=float(self._env_opts["height_sensor_resolution"]),
+                    n_envs=self._num_envs,
+                    device=self._device,
+                    dtype=self._dtype)
      
             self._reset_sim()
             self._fill_robot_info_from_world() 
@@ -842,13 +845,12 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
     def _generate_stepup_boxes(self):
         """Create step-up style boxes similar to Isaac stepup_prim terrain."""
         opts = self._env_opts
-        terrain_size = float(opts.get("stepup_terrain_size", 30.0))
+        terrain_size = float(opts.get("stepup_terrain_size", 50.0))
         stairs_ratio = float(opts.get("stepup_stairs_ratio", 0.0))
-        platform_size = float(opts.get("stepup_platform_size", 5.0))
-        step_height = float(opts.get("stepup_step_height", 0.2))
+        platform_size = float(opts.get("stepup_platform_size", 4.0))
+        step_height = float(opts.get("stepup_step_height", 0.10))
         n_steps = max(1, int(opts.get("stepup_n_steps", 1)))
         area_factor = float(opts.get("stepup_area_factor", 0.5))
-        wall_height = float(opts.get("stepup_wall_height", 2.0))
         res_low = float(opts.get("stepup_res_low", 0.1))
         res_high = float(opts.get("stepup_res_high", 0.03))
         pos = np.array(opts.get("stepup_position", [0.0, 0.0, 0.0]), dtype=float)
@@ -911,34 +913,6 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                         "size": np.array([level_size_x / 2.0, level_size_y / 2.0, step_height / 2.0]),
                         "pos": np.array([center_x, center_y, center_z])
                     })
-
-        # optional simple perimeter walls (heightfield equivalent) -- four thin boxes
-        if wall_height > 0.0:
-            wall_thickness = _horizontal_scale
-            # +X wall
-            boxes.append({
-                "name": "stepup_wall_posx",
-                "size": np.array([wall_thickness / 2.0, terrain_size / 2.0, wall_height / 2.0]),
-                "pos": pos + np.array([terrain_size / 2.0 + wall_thickness / 2.0, 0.0, wall_height / 2.0])
-            })
-            # -X wall
-            boxes.append({
-                "name": "stepup_wall_negx",
-                "size": np.array([wall_thickness / 2.0, terrain_size / 2.0, wall_height / 2.0]),
-                "pos": pos + np.array([-terrain_size / 2.0 - wall_thickness / 2.0, 0.0, wall_height / 2.0])
-            })
-            # +Y wall
-            boxes.append({
-                "name": "stepup_wall_posy",
-                "size": np.array([terrain_size / 2.0, wall_thickness / 2.0, wall_height / 2.0]),
-                "pos": pos + np.array([0.0, terrain_size / 2.0 + wall_thickness / 2.0, wall_height / 2.0])
-            })
-            # -Y wall
-            boxes.append({
-                "name": "stepup_wall_negy",
-                "size": np.array([terrain_size / 2.0, wall_thickness / 2.0, wall_height / 2.0]),
-                "pos": pos + np.array([0.0, -terrain_size / 2.0 - wall_thickness / 2.0, wall_height / 2.0])
-            })
 
         return boxes
 
