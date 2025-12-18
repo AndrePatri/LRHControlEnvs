@@ -140,7 +140,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["use_rel_q_from_startup"]=True
         xmj_opts["height_map_resolution"]=0.05
         xmj_opts["height_map_margin"]=0.5
-        xmj_opts["generate_stepup_terrain"]=True
+        xmj_opts["generate_stepup_terrain"]=False
         xmj_opts["stepup_terrain_size"]=30.0
         xmj_opts["stepup_stairs_ratio"]=0.2
         xmj_opts["stepup_platform_size"]=5.0

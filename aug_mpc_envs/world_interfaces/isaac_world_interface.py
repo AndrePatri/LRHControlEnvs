@@ -175,7 +175,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
     def _import_isaac_pkgs(self):
         # we use global, so that we can create the simulation app inside (and so
         # access Isaac's kit) and also expose to all methods the imports
-        global World, omni_kit, get_context, UsdLux, Sdf, Gf, UsdPhysics, PhysicsSchemaTools
+        global World, omni_kit, get_context, UsdLux, Sdf, Gf, UsdPhysics, PhysicsSchemaTools, UsdShade
         global enable_extension, set_camera_view, _urdf, move_prim, GridCloner, prim_utils
         global get_current_stage, Scene, ArticulationView, RigidPrimView, rep
         global OmniContactSensors, RlTerrains,OmniJntImpCntrl
@@ -183,7 +183,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         global _sensor, _dynamic_control
         global get_prim_at_path
 
-        from pxr import PhysxSchema, UsdGeom
+        from pxr import PhysxSchema, UsdGeom, UsdShade
 
         from omni.isaac.core.world import World
         from omni.usd import get_context
@@ -608,8 +608,11 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                     static_friction=self._env_opts["static_friction"], 
                     dynamic_friction=self._env_opts["dynamic_friction"], 
                     restitution=self._env_opts["restitution"],
-                    n_steps=3
+                    n_steps=1
                     )
+                # apply the same visual material as the default ground plane
+                mat_path = self._ensure_groundplane_material()
+                self._apply_checker_material_to_terrain(terrain_root_path=terrain_prim_path, material_path=mat_path)
             else:
                 ground_type=self._env_opts["ground_type"]
                 Journal.log(self.__class__.__name__,
@@ -816,6 +819,44 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         physxMaterialAPI=PhysxSchema.PhysxMaterialAPI.Apply(prim)
         physxMaterialAPI.CreateFrictionCombineModeAttr().Set("multiply") # average, min, multiply, max 
         physxMaterialAPI.CreateRestitutionCombineModeAttr().Set("multiply")
+
+    def _ensure_groundplane_material(self):
+        """Guarantee a ground-plane material exists (default checker) and return its path."""
+        stage = get_current_stage()
+        mat_path = "/World/Looks/groundPlaneMaterial"
+        mat_prim = stage.GetPrimAtPath(mat_path)
+        if mat_prim.IsValid():
+            return mat_path
+
+        # create a temporary default ground plane to spawn the checker material, then delete the geom
+        tmp_gp_path = "/World/tmp_ground_for_material"
+        self._scene.add_default_ground_plane(z_position=-1000.0,
+            name="tmp_ground_for_material",
+            prim_path=tmp_gp_path,
+            static_friction=self._env_opts["static_friction"],
+            dynamic_friction=self._env_opts["dynamic_friction"],
+            restitution=self._env_opts["restitution"])
+
+        mat_prim = stage.GetPrimAtPath(mat_path)
+        prim_utils.delete_prim(tmp_gp_path)
+
+        return mat_path if mat_prim.IsValid() else None
+
+    def _apply_checker_material_to_terrain(self, terrain_root_path: str, material_path: str):
+        """Bind the checker material to all terrain prims (visual only)."""
+        if material_path is None:
+            return
+        stage = get_current_stage()
+        mat_prim = stage.GetPrimAtPath(material_path)
+        if not mat_prim.IsValid():
+            return
+        material = UsdShade.Material(mat_prim)
+        for prim in stage.Traverse():
+            path = prim.GetPath().pathString
+            if not path.startswith(terrain_root_path):
+                continue
+            binding = UsdShade.MaterialBindingAPI.Apply(prim)
+            binding.Bind(material, UsdShade.Tokens.strongerThanDescendants)
 
     def _is_link(self, prim):
         return prim.GetTypeName() == 'Xform' 
