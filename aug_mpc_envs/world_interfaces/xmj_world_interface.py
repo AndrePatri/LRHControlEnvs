@@ -142,10 +142,10 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["height_map_margin"]=0.5
         xmj_opts["generate_stepup_terrain"]=False
         xmj_opts["stepup_terrain_size"]=30.0
-        xmj_opts["stepup_stairs_ratio"]=0.2
+        xmj_opts["stepup_stairs_ratio"]=0.5
         xmj_opts["stepup_platform_size"]=5.0
         xmj_opts["stepup_step_height"]=0.1
-        xmj_opts["stepup_n_steps"]=3
+        xmj_opts["stepup_n_steps"]=1
         xmj_opts["stepup_area_factor"]=0.5
         xmj_opts["stepup_res_low"]=0.1
         xmj_opts["stepup_res_high"]=0.03
@@ -158,6 +158,9 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["height_sensor_resolution"]=float(xmj_opts["height_sensor_resolution"])
         xmj_opts["enable_height_sensor"]=bool(xmj_opts.get("enable_height_sensor", False))
         xmj_opts["enable_height_vis"]=bool(xmj_opts.get("enable_height_vis", False))
+        # keep visualization/state anchored to simulator ground truth when height sensor is on
+        if xmj_opts["enable_height_sensor"]:
+            xmj_opts["use_mpc_pos_for_robot"]=False
         
         if not xmj_opts["use_gpu"]: # don't use GPU at all
             xmj_opts["use_gpu_pipeline"]=False
@@ -393,13 +396,22 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
 
         # height grid sensor readout
         if robot_name in self._height_sensors:
-            pos_src = self._root_p[robot_name] if env_indxs is None else self._root_p[robot_name][env_indxs]
-            quat_src = self._root_q[robot_name] if env_indxs is None else self._root_q[robot_name][env_indxs]
+            # always use simulator ground-truth pose for the height sensor, even when
+            # we fall back to MPC pose for the rest of the pipeline (use_mpc_pos_for_robot)
+            if self._env_opts["use_mpc_pos_for_robot"]:
+                sim_p = torch.from_numpy(self._xmj_adapter.xmj_env().p).reshape(self._num_envs, -1).to(self._dtype)
+                sim_q = torch.from_numpy(self._xmj_adapter.xmj_env().q).reshape(self._num_envs, -1).to(self._dtype)
+                pos_src = sim_p if env_indxs is None else sim_p[env_indxs]
+                quat_src = sim_q if env_indxs is None else sim_q[env_indxs]
+            else:
+                pos_src = self._root_p[robot_name] if env_indxs is None else self._root_p[robot_name][env_indxs]
+                quat_src = self._root_q[robot_name] if env_indxs is None else self._root_q[robot_name][env_indxs]
             heights = self._height_sensors[robot_name].read(pos_src, quat_src)
             if env_indxs is None:
                 self._height_imgs[robot_name] = heights
             else:
                 self._height_imgs[robot_name][env_indxs] = heights.clone()
+
             
     def _read_jnts_state_from_robot(self,
         robot_name: str,
@@ -809,6 +821,9 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         for child in list(worldbody):
             if child.tag == "body" and child.get("name") == "auto_stepup_prim":
                 worldbody.remove(child)
+            # drop floor plane when generating stepup terrain to avoid double ground
+            if child.tag == "geom" and child.get("name") == "floor":
+                worldbody.remove(child)
 
         step_body = ET.SubElement(worldbody, "body", {"name": "auto_stepup_prim", "pos": "0 0 0"})
         for idx, box in enumerate(step_boxes):
@@ -865,11 +880,12 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
 
         ground_thickness = 0.1
         base_size = np.array([terrain_size / 2.0, terrain_size / 2.0, ground_thickness / 2.0])
-        base_pos = pos + np.array([0.0, 0.0, ground_thickness / 2.0])
+        # place base so its top sits at z=0 in world frame
+        base_pos = pos + np.array([0.0, 0.0, -ground_thickness / 2.0])
         boxes.append({"name": "stepup_base", "size": base_size, "pos": base_pos})
 
         terrain_low_corner = pos + np.array([-terrain_size / 2.0, -terrain_size / 2.0, 0.0])
-        ground_top = pos[2] + ground_thickness
+        ground_top = 0.0
 
         n_tiles_x = max(1, int(math.ceil(terrain_size / platform_size)))
         n_tiles_y = max(1, int(math.ceil(terrain_size / platform_size)))
