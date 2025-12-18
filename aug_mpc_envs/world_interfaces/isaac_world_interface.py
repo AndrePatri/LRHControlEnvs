@@ -297,7 +297,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["pert_wrenches_max_duration"]=1.5
         isaac_opts["pert_wrenches_min_duration"]=1.0
 
-        isaac_opts["pert_wrenches_weight_factor"]=0.3 # 0.5 -> 50% of full robot weight
+        isaac_opts["pert_wrenches_weight_factor"]=0.2 # 0.5 -> 50% of full robot weight
         isaac_opts["max_lin_impulse_norm"]=isaac_opts["pert_wrenches_weight_factor"]*isaac_opts["pert_wrenches_max_duration"]
         isaac_opts["max_ang_impulse_lever"]=0.2 # [m]
         isaac_opts["max_ang_impulse_norm"]=isaac_opts["max_lin_impulse_norm"]*isaac_opts["max_ang_impulse_lever"]
