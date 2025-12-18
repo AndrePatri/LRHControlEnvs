@@ -297,12 +297,12 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["pert_wrenches_max_duration"]=1.5
         isaac_opts["pert_wrenches_min_duration"]=1.0
 
-        isaac_opts["pert_wrenches_weight_factor"]=0.2 # 0.5 -> 50% of full robot weight
+        isaac_opts["pert_wrenches_weight_factor"]=0.3 # 0.5 -> 50% of full robot weight
         isaac_opts["max_lin_impulse_norm"]=isaac_opts["pert_wrenches_weight_factor"]*isaac_opts["pert_wrenches_max_duration"]
         isaac_opts["max_ang_impulse_lever"]=0.2 # [m]
         isaac_opts["max_ang_impulse_norm"]=isaac_opts["max_lin_impulse_norm"]*isaac_opts["max_ang_impulse_lever"]
         
-        isaac_opts["pert_wrenches_rate"]=15.0 # on average 1 pert every pert_wrenches_rate seconds
+        isaac_opts["pert_wrenches_rate"]=10.0 # on average 1 pert every pert_wrenches_rate seconds
         isaac_opts["pert_planar_only"]=True # if True, linear pushes only in xy plane and torque only around z
         isaac_opts["pert_duration_scale"]=1.0 # multiply min/max duration without changing defaults
 
@@ -1095,7 +1095,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
 
                 # 3. Sample linear impulse magnitudes (reuse scratch)
                 # scratch has shape (N,1) - uniform [0,1]
-                self._pert_scratch[robot_name].uniform_(0.4, 1.0)
+                self._pert_scratch[robot_name].uniform_(0.5, 1.0)
                 # impulse vectors = unit_dir * (rand * lin_impulse_max)
 
                 lindir.mul_(self._pert_scratch[robot_name] * lin_impulse_max)  # now contains linear impulses (N,3)
