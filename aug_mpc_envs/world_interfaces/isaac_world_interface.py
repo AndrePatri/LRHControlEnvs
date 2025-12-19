@@ -603,7 +603,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 self.terrain_generator = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
                 self._ground_plane=self.terrain_generator.create_stepup_prim_terrain(
                     terrain_size=self._env_opts["ground_size"], 
-                    stairs_ratio=0.5,
+                    stairs_ratio=0.8,
                     platform_size=4.0,
                     step_height_lb=self._env_opts["step_height_lb"],
                     step_height_ub=self._env_opts["step_height_ub"],
