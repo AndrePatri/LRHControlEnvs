@@ -295,18 +295,27 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
 
         isaac_opts["use_diff_vels"] = False
 
+        # random perturbations (impulse, durations, directions are sampled uniformly, force/torque computed accordinly)
         isaac_opts["use_random_pertub"]=False
-        isaac_opts["pert_wrenches_max_duration"]=1.5
-        isaac_opts["pert_wrenches_min_duration"]=1.0
+        isaac_opts["pert_planar_only"]=True # if True, linear pushes only in xy plane and no torques
 
-        isaac_opts["pert_wrenches_weight_factor"]=0.2 # 0.5 -> 50% of full robot weight
-        isaac_opts["max_lin_impulse_norm"]=isaac_opts["pert_wrenches_weight_factor"]*isaac_opts["pert_wrenches_max_duration"]
+        isaac_opts["pert_wrenches_rate"]=10.0 # on average 1 pert every pert_wrenches_rate seconds
+        isaac_opts["pert_wrenches_min_duration"]=0.5
+        isaac_opts["pert_wrenches_max_duration"]=3.0 # [s]
+        isaac_opts["pert_force_max_weight_scale"]=1.0 # clip force norm to scale*weight
+        isaac_opts["pert_torque_max_weight_scale"]=1.0 # clip torque norm to scale*weight*max_ang_impulse_lever
+        
+        isaac_opts["pert_target_delta_v"]=2.0 # [m/s] desired max impulse = m*delta_v
+
+        # max impulse (unitless scale multiplied by weight to get N*s): delta_v/g
+        isaac_opts["max_lin_impulse_norm"]=isaac_opts["pert_target_delta_v"]/9.81
+        isaac_opts["lin_impulse_mag_min"]=0.5 # [0, 1] -> min fraction of max_lin_impulse_norm when sampling
+        isaac_opts["lin_impulse_mag_max"]=1.0 # [0, 1] -> max fraction of max_lin_impulse_norm when sampling
+
         isaac_opts["max_ang_impulse_lever"]=0.2 # [m]
         isaac_opts["max_ang_impulse_norm"]=isaac_opts["max_lin_impulse_norm"]*isaac_opts["max_ang_impulse_lever"]
-        
-        isaac_opts["pert_wrenches_rate"]=10.0 # on average 1 pert every pert_wrenches_rate seconds
-        isaac_opts["pert_planar_only"]=True # if True, linear pushes only in xy plane and torque only around z
-        isaac_opts["pert_duration_scale"]=1.0 # multiply min/max duration without changing defaults
+                
+        # opts definition end
 
         isaac_opts.update(self._env_opts) # update defaults with provided opts
         isaac_opts["rendering_freq"]=int(isaac_opts["rendering_dt"]/isaac_opts["physics_dt"])
@@ -1104,9 +1113,9 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
 
             # Reuse scratch buffer for probability check
             # Assumes self._pert_scratch is (num_envs, 1) pre-allocated
-            self._pert_scratch[robot_name].uniform_(0.0, 1.0)
+            self._pert_scratch[robot_name].uniform_(0.0, 1.0) # used for triggering new perturbations
 
-            # Check probs against threshold (Broadcasting (N,1) vs scalar)
+            # Check probs against threshold
             # Flatten scratch to (N,) to match 'active' mask
             trigger_mask = (self._pert_scratch[robot_name].flatten() < self._pert_wrenches_prob) & (~active)
 
@@ -1139,7 +1148,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
 
                 # 3. Sample linear impulse magnitudes (reuse scratch)
                 # scratch has shape (N,1) - uniform [0,1]
-                self._pert_scratch[robot_name].uniform_(0.5, 1.0)
+                self._pert_scratch[robot_name].uniform_(self._env_opts["lin_impulse_mag_min"], self._env_opts["lin_impulse_mag_max"])
                 # impulse vectors = unit_dir * (rand * lin_impulse_max)
 
                 lindir.mul_(self._pert_scratch[robot_name] * lin_impulse_max)  # now contains linear impulses (N,3)
@@ -1179,6 +1188,21 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 # lindir currently holds linear impulses, angdir holds angular impulses
                 forces_to_apply = lindir / duration_seconds
                 torques_to_apply = angdir / duration_seconds
+
+                # Optional clipping based on robot weight
+                f_clip_scale = self._env_opts["pert_force_max_weight_scale"]
+                if f_clip_scale > 0.0:
+                    force_max = self._weights[robot_name] * f_clip_scale  # (N,1)
+                    f_norm = torch.norm(forces_to_apply, dim=1, keepdim=True).clamp_min_(1e-9)
+                    f_scale = torch.minimum(torch.ones_like(f_norm), force_max / f_norm)
+                    forces_to_apply = forces_to_apply * f_scale
+
+                t_clip_scale = self._env_opts["pert_torque_max_weight_scale"]
+                if t_clip_scale > 0.0:
+                    torque_max = self._weights[robot_name] * self._env_opts["max_ang_impulse_lever"] * t_clip_scale
+                    t_norm = torch.norm(torques_to_apply, dim=1, keepdim=True).clamp_min_(1e-9)
+                    t_scale = torch.minimum(torch.ones_like(t_norm), torque_max / t_norm)
+                    torques_to_apply = torques_to_apply * t_scale
 
                 # --- Update State Buffers ---
                 # Use boolean indexing to scatter only triggered values
@@ -1696,11 +1720,8 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         self._pert_scratch = {}
 
         # convert durations in seconds to integer physics steps (min 1 step)
-        duration_scale=self._env_opts["pert_duration_scale"] if "pert_duration_scale" in self._env_opts else 1.0
-        pert_min_duration=self._env_opts["pert_wrenches_min_duration"]*duration_scale
-        pert_max_duration=self._env_opts["pert_wrenches_max_duration"]*duration_scale
-        self._pert_min_steps = max(1, int(math.ceil(pert_min_duration / self.physics_dt())))
-        self._pert_max_steps = max(self._pert_min_steps, int(math.ceil(pert_max_duration / self.physics_dt())))
+        self._pert_min_steps = max(1, int(math.ceil(self._env_opts["pert_wrenches_min_duration"] / self.physics_dt())))
+        self._pert_max_steps = max(self._pert_min_steps, int(math.ceil(self._env_opts["pert_wrenches_max_duration"] / self.physics_dt())))
 
         pert_wrenches_step_rate=self._env_opts["pert_wrenches_rate"]/self.physics_dt() # 1 pert every n physics steps
         self._pert_wrenches_prob=1.0/pert_wrenches_step_rate # sampling prob to be used
