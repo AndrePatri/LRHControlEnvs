@@ -107,7 +107,8 @@ class RlTerrains():
                     terrain_size=30,
                     stairs_ratio: float = 0.2,
                     platform_size: float = 5.0,
-                    step_height: float = 0.2,
+                    step_height_lb: float = 0.05,
+                    step_height_ub: float = 0.15,
                     n_steps: int = 1,
                     area_factor: float = 0.5,
                     wall_height: float = 2.0,
@@ -141,7 +142,8 @@ class RlTerrains():
 
         terrain_center = position
 
-        step_h_units = max(1, int(round(step_height / vertical_scale)))
+        step_height_lb = max(step_height_lb, 0.0)
+        step_height_ub = max(step_height_ub, step_height_lb)
         wall_h_units = max(1, int(round(wall_height / vertical_scale)))
         ground_thickness = 0.1
         ground_top = terrain_center[2] + 0.5 * ground_thickness
@@ -196,6 +198,8 @@ class RlTerrains():
 
                 if n_steps <= 1:
                     # single raised tile
+                    step_height = np.random.uniform(step_height_lb, step_height_ub)
+                    step_h_units = max(1, int(round(step_height / vertical_scale)))
                     heightfield[start_row:end_row, start_col:end_col] = step_h_units
                     center_z = ground_top + 0.5 * step_height
                     tile_prim_path = f"{self._prim_path}/tile_{ix}_{iy}"
@@ -212,11 +216,17 @@ class RlTerrains():
                 else:
                     shrink_factor = math.sqrt(area_factor)
                     steps_for_tile = np.random.randint(1, n_steps + 1)
+                    accumulated_height = 0.0
+                    accumulated_units = 0
                     for level in range(steps_for_tile):
                         level_size_x = size_x * (shrink_factor ** level)
                         level_size_y = size_y * (shrink_factor ** level)
                         if level_size_x < horizontal_scale or level_size_y < horizontal_scale:
                             break
+
+                        # sample height for this level
+                        level_height = np.random.uniform(step_height_lb, step_height_ub)
+                        level_units = max(1, int(round(level_height / vertical_scale)))
 
                         # center the reduced platform within the tile bounds
                         level_start_x = start_x_m + 0.5 * (size_x - level_size_x)
@@ -231,18 +241,19 @@ class RlTerrains():
                         if level_end_row <= level_start_row or level_end_col <= level_start_col:
                             continue
 
-                        level_units = step_h_units * (level + 1)
-                        heightfield[level_start_row:level_end_row, level_start_col:level_end_col] = level_units
+                        accumulated_units += level_units
+                        heightfield[level_start_row:level_end_row, level_start_col:level_end_col] = accumulated_units
 
+                        accumulated_height += level_height
                         level_center_x = terrain_low_corner[0] + level_start_x + 0.5 * level_size_x
                         level_center_y = terrain_low_corner[1] + level_start_y + 0.5 * level_size_y
-                        level_center_z = ground_top + (level + 0.5) * step_height
+                        level_center_z = ground_top + (accumulated_height - 0.5 * level_height)
 
                         tile_prim_path = f"{self._prim_path}/tile_{ix}_{iy}_lvl{level}"
                         tile_prim = UsdGeom.Cube.Define(self._stage, tile_prim_path)
                         tile_prim.CreateSizeAttr(1.0)
                         tile_prim.AddTranslateOp().Set(Gf.Vec3f(level_center_x, level_center_y, level_center_z))
-                        tile_prim.AddScaleOp().Set(Gf.Vec3f(level_size_x, level_size_y, step_height))
+                        tile_prim.AddScaleOp().Set(Gf.Vec3f(level_size_x, level_size_y, level_height))
                         UsdPhysics.CollisionAPI.Apply(tile_prim.GetPrim())
                         PhysxSchema.PhysxCollisionAPI.Apply(tile_prim.GetPrim())
                         tile_mat = UsdPhysics.MaterialAPI.Apply(tile_prim.GetPrim())
