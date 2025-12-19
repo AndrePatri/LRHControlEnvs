@@ -171,6 +171,15 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         self._height_vis_step={}
         self._height_vis_step={}
         self._height_vis={}
+        self._terrain_hit_margin = 1.0
+        self._terrain_hit_log_period = 1000
+        self._terrain_hit_active = {}
+        self._terrain_hit_counts = {}
+        self._terrain_hit_counts_last_logged = {}
+        for robot_name in self._robot_names:
+            self._terrain_hit_active[robot_name] = torch.zeros((self._num_envs,), device=self._device, dtype=torch.bool)
+            self._terrain_hit_counts[robot_name] = torch.zeros((self._num_envs,), device=self._device, dtype=torch.int32)
+            self._terrain_hit_counts_last_logged[robot_name] = None
         
     def _import_isaac_pkgs(self):
         # we use global, so that we can create the simulation app inside (and so
@@ -299,21 +308,24 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["use_random_pertub"]=False
         isaac_opts["pert_planar_only"]=True # if True, linear pushes only in xy plane and no torques
 
-        isaac_opts["pert_wrenches_rate"]=10.0 # on average 1 pert every pert_wrenches_rate seconds
-        isaac_opts["pert_wrenches_min_duration"]=0.5
+        isaac_opts["pert_wrenches_rate"]=4.0 # on average 1 pert every pert_wrenches_rate seconds
+        isaac_opts["pert_wrenches_min_duration"]=0.8
         isaac_opts["pert_wrenches_max_duration"]=3.0 # [s]
         isaac_opts["pert_force_max_weight_scale"]=1.0 # clip force norm to scale*weight
+        isaac_opts["pert_force_min_weight_scale"]=0.15 # optional min force norm as scale*weight
         isaac_opts["pert_torque_max_weight_scale"]=1.0 # clip torque norm to scale*weight*max_ang_impulse_lever
         
         isaac_opts["pert_target_delta_v"]=2.0 # [m/s] desired max impulse = m*delta_v
+        isaac_opts["det_pert_rate"]=True
 
         # max impulse (unitless scale multiplied by weight to get N*s): delta_v/g
         isaac_opts["max_lin_impulse_norm"]=isaac_opts["pert_target_delta_v"]/9.81
-        isaac_opts["lin_impulse_mag_min"]=0.5 # [0, 1] -> min fraction of max_lin_impulse_norm when sampling
+        isaac_opts["lin_impulse_mag_min"]=1.0 # [0, 1] -> min fraction of max_lin_impulse_norm when sampling
         isaac_opts["lin_impulse_mag_max"]=1.0 # [0, 1] -> max fraction of max_lin_impulse_norm when sampling
 
         isaac_opts["max_ang_impulse_lever"]=0.2 # [m]
         isaac_opts["max_ang_impulse_norm"]=isaac_opts["max_lin_impulse_norm"]*isaac_opts["max_ang_impulse_lever"]
+        isaac_opts["terrain_hit_log_period"]=1000
                 
         # opts definition end
 
@@ -1049,6 +1061,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
             # jnts eff
             self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][env_indxs, :],
                                                     indices = env_indxs)
+            self._reset_perturbations(robot_name=robot_name, env_indxs=env_indxs)
         else:
 
             if randomize:
@@ -1072,12 +1085,30 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
             # jnts eff
             self._robots_art_views[robot_name].set_joint_efforts(efforts = self._jnts_eff_default[robot_name][:, :],
                                                     indices = None)
+            self._reset_perturbations(robot_name=robot_name, env_indxs=None)
 
         # we update the robots state 
         self._read_root_state_from_robot(env_indxs=env_indxs, 
             robot_name=robot_name)
         self._read_jnts_state_from_robot(env_indxs=env_indxs,
             robot_name=robot_name)
+
+    def _reset_perturbations(self, robot_name: str, env_indxs: torch.Tensor = None):
+        """Clear perturbation state and wrenches for selected envs."""
+        if robot_name not in self._pert_active:
+            return
+        if env_indxs is None:
+            self._pert_active[robot_name].zero_()
+            self._pert_steps_remaining[robot_name].zero_()
+            self._pert_forces_world[robot_name].zero_()
+            self._pert_torques_world[robot_name].zero_()
+            self._pert_det_counter[robot_name].zero_()
+        else:
+            self._pert_active[robot_name][env_indxs] = False
+            self._pert_steps_remaining[robot_name][env_indxs] = 0
+            self._pert_forces_world[robot_name][env_indxs, :] = 0
+            self._pert_torques_world[robot_name][env_indxs, :] = 0
+            self._pert_det_counter[robot_name][env_indxs] = 0
     
     def _process_perturbations(self):
 
@@ -1111,13 +1142,19 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
 
             # --- 3. Trigger New Perturbations ---
 
-            # Reuse scratch buffer for probability check
-            # Assumes self._pert_scratch is (num_envs, 1) pre-allocated
-            self._pert_scratch[robot_name].uniform_(0.0, 1.0) # used for triggering new perturbations
-
-            # Check probs against threshold
-            # Flatten scratch to (N,) to match 'active' mask
-            trigger_mask = (self._pert_scratch[robot_name].flatten() < self._pert_wrenches_prob) & (~active)
+            det_rate = self._env_opts.get("det_pert_rate", False)
+            if det_rate:
+                # deterministic spacing: count physics steps and trigger when threshold reached (if not already active)
+                det_counter = self._pert_det_counter[robot_name]
+                det_counter += 1
+                trigger_mask = (det_counter >= self._pert_det_steps) & (~active)
+            else:
+                # Reuse scratch buffer for probability check
+                # Assumes self._pert_scratch is (num_envs, 1) pre-allocated
+                self._pert_scratch[robot_name].uniform_(0.0, 1.0) # used for triggering new perturbations
+                # Check probs against threshold
+                # Flatten scratch to (N,) to match 'active' mask
+                trigger_mask = (self._pert_scratch[robot_name].flatten() < self._pert_wrenches_prob) & (~active)
 
             if trigger_mask.any():
 
@@ -1189,13 +1226,21 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 forces_to_apply = lindir / duration_seconds
                 torques_to_apply = angdir / duration_seconds
 
-                # Optional clipping based on robot weight
-                f_clip_scale = self._env_opts["pert_force_max_weight_scale"]
-                if f_clip_scale > 0.0:
-                    force_max = self._weights[robot_name] * f_clip_scale  # (N,1)
-                    f_norm = torch.norm(forces_to_apply, dim=1, keepdim=True).clamp_min_(1e-9)
-                    f_scale = torch.minimum(torch.ones_like(f_norm), force_max / f_norm)
-                    forces_to_apply = forces_to_apply * f_scale
+                # Optional clipping based on robot weight (min/max)
+                f_norm = torch.norm(forces_to_apply, dim=1, keepdim=True).clamp_min_(1e-9)
+                target_norm = f_norm
+
+                f_clip_scale_max = self._env_opts["pert_force_max_weight_scale"]
+                if f_clip_scale_max > 0.0:
+                    force_max = self._weights[robot_name] * f_clip_scale_max  # (N,1)
+                    target_norm = torch.minimum(target_norm, force_max)
+
+                f_clip_scale_min = self._env_opts.get("pert_force_min_weight_scale", 0.0)
+                if f_clip_scale_min > 0.0:
+                    force_min = self._weights[robot_name] * f_clip_scale_min
+                    target_norm = torch.maximum(target_norm, force_min)
+
+                forces_to_apply = forces_to_apply * (target_norm / f_norm)
 
                 t_clip_scale = self._env_opts["pert_torque_max_weight_scale"]
                 if t_clip_scale > 0.0:
@@ -1210,6 +1255,8 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 steps_rem[trigger_mask] = self._pert_durations[robot_name][trigger_mask, :].flatten()
                 forces_world[trigger_mask, :] = forces_to_apply[trigger_mask, :]
                 torques_world[trigger_mask, :] = torques_to_apply[trigger_mask, :]
+                if det_rate:
+                    det_counter[trigger_mask] = 0
 
             # --- 4. Apply Wrenches (Vectorized) ---
             # Only call API if there are active perturbations to minimize overhead
@@ -1455,6 +1502,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 self._root_q_prev[robot_name][env_indxs, :] = self._root_q[robot_name][env_indxs, :]
                 self._root_v_prev[robot_name][env_indxs, :] = self._root_v[robot_name][env_indxs, :] 
                 self._root_omega_prev[robot_name][env_indxs, :] = self._root_omega[robot_name][env_indxs, :]
+            self._track_terrain_hits(robot_name=robot_name, env_indxs=env_indxs)
 
         else:
             # updating data for all environments
@@ -1507,6 +1555,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 self._root_q_prev[robot_name][:, :] = self._root_q[robot_name][:, :]
                 self._root_v_prev[robot_name][:, :] = self._root_v[robot_name][:, :] 
                 self._root_omega_prev[robot_name][:, :]  = self._root_omega[robot_name][:, :]
+            self._track_terrain_hits(robot_name=robot_name, env_indxs=None)
         
         if base_loc:
             # rotate robot twist in base local
@@ -1718,13 +1767,15 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         self._pert_angdir = {}
         self._pert_durations = {}
         self._pert_scratch = {}
+        self._pert_det_counter = {}
 
         # convert durations in seconds to integer physics steps (min 1 step)
         self._pert_min_steps = max(1, int(math.ceil(self._env_opts["pert_wrenches_min_duration"] / self.physics_dt())))
         self._pert_max_steps = max(self._pert_min_steps, int(math.ceil(self._env_opts["pert_wrenches_max_duration"] / self.physics_dt())))
 
         pert_wrenches_step_rate=self._env_opts["pert_wrenches_rate"]/self.physics_dt() # 1 pert every n physics steps
-        self._pert_wrenches_prob=1.0/pert_wrenches_step_rate # sampling prob to be used
+        self._pert_det_steps = max(1, int(round(pert_wrenches_step_rate)))
+        self._pert_wrenches_prob=min(1.0, 1.0/pert_wrenches_step_rate) # sampling prob to be used when not deterministic
 
         self._calc_robot_distrib()
 
@@ -1825,10 +1876,72 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
             self._pert_durations[robot_name] = torch.zeros((self._num_envs, 1), dtype=torch.int32, device=self._device)
 
             self._pert_scratch[robot_name] = torch.zeros((self._num_envs, 1), dtype=self._dtype, device=self._device)
+            self._pert_det_counter[robot_name] = torch.zeros((self._num_envs,), dtype=torch.int32, device=self._device)
             
             self._masses[robot_name] = torch.sum(self._robots_art_views[robot_name].get_body_masses(clone=True), dim=1).to(dtype=self._dtype, device=self._device)
 
             self._weights[robot_name] = (self._masses[robot_name] * abs(self._env_opts["gravity"][2].item())).reshape((self._num_envs, 1))
+    
+    def _track_terrain_hits(self, robot_name: str, env_indxs: torch.Tensor = None):
+        """Track transitions into the terrain boundary margin (1 m) and count hits per env."""
+        if self._env_opts["use_flat_ground"]:
+            return
+        border = float(self._env_opts.get("terrain_border", 0.0))
+        threshold = max(0.0, border - self._terrain_hit_margin)
+        state = self._terrain_hit_active[robot_name]
+        counts = self._terrain_hit_counts[robot_name]
+        if env_indxs is None:
+            pos_xy = self._root_p[robot_name][:, 0:2]
+            hitting = torch.any(torch.abs(pos_xy) > threshold, dim=1)
+            new_hits = (~state) & hitting
+            if new_hits.any():
+                counts[new_hits] += 1
+            state.copy_(hitting)
+        else:
+            pos_xy = self._root_p[robot_name][env_indxs, 0:2]
+            hitting = torch.any(torch.abs(pos_xy) > threshold, dim=1)
+            prev_state = state[env_indxs]
+            new_hits = (~prev_state) & hitting
+            if new_hits.any():
+                counts[env_indxs[new_hits]] += 1
+            state[env_indxs] = hitting
+
+    def _maybe_log_terrain_hits(self):
+        """Log boundary hits at low frequency only when counters change."""
+        if self._env_opts["use_flat_ground"]:
+            return
+        period = int(self._env_opts.get("terrain_hit_log_period", self._terrain_hit_log_period))
+        if period <= 0 or (self.step_counter % period != 0):
+            return
+        for robot_name in self._robot_names:
+            active = self._terrain_hit_active.get(robot_name, None)
+            if active is None:
+                continue
+            active_now = int(active.sum().item())
+            if active_now == 0:
+                continue
+            counts = self._terrain_hit_counts[robot_name]
+            last = self._terrain_hit_counts_last_logged.get(robot_name, None)
+            if last is not None and torch.equal(counts, last):
+                continue
+            total_hits = int(counts.sum().item())
+            msg = f"{active_now} {robot_name} robots within {self._terrain_hit_margin}m of terrain border. Total hits: {total_hits}."
+            Journal.log(self.__class__.__name__,
+                "_terrain_hits",
+                msg,
+                LogType.WARN,
+                throw_when_excep = True)
+            self._terrain_hit_counts_last_logged[robot_name] = counts.clone()
+
+    def _post_world_step(self) -> bool:
+        res = super()._post_world_step()
+        self._maybe_log_terrain_hits()
+        return res
+
+    def _post_world_step_db(self) -> bool:
+        res = super()._post_world_step_db()
+        self._maybe_log_terrain_hits()
+        return res
             
     def current_tstep(self):
         self._world.current_time_step_index
