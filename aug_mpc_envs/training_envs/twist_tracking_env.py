@@ -44,7 +44,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
             True # if True, the task ref is constant over the episode (ie
             # episodes are truncated when task is changed) 
             )
-        self._add_env_opt(env_opts, "add_angvel_ref_rand", default=True) # randomize also agular vel ref (just z component)
+        self._add_env_opt(env_opts, "add_angvel_ref_rand", default=False) # randomize also agular vel ref (just z component)
 
         self._add_env_opt(env_opts, "episode_timeout_lb", 
             1024)
@@ -143,7 +143,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
 
         # energy penalties
         self._add_env_opt(env_opts, "CoT_offset", default=0.3)
-        self._add_env_opt(env_opts, "CoT_scale", default=0.6)
+        self._add_env_opt(env_opts, "CoT_scale", default=0.9)
         self._add_env_opt(env_opts, "power_offset", default=0.1)
         self._add_env_opt(env_opts, "power_scale", default=8e-4)
 
