@@ -494,8 +494,22 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
 
         self._stage = get_context().get_stage()
 
-        distantLight = UsdLux.DistantLight.Define(self._stage, Sdf.Path("/World/DistantLight"))
-        distantLight.CreateIntensityAttr(500)
+        # strong, uniform lighting: bright sun + dome fill to cover the whole terrain
+        prim_utils.define_prim("/World/Lighting", "Xform")
+        sun_path = "/World/Lighting/SunLight"
+        dome_path = "/World/Lighting/AmbientDome"
+
+        distantLight = UsdLux.DistantLight.Define(self._stage, Sdf.Path(sun_path))
+        distantLight.CreateIntensityAttr(600.0)
+        distantLight.CreateAngleAttr(0.5)  # soften shadows a bit
+        distantLight.CreateColorAttr(Gf.Vec3f(1.0, 1.0, 1.0))
+        # Shadow attr naming differs across versions; set the underlying USD attribute directly.
+        distantLight.GetPrim().CreateAttribute("shadow:enable", Sdf.ValueTypeNames.Bool).Set(True)
+
+        domeLight = UsdLux.DomeLight.Define(self._stage, Sdf.Path(dome_path))
+        domeLight.CreateIntensityAttr(400.0)
+        domeLight.CreateExposureAttr(1.0)
+        domeLight.CreateColorAttr(Gf.Vec3f(1.0, 1.0, 1.0))
 
         self._configure_scene()
 
@@ -625,14 +639,14 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 self._ground_plane=self.terrain_generator.create_stepup_prim_terrain(
                     terrain_size=self._env_opts["ground_size"], 
                     stairs_ratio=0.8,
-                    platform_size=4.0,
+                    platform_size=6.0,
                     step_height_lb=self._env_opts["step_height_lb"],
                     step_height_ub=self._env_opts["step_height_ub"],
                     position=np.array([0.0, 0.0, 0.0]), 
                     static_friction=self._env_opts["static_friction"], 
                     dynamic_friction=self._env_opts["dynamic_friction"], 
                     restitution=self._env_opts["restitution"],
-                    n_steps=1
+                    n_steps=5
                     )
                 # apply the same visual material as the default ground plane
                 mat_path = self._ensure_groundplane_material()
