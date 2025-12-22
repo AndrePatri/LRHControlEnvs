@@ -309,10 +309,10 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["pert_planar_only"]=True # if True, linear pushes only in xy plane and no torques
 
         isaac_opts["pert_wrenches_rate"]=4.0 # on average 1 pert every pert_wrenches_rate seconds
-        isaac_opts["pert_wrenches_min_duration"]=0.8
-        isaac_opts["pert_wrenches_max_duration"]=3.0 # [s]
-        isaac_opts["pert_force_max_weight_scale"]=1.0 # clip force norm to scale*weight
-        isaac_opts["pert_force_min_weight_scale"]=0.15 # optional min force norm as scale*weight
+        isaac_opts["pert_wrenches_min_duration"]=0.6
+        isaac_opts["pert_wrenches_max_duration"]=3.5 # [s]
+        isaac_opts["pert_force_max_weight_scale"]=1.2 # clip force norm to scale*weight
+        isaac_opts["pert_force_min_weight_scale"]=0.2 # optional min force norm as scale*weight
         isaac_opts["pert_torque_max_weight_scale"]=1.0 # clip torque norm to scale*weight*max_ang_impulse_lever
         
         isaac_opts["pert_target_delta_v"]=2.0 # [m/s] desired max impulse = m*delta_v
