@@ -1373,7 +1373,12 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 robot_base_prim_path) # to
         
         robot_base_prim = prim_utils.get_prim_at_path(robot_base_prim_path)
-        print("Imported robot URDF: \n", prim_utils.get_prim_children(robot_base_prim))
+        children = prim_utils.get_prim_children(robot_base_prim)
+        # log imported prim children to the journal (print was getting truncated in logs)
+        Journal.log(self.__class__.__name__,
+            "_import_urdf",
+            f"Imported robot URDF children: {children}",
+            LogType.STAT)
 
         # improve collision tesselation for cylinders (e.g., wheels) if requested
         # self._apply_collision_refinement(robot_base_prim_path,
