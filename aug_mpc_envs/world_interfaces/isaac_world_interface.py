@@ -1761,7 +1761,8 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 sensor_radii=sensor_radii, 
                 device=self._device, 
                 dtype=self._dtype,
-                enable_debug=self._debug)
+                enable_debug=self._debug,
+                filter_paths=self._ground_plane_prim_paths)
             self.omni_contact_sensors[robot_name].create_contact_sensors(
                 self._world,
                 envs_namespace=self._env_opts["envs_ns"])            
@@ -1796,6 +1797,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         for i in range(0, len(self._robot_names)):
 
             robot_name = self._robot_names[i]
+
             pose = self._robots_art_views[robot_name].get_world_poses( 
                 clone = True) # tuple: (pos, quat)
 

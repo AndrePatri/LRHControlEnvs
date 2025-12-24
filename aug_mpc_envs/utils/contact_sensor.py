@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import inspect
 
 from typing import List, Dict
 
@@ -121,15 +122,23 @@ class OmniContactSensors:
             if self.contact_geom_prim_views[sensor_idx] is None:        
                 prim_view_regex_path=prim_paths_expr=envs_namespace + "/env_.*/" + robot_name + \
                     "/" + contact_link_names[sensor_idx]                     
-                self.contact_geom_prim_views[sensor_idx] = RigidPrimView(prim_paths_expr=prim_view_regex_path,
-                                                    name=self.name+"ContactRigidPrimView"+contact_link_names[sensor_idx], 
-                                                    contact_filter_prim_paths_expr= self._filter_paths,
-                                                    prepare_contact_sensors=True, 
-                                                    track_contact_forces = True,
-                                                    disable_stablization = False, 
-                                                    reset_xform_properties=False,
-                                                    max_contact_count = 10*self.n_sensors*self.n_envs
-                                                    )
+                # Older Isaac versions (e.g., 4.2) do not expose enable_rigid_body_state.
+                # Build kwargs dynamically to stay compatible across versions.
+                rv_kwargs = dict(
+                    prim_paths_expr=prim_view_regex_path,
+                    name=self.name+"ContactRigidPrimView"+contact_link_names[sensor_idx],
+                    contact_filter_prim_paths_expr=self._filter_paths,
+                    prepare_contact_sensors=True,
+                    track_contact_forces=True,
+                    disable_stablization=False,
+                    reset_xform_properties=False,
+                    max_contact_count=10*self.n_sensors*self.n_envs,
+                )
+                if "enable_rigid_body_state" in inspect.signature(RigidPrimView.__init__).parameters:
+                    # Disable rigid-body state readout to avoid non-root articulation warnings when supported.
+                    rv_kwargs["enable_rigid_body_state"] = False
+
+                self.contact_geom_prim_views[sensor_idx] = RigidPrimView(**rv_kwargs)
                 world.scene.add(self.contact_geom_prim_views[sensor_idx])   
         
         # for env_idx in range(0, self.n_envs):
