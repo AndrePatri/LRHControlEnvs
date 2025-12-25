@@ -1750,12 +1750,13 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
     def _zero_angular_velocities(self, robot_name: str, env_indxs: torch.Tensor = None):
         """Zero angular velocities and joint velocities for the given robot/envs."""
         if env_indxs is None:
-            zeros_omega = torch.zeros_like(self._root_omega_default[robot_name])
-            self._robots_art_views[robot_name].set_angular_velocities(velocities=zeros_omega, indices=None)
-            # keep joint v zero as well
+            twist = self._robots_art_views[robot_name].get_velocities(clone=True)
+            twist[:, 3:] = 0.0  # zero angular part, preserve current linear
+            self._robots_art_views[robot_name].set_velocities(velocities=twist, indices=None)
         else:
-            zeros_omega = torch.zeros_like(self._root_omega_default[robot_name][env_indxs, :])
-            self._robots_art_views[robot_name].set_angular_velocities(velocities=zeros_omega, indices=env_indxs)
+            twist = self._robots_art_views[robot_name].get_velocities(clone=True, indices=env_indxs)
+            twist[:, 3:] = 0.0
+            self._robots_art_views[robot_name].set_velocities(velocities=twist, indices=env_indxs)
         
     def _get_solver_info(self):
         for i in range(0, len(self._robot_names)):
