@@ -1318,6 +1318,84 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                                     robot_idxs = env_indxs, 
                                     gpu=self._use_gpu)
         
+    def _post_warmup_validation(self, robot_name: str):
+        """Validate warmup state: base height, tilt, and (if available) contacts."""
+        envs = torch.arange(self._num_envs, device=self._device)
+
+        # terrain height query
+        def _terrain_height(xy: torch.Tensor):
+            if self._env_opts.get("use_flat_ground", True) or self.terrain_generator is None:
+                return torch.zeros((xy.shape[0],), device=xy.device, dtype=self._dtype)
+            heights = []
+            half_extent = self._env_opts.get("spawn_height_check_half_extent", 0.3)
+            for k in range(xy.shape[0]):
+                h = self.terrain_generator.get_max_height_in_rect(
+                    float(xy[k, 0]), float(xy[k, 1]), half_extent=half_extent)
+                heights.append(h)
+            return torch.as_tensor(heights, device=xy.device, dtype=self._dtype)
+
+        # base height check
+        base_xy = self._root_p[robot_name][:, 0:2]
+        base_z = self._root_p[robot_name][:, 2]
+        ground_z = _terrain_height(base_xy)
+        margin = float(self._env_opts.get("spawn_height_cushion", 0.03))
+        bad_z = base_z < (ground_z + margin)
+
+        # tilt check (angle between base up and world up)
+        q = self._root_q[robot_name]
+        # quaternion to up vector
+        w, x, y, z = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
+        up = torch.stack([
+            2 * (x * z - w * y),
+            2 * (y * z + w * x),
+            1 - 2 * (x * x + y * y)
+        ], dim=1)
+        cos_tilt = up[:, 2].clamp(-1.0, 1.0)
+        tilt_thresh_deg = 35.0
+        bad_tilt = cos_tilt < math.cos(math.radians(tilt_thresh_deg))
+
+        # contact check (only if sensors exist)
+        # bad_contact = torch.zeros_like(base_z, dtype=torch.bool)
+        # if robot_name in self.omni_contact_sensors and self.omni_contact_sensors[robot_name] is not None:
+        #     counts = torch.zeros((self._num_envs,), dtype=torch.int32, device=self._device)
+        #     for link in self._contact_names.get(robot_name, []):
+        #         f_contact = self._get_contact_f(robot_name=robot_name,
+        #                                         contact_link=link,
+        #                                         env_indxs=None)
+        #         if f_contact is None:
+        #             continue
+        #         # use normal component (assume z-up); ignore tangential forces
+        #         active = f_contact[:, 2] > 1e-3
+        #         counts += active.int()
+        #     bad_contact = counts < 3
+
+        failing = torch.nonzero(bad_z | bad_tilt, as_tuple=False).flatten()
+        if failing.numel() > 0:
+            # remediate: lift to terrain+margin, upright (preserve yaw), zero root velocities
+            yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+            safe_z = (ground_z + margin)[failing]
+            self._root_p[robot_name][failing, 2] = safe_z
+            cos_h = torch.cos(yaw[failing] / 2)
+            sin_h = torch.sin(yaw[failing] / 2)
+            upright = torch.zeros((failing.shape[0], 4), device=self._device, dtype=self._dtype)
+            upright[:, 0] = cos_h
+            upright[:, 3] = sin_h
+            self._root_q[robot_name][failing, :] = upright
+            self._root_v[robot_name][failing, :] = 0.0
+            self._root_omega[robot_name][failing, :] = 0.0
+
+            msgs = []
+            if bad_z.any():
+                msgs.append(f"low_z envs {torch.nonzero(bad_z, as_tuple=False).flatten().tolist()}")
+            if bad_tilt.any():
+                msgs.append(f"tilt envs {torch.nonzero(bad_tilt, as_tuple=False).flatten().tolist()}")
+            Journal.log(self.__class__.__name__,
+                        "_post_warmup_validation",
+                        f"Warmup validation adjusted {robot_name}: " + "; ".join(msgs),
+                        LogType.WARN,
+                        throw_when_excep=False)
+        return failing
+        
     def _import_urdf(self, 
         robot_name: str,
         fix_base = False, 
@@ -1668,6 +1746,16 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
     def _set_root_to_defconfig(self, robot_name: str):
         self._robots_art_views[robot_name].set_default_state(positions=self._root_p_default[robot_name], 
             orientations=self._root_q_default[robot_name])
+        
+    def _zero_angular_velocities(self, robot_name: str, env_indxs: torch.Tensor = None):
+        """Zero angular velocities and joint velocities for the given robot/envs."""
+        if env_indxs is None:
+            zeros_omega = torch.zeros_like(self._root_omega_default[robot_name])
+            self._robots_art_views[robot_name].set_angular_velocities(velocities=zeros_omega, indices=None)
+            # keep joint v zero as well
+        else:
+            zeros_omega = torch.zeros_like(self._root_omega_default[robot_name][env_indxs, :])
+            self._robots_art_views[robot_name].set_angular_velocities(velocities=zeros_omega, indices=env_indxs)
         
     def _get_solver_info(self):
         for i in range(0, len(self._robot_names)):

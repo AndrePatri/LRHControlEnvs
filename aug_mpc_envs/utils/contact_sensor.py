@@ -210,8 +210,7 @@ class OmniContactSensors:
         # print(contact_force_data[5])
         
         if env_indxs is None:
-            return self.contact_geom_prim_views[index].get_net_contact_forces(clone = clone, 
-                                            dt = dt).view(self.n_envs, 3)
+            return net_contact_f.view(self.n_envs, 3)
         else:
             if self._enable_debug:
                 if env_indxs is not None:
