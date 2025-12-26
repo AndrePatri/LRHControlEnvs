@@ -282,14 +282,14 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["collision_refinement_level"]=3  # increase cylinder tesselation for smoother wheel contacts
             
         # rendering helpers
-        isaac_opts["render_to_file"]=True
+        isaac_opts["render_to_file"]=False
         isaac_opts["use_follow_camera"]=True # if True, follow robot during rendering in human mode
         isaac_opts["render_follow_env_idx"]=0
         isaac_opts["render_follow_robot_idx"]=0
         isaac_opts["render_follow_offset"]=[4.2, 4.2, 1.5]  
         isaac_opts["rendering_dt"]=15*isaac_opts["physics_dt"]
         isaac_opts["camera_prim_path"]="/OmniverseKit_Persp"
-        isaac_opts["render_resolution"]=[1024, 576] # [1280, 720]
+        isaac_opts["render_resolution"]=[1280, 720] # [1024, 576]
 
         isaac_opts["render_panoramic_cam"]=True
         isaac_opts["render_panoramic_cam_height"]=5.0
