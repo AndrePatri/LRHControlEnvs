@@ -1751,10 +1751,12 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         """Zero angular velocities and joint velocities for the given robot/envs."""
         if env_indxs is None:
             twist = self._robots_art_views[robot_name].get_velocities(clone=True)
+            # twist[:, 0:2] = 0.0
             twist[:, 3:] = 0.0  # zero angular part, preserve current linear
             self._robots_art_views[robot_name].set_velocities(velocities=twist, indices=None)
         else:
             twist = self._robots_art_views[robot_name].get_velocities(clone=True, indices=env_indxs)
+            # twist[:, 0:2] = 0.0
             twist[:, 3:] = 0.0
             self._robots_art_views[robot_name].set_velocities(velocities=twist, indices=env_indxs)
         
