@@ -289,7 +289,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["render_follow_offset"]=[4.2, 4.2, 1.5]  
         isaac_opts["rendering_dt"]=15*isaac_opts["physics_dt"]
         isaac_opts["camera_prim_path"]="/OmniverseKit_Persp"
-        isaac_opts["render_resolution"]=[1024×576] # [1280, 720]
+        isaac_opts["render_resolution"]=[1024, 576] # [1280, 720]
 
         isaac_opts["render_panoramic_cam"]=True
         isaac_opts["render_panoramic_cam_height"]=5.0
