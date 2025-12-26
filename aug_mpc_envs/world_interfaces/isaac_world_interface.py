@@ -231,20 +231,13 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["physics_prim_path"]="/physicsScene"
         isaac_opts["use_gpu"]=True
         isaac_opts["use_gpu_pipeline"]=True
-        isaac_opts["render_to_file"]=False
         isaac_opts["device"]="cuda"
         isaac_opts["is_fixed_base"]=False
         isaac_opts["merge_fixed_jnts"]=True
         isaac_opts["self_collide"]=True
         isaac_opts["sim_device"]="cuda" if isaac_opts["use_gpu"] else "cpu"
         isaac_opts["physics_dt"]=1e-3
-        isaac_opts["rendering_dt"]=15*isaac_opts["physics_dt"]
-        isaac_opts["static_friction"]=0.5
-        isaac_opts["dynamic_friction"]=0.5
-        isaac_opts["restitution"]=0.1
-        isaac_opts["substeps"]=1 # number of physics steps to be taken for for each rendering step
         isaac_opts["gravity"] = np.array([0.0, 0.0, -9.81])
-        isaac_opts["enable_scene_query_support"]=False
         isaac_opts["use_fabric"]=True# Enable/disable reading of physics buffers directly. Default is True.
         isaac_opts["replicate_physics"]=True
         # isaac_opts["worker_thread_count"]=4
@@ -288,7 +281,26 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["height_vis_update_period"]=1
         isaac_opts["collision_refinement_level"]=3  # increase cylinder tesselation for smoother wheel contacts
             
+        # rendering helpers
+        isaac_opts["render_to_file"]=True
+        isaac_opts["use_follow_camera"]=True # if True, follow robot during rendering in human mode
+        isaac_opts["render_follow_env_idx"]=0
+        isaac_opts["render_follow_robot_idx"]=0
+        isaac_opts["render_follow_offset"]=[4.2, 4.2, 1.5]  
+        isaac_opts["rendering_dt"]=15*isaac_opts["physics_dt"]
+        isaac_opts["camera_prim_path"]="/OmniverseKit_Persp"
+        isaac_opts["render_resolution"]=[1024×576] # [1280, 720]
+
+        isaac_opts["render_panoramic_cam"]=True
+        isaac_opts["render_panoramic_cam_height"]=5.0
+        isaac_opts["render_panoramic_cam_target_xy"]=[6.0, 6.0]
+        isaac_opts["render_panoramic_cam_target_z"]=3.0
+
+        # ground opts
         isaac_opts["use_flat_ground"]=True
+        isaac_opts["static_friction"]=0.5
+        isaac_opts["dynamic_friction"]=0.5
+        isaac_opts["restitution"]=0.1
         isaac_opts["ground_type"]="random"
         isaac_opts["ground_size"]=300
         isaac_opts["terrain_border"]=isaac_opts["ground_size"]/2
@@ -682,7 +694,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                     x = row_offset - row * spacing
                     y = col * spacing - col_offset
 
-                    half_extent = self._env_opts.get("spawn_height_check_half_extent", 0.3)
+                    half_extent = self._env_opts["spawn_height_check_half_extent"]
                     if up_axis == UsdGeom.Tokens.z:
                         height = self.terrain_generator.get_max_height_in_rect(x, y, half_extent=half_extent)
                     else:
@@ -802,22 +814,43 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         # set default camera viewport position and target
         camera_position=[4.2, 4.2, 1.5]
         camera_target=[0, 0, 0]
+        # use a single camera prim (configurable) for both viewport and render products
+        camera_prim = self._env_opts["camera_prim_path"]
         self._set_initial_camera_params(camera_position=camera_position,
-                camera_target=camera_target)
+                camera_target=camera_target,
+                camera_prim_path=camera_prim)
+
         if self._env_opts["render_to_file"]:
-            self._render_camera = rep.create.camera(focal_length=12, 
-                                name='rendering_camera',
-                                clipping_range = (1, 40), 
-                                position = camera_position,
-                                look_at = camera_target)
-            self._render_product  = rep.create.render_product(self._render_camera, 
-                        (1280, 720), name='rendering_camera')
-            self._render_writer = rep.WriterRegistry.get("BasicWriter")
+            # base output dir
             from datetime import datetime
             timestamp = datetime.now().strftime("h%H_m%M_s%S_%d_%m_%Y")
-            self._render_writer.initialize(output_dir=f"/tmp/IsaacRenderings/{timestamp}", 
+            self._render_output_dir = f"/tmp/IsaacRenderings/{timestamp}"
+            res = tuple(int(x) for x in self._env_opts["render_resolution"])
+
+            # create render product from chosen camera prim
+            self._render_product  = rep.create.render_product(camera_prim, 
+                        res, name='rendering_camera')
+            self._render_writer = rep.WriterRegistry.get("BasicWriter")
+            self._render_writer.initialize(output_dir=self._render_output_dir, 
                         rgb=True)
             self._render_writer.attach([self._render_product])
+            # optional top-down capture
+            if self._env_opts["render_panoramic_cam"]:
+                td_height = float(self._env_opts["render_panoramic_cam_height"])
+                td_dir = self._render_output_dir + "/panoramic_cam"
+                td_offset = self._env_opts["render_panoramic_cam_target_xy"]
+                td_target_z = float(self._env_opts["render_panoramic_cam_target_z"])
+                pos = [-10.0, -10.0, td_height]
+                self._panoramic_cam_camera = rep.create.camera(focal_length=12,
+                                name='rendering_camera_panoramic_cam',
+                                clipping_range = (1, 200),
+                                position = pos,
+                                look_at = [td_offset[0], td_offset[1], td_target_z])
+                self._panoramic_cam_render_product = rep.create.render_product(self._panoramic_cam_camera,
+                                res, name='rendering_camera_panoramic_cam')
+                self._panoramic_cam_writer = rep.WriterRegistry.get("BasicWriter")
+                self._panoramic_cam_writer.initialize(output_dir=td_dir, rgb=True)
+                self._panoramic_cam_writer.attach([self._panoramic_cam_render_product])
 
         self.apply_collision_filters(self._physics_context.prim_path, 
                             "/World/collisions")
@@ -941,9 +974,24 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
     def _render_sim(self, mode="human"):
 
         if mode == "human":
+            # follow requested robot/env
+            if self._env_opts["use_follow_camera"]:
+                ridx = int(self._env_opts["render_follow_robot_idx"])
+                eidx = int(self._env_opts["render_follow_env_idx"])
+                if ridx < len(self._robot_names) and eidx < self._num_envs:
+                    rname = self._robot_names[ridx]
+                    pos = self._root_p.get(rname, None)
+                    if pos is not None and pos.shape[0] > eidx:
+                        base = pos[eidx].detach().cpu()
+                        offset = torch.as_tensor(self._env_opts["render_follow_offset"],
+                                                 device=base.device, dtype=base.dtype)
+                        eye = (base + offset).tolist()
+                        target = base.tolist()
+                        set_camera_view(eye=eye, target=target, camera_prim_path=self._env_opts["camera_prim_path"])
+                       
             self._world.render()
             # optional height grid visualization
-            if self._env_opts.get("enable_height_vis", False):
+            if self._env_opts["enable_height_vis"]:
                 for robot_name, vis in self._height_vis.items():
                     # use latest stored states
                     if robot_name not in self._height_imgs or robot_name not in self._height_sensors:
@@ -956,7 +1004,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                     if pos_src is None or quat_src is None:
                         continue
                     step = self._height_vis_step.get(robot_name, 0)
-                    period = max(1, int(self._env_opts.get("height_vis_update_period", 1)))
+                    period = max(1, int(self._env_opts["height_vis_update_period"]))
                     if step % period == 0:
                         try:
                             vis.update(
@@ -986,13 +1034,17 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         else:    
             return None
 
-    def _create_viewport_render_product(self, resolution=(1280, 720)):
+    def _create_viewport_render_product(self, resolution=None):
         """Create a render product of the viewport for rendering."""
 
         try:
 
             # create render product
-            self._render_product = rep.create.render_product("/OmniverseKit_Persp", resolution)
+            camera_prim = self._env_opts["camera_prim_path"]
+            res = resolution
+            if res is None:
+                res = tuple(int(x) for x in self._env_opts["render_resolution"])
+            self._render_product = rep.create.render_product(camera_prim, res)
             # create rgb annotator -- used to read data from the render product
             self._rgb_annotator = rep.AnnotatorRegistry.get_annotator("rgb", device="cpu")
             self._rgb_annotator.attach([self._render_product])
@@ -1156,7 +1208,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
 
             # --- 3. Trigger New Perturbations ---
 
-            det_rate = self._env_opts.get("det_pert_rate", False)
+            det_rate = self._env_opts["det_pert_rate"]
             if det_rate:
                 # deterministic spacing: count physics steps and trigger when threshold reached (if not already active)
                 det_counter = self._pert_det_counter[robot_name]
@@ -1249,7 +1301,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                     force_max = self._weights[robot_name] * f_clip_scale_max  # (N,1)
                     target_norm = torch.minimum(target_norm, force_max)
 
-                f_clip_scale_min = self._env_opts.get("pert_force_min_weight_scale", 0.0)
+                f_clip_scale_min = self._env_opts["pert_force_min_weight_scale"]
                 if f_clip_scale_min > 0.0:
                     force_min = self._weights[robot_name] * f_clip_scale_min
                     target_norm = torch.maximum(target_norm, force_min)
@@ -1324,10 +1376,10 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
 
         # terrain height query
         def _terrain_height(xy: torch.Tensor):
-            if self._env_opts.get("use_flat_ground", True) or self.terrain_generator is None:
+            if self._env_opts["use_flat_ground"] or self.terrain_generator is None:
                 return torch.zeros((xy.shape[0],), device=xy.device, dtype=self._dtype)
             heights = []
-            half_extent = self._env_opts.get("spawn_height_check_half_extent", 0.3)
+            half_extent = self._env_opts["spawn_height_check_half_extent"]
             for k in range(xy.shape[0]):
                 h = self.terrain_generator.get_max_height_in_rect(
                     float(xy[k, 0]), float(xy[k, 1]), half_extent=half_extent)
@@ -1338,7 +1390,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         base_xy = self._root_p[robot_name][:, 0:2]
         base_z = self._root_p[robot_name][:, 2]
         ground_z = _terrain_height(base_xy)
-        margin = float(self._env_opts.get("spawn_height_cushion", 0.03))
+        margin = float(self._env_opts["spawn_height_cushion"])
         bad_z = base_z < (ground_z + margin)
 
         # tilt check (angle between base up and world up)
@@ -1835,10 +1887,11 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
     
     def _set_initial_camera_params(self, 
                                 camera_position=[10, 10, 3], 
-                                camera_target=[0, 0, 0]):
+                                camera_target=[0, 0, 0],
+                                camera_prim_path="/OmniverseKit_Persp"):
         set_camera_view(eye=camera_position, 
                         target=camera_target, 
-                        camera_prim_path="/OmniverseKit_Persp")
+                        camera_prim_path=camera_prim_path)
 
     def _init_contact_sensors(self, robot_name: str):
         self.omni_contact_sensors[robot_name]=None
@@ -1998,7 +2051,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         """Track transitions into the terrain boundary margin (1 m) and count hits per env."""
         if self._env_opts["use_flat_ground"]:
             return
-        border = float(self._env_opts.get("terrain_border", 0.0))
+        border = float(self._env_opts["terrain_border"])
         threshold = max(0.0, border - self._terrain_hit_margin)
         state = self._terrain_hit_active[robot_name]
         counts = self._terrain_hit_counts[robot_name]
@@ -2022,7 +2075,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         """Log boundary hits at low frequency only when counters change."""
         if self._env_opts["use_flat_ground"]:
             return
-        period = int(self._env_opts.get("terrain_hit_log_period", self._terrain_hit_log_period))
+        period = int(self._env_opts["terrain_hit_log_period"])
         if period <= 0 or (self.step_counter % period != 0):
             return
         for robot_name in self._robot_names:
