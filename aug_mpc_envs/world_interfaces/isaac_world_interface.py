@@ -271,7 +271,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         # isaac_opts["gpu_max_num_partitions"] = 8
 
         isaac_opts["env_spacing"]=8.0
-        isaac_opts["spawning_height"]=0.8
+        isaac_opts["spawning_height"]=1.0
         isaac_opts["spawning_radius"]=1.0
         isaac_opts["spawn_height_check_half_extent"]=0.2
         isaac_opts["spawn_height_cushion"]=0.03
@@ -283,7 +283,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
             
         # rendering helpers
         isaac_opts["render_to_file"]=False
-        isaac_opts["use_follow_camera"]=True # if True, follow robot during rendering in human mode
+        isaac_opts["use_follow_camera"]=False # if True, follow robot during rendering in human mode
         isaac_opts["render_follow_env_idx"]=0
         isaac_opts["render_follow_robot_idx"]=0
         isaac_opts["render_follow_offset"]=[4.2, 4.2, 1.5]  
@@ -305,8 +305,8 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["ground_size"]=300
         isaac_opts["terrain_border"]=isaac_opts["ground_size"]/2
         isaac_opts["dh_ground"]=0.03
-        isaac_opts["step_height_lb"]=0.05
-        isaac_opts["step_height_ub"]=0.15
+        isaac_opts["step_height_lb"]=0.08
+        isaac_opts["step_height_ub"]=0.13
         isaac_opts["contact_prims"] = []
         isaac_opts["sensor_radii"] = 0.1
         isaac_opts["contact_offsets"] = {}
@@ -650,15 +650,15 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 self.terrain_generator = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
                 self._ground_plane=self.terrain_generator.create_stepup_prim_terrain(
                     terrain_size=self._env_opts["ground_size"], 
-                    stairs_ratio=0.8,
-                    platform_size=6.0,
+                    stairs_ratio=0.95,
+                    platform_size=10.0,
                     step_height_lb=self._env_opts["step_height_lb"],
                     step_height_ub=self._env_opts["step_height_ub"],
                     position=np.array([0.0, 0.0, 0.0]), 
                     static_friction=self._env_opts["static_friction"], 
                     dynamic_friction=self._env_opts["dynamic_friction"], 
                     restitution=self._env_opts["restitution"],
-                    n_steps=5
+                    n_steps=4
                     )
                 # apply the same visual material as the default ground plane
                 mat_path = self._ensure_groundplane_material()
@@ -1806,11 +1806,28 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
             # twist[:, 0:2] = 0.0
             twist[:, 3:] = 0.0  # zero angular part, preserve current linear
             self._robots_art_views[robot_name].set_velocities(velocities=twist, indices=None)
+
+            # jnt_vel=self._robots_art_views[robot_name].get_joint_velocities(
+            #         indices = None, clone=True)
+            # jnt_vel[:, :] = 0.0
+
+            # self._robots_art_views[robot_name].set_joint_velocities(
+            #     velocities = jnt_vel,
+            #         indices = None)
+            
         else:
             twist = self._robots_art_views[robot_name].get_velocities(clone=True, indices=env_indxs)
             # twist[:, 0:2] = 0.0
             twist[:, 3:] = 0.0
             self._robots_art_views[robot_name].set_velocities(velocities=twist, indices=env_indxs)
+        
+            # jnt_vel=self._robots_art_views[robot_name].get_joint_velocities(
+            #         indices = env_indxs, clone=True)
+            # jnt_vel[:, :] = 0.0
+
+            # self._robots_art_views[robot_name].set_joint_velocities(
+            #     velocities = jnt_vel,
+            #         indices = env_indxs)
         
     def _get_solver_info(self):
         for i in range(0, len(self._robot_names)):
