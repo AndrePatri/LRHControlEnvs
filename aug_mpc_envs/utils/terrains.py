@@ -117,7 +117,8 @@ class RlTerrains():
                     position = np.array([0.0, 0.0, 0.0]),
                     dynamic_friction=0.5,
                     static_friction=0.5,
-                    restitution=0.1):
+                    restitution=0.1,
+                    random_n_steps: bool = True):
         """
         Create a random tiled step-up terrain using only primitive colliders (boxes + base slab).
         Each tile of size ``platform_size`` has probability ``stairs_ratio`` of being raised
@@ -215,7 +216,10 @@ class RlTerrains():
                     tile_mat.CreateRestitutionAttr(restitution)
                 else:
                     shrink_factor = math.sqrt(area_factor)
-                    steps_for_tile = np.random.randint(1, n_steps + 1)
+                    if random_n_steps:
+                        steps_for_tile = np.random.randint(1, n_steps + 1)
+                    else:
+                        steps_for_tile = n_steps
                     accumulated_height = 0.0
                     accumulated_units = 0
                     for level in range(steps_for_tile):

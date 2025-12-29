@@ -302,10 +302,10 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["dynamic_friction"]=0.5
         isaac_opts["restitution"]=0.1
         isaac_opts["ground_type"]="random"
-        isaac_opts["ground_size"]=300
+        isaac_opts["ground_size"]=800
         isaac_opts["terrain_border"]=isaac_opts["ground_size"]/2
         isaac_opts["dh_ground"]=0.03
-        isaac_opts["step_height_lb"]=0.1
+        isaac_opts["step_height_lb"]=0.08
         isaac_opts["step_height_ub"]=0.13
         isaac_opts["contact_prims"] = []
         isaac_opts["sensor_radii"] = 0.1
@@ -650,16 +650,17 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 self.terrain_generator = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
                 self._ground_plane=self.terrain_generator.create_stepup_prim_terrain(
                     terrain_size=self._env_opts["ground_size"], 
-                    stairs_ratio=0.6,
-                    platform_size=10.0,
+                    stairs_ratio=0.99,
+                    platform_size=50.0,
                     step_height_lb=self._env_opts["step_height_lb"],
                     step_height_ub=self._env_opts["step_height_ub"],
                     position=np.array([0.0, 0.0, 0.0]), 
                     static_friction=self._env_opts["static_friction"], 
                     dynamic_friction=self._env_opts["dynamic_friction"], 
                     restitution=self._env_opts["restitution"],
-                    n_steps=3,
-                    area_factor=0.3
+                    n_steps=8,
+                    area_factor=0.7,
+                    random_n_steps=False
                     )
                 # apply the same visual material as the default ground plane
                 mat_path = self._ensure_groundplane_material()
