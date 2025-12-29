@@ -286,7 +286,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["use_follow_camera"]=False # if True, follow robot during rendering in human mode
         isaac_opts["render_follow_env_idx"]=0
         isaac_opts["render_follow_robot_idx"]=0
-        isaac_opts["render_follow_offset"]=[4.2, 4.2, 1.5]  
+        isaac_opts["render_follow_offset"]=[2.0, 2.0, 0.35]  
         isaac_opts["rendering_dt"]=15*isaac_opts["physics_dt"]
         isaac_opts["camera_prim_path"]="/OmniverseKit_Persp"
         isaac_opts["render_resolution"]=[1280, 720] # [1024, 576]
@@ -305,7 +305,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["ground_size"]=300
         isaac_opts["terrain_border"]=isaac_opts["ground_size"]/2
         isaac_opts["dh_ground"]=0.03
-        isaac_opts["step_height_lb"]=0.08
+        isaac_opts["step_height_lb"]=0.1
         isaac_opts["step_height_ub"]=0.13
         isaac_opts["contact_prims"] = []
         isaac_opts["sensor_radii"] = 0.1
@@ -650,7 +650,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 self.terrain_generator = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
                 self._ground_plane=self.terrain_generator.create_stepup_prim_terrain(
                     terrain_size=self._env_opts["ground_size"], 
-                    stairs_ratio=0.95,
+                    stairs_ratio=0.6,
                     platform_size=10.0,
                     step_height_lb=self._env_opts["step_height_lb"],
                     step_height_ub=self._env_opts["step_height_ub"],
@@ -658,7 +658,8 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                     static_friction=self._env_opts["static_friction"], 
                     dynamic_friction=self._env_opts["dynamic_friction"], 
                     restitution=self._env_opts["restitution"],
-                    n_steps=4
+                    n_steps=3,
+                    area_factor=0.3
                     )
                 # apply the same visual material as the default ground plane
                 mat_path = self._ensure_groundplane_material()
