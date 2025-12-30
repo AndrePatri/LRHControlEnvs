@@ -927,20 +927,25 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         self._track_error_db[:, :]=torch.abs(task_error)
         task_error=task_error/scaling
 
-        task_ref_xy_linvel=task_ref[:, 0:2]
-        task_error_xy_linvel=task_error[:, 0:2]
-        task_ref_linvel_norm=task_ref_xy_linvel.norm(dim=1,keepdim=True)
-        task_ref_xy_versor=task_ref_xy_linvel/(task_ref_linvel_norm+1e-8)
+        # projection along commanded direction and gravity, matching paper formulation
+        v_ref=task_ref[:, 0:3]
+        delta_v=task_error[:, 0:3]
 
-        longitudinal_error_norm=torch.sum(task_error_xy_linvel*task_ref_xy_versor, dim=1, keepdim=True)
-        lateral_error_norm=torch.norm(task_error_xy_linvel-longitudinal_error_norm*task_ref_xy_versor, dim=1, keepdim=True)
+        v_ref_norm=torch.norm(v_ref, dim=1, keepdim=True)
+        cmd_dir=v_ref/(v_ref_norm+1e-8)
+        # fallback to measured direction if command is (near) zero to avoid degenerate projection
+        meas_dir=task_meas[:, 0:3]
+        meas_dir=meas_dir/(torch.norm(meas_dir, dim=1, keepdim=True)+1e-8)
+        cmd_dir=torch.where((v_ref_norm>1e-6), cmd_dir, meas_dir)
 
-        # handle small refs
-        below_thresh=task_ref_linvel_norm<1e-6 
-        longitudinal_error_norm[below_thresh.flatten(), :]=task_meas[below_thresh.flatten(), 0:1]
-        lateral_error_norm[below_thresh.flatten(), :]=task_meas[below_thresh.flatten(), 1:2]
+        gravity_dir = self._robot_state.root_state.get(data_type="gn",gpu=self._use_gpu) # normalized gravity in base frame
 
-        full_error=torch.cat((longitudinal_error_norm, lateral_error_norm, task_error[:, 2:6]), dim=1)
+        forward_error=torch.sum(delta_v*cmd_dir, dim=1, keepdim=True)
+        vertical_error=torch.sum(delta_v*gravity_dir, dim=1, keepdim=True)
+        lateral_vec=delta_v - vertical_error*gravity_dir - forward_error*cmd_dir
+        lateral_error=torch.norm(lateral_vec, dim=1, keepdim=True)
+
+        full_error=torch.cat((forward_error, lateral_error, vertical_error, task_error[:, 3:6]), dim=1)
         task_wmse_dir = torch.sum(full_error*full_error*weights, dim=1, keepdim=True)/torch.sum(weights).item()
         return task_wmse_dir # weighted mean square error (along task dimension)
     
