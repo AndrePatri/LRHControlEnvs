@@ -60,6 +60,8 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         dtype: torch.dtype = torch.float32,
         override_low_lev_controller: bool = False):
 
+        self._render_step_counter = 0
+
         super().__init__(name=name,
             robot_names=robot_names,
             robot_urdf_paths=robot_urdf_paths,
@@ -78,8 +80,6 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
             use_gpu=use_gpu,
             dtype=dtype,
             override_low_lev_controller=override_low_lev_controller)
-        # BaseTask.__init__(self,name=self._name,offset=None)
-        self._render_step_counter = 0
 
     def is_running(self):
         return self._simulation_app.is_running()
