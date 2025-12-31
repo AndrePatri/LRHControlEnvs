@@ -79,6 +79,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
             dtype=dtype,
             override_low_lev_controller=override_low_lev_controller)
         # BaseTask.__init__(self,name=self._name,offset=None)
+        self._render_step_counter = 0
 
     def is_running(self):
         return self._simulation_app.is_running()
@@ -1062,11 +1063,12 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
     def _step_world(self): 
         self._world.step(render=False, step_sim=True)
 
-        if (self._render) and (self.step_counter%self._env_opts["rendering_freq"]==0):
+        if (self._render) and (self._render_step_counter%self._env_opts["rendering_freq"]==0):
             # if self._env_opts["render_to_file"]:
             #     rep.orchestrator.step()
             self._render_sim() # manually trigger rendering (World.step(render=True) for some reason 
             # will step the simulation for a dt==rendering_dt)
+        self._render_step_counter += 1
 
     def _generate_jnt_imp_control(self, robot_name: str):
         
