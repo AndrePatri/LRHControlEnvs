@@ -296,6 +296,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                     terrain_utils=self._height_field_data,
                     grid_size=int(self._env_opts["height_sensor_pixels"]),
                     resolution=float(self._env_opts["height_sensor_resolution"]),
+                    forward_offset=float(self._env_opts.get("height_sensor_forward_offset", 0.0)),
+                    lateral_offset=float(self._env_opts.get("height_sensor_lateral_offset", 0.0)),
                     n_envs=self._num_envs,
                     device=self._device,
                     dtype=self._dtype)

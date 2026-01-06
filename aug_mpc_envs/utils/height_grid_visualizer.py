@@ -12,6 +12,8 @@ class HeightGridVisualizer:
                  resolution: float,
                  base_prim_path: str = "/World/debug/height_grid",
                  marker_radius: float = 0.03,
+                 forward_offset: float = 0.0,
+                 lateral_offset: float = 0.0,
                  device: str = "cpu",
                  dtype: torch.dtype = torch.float32):
         self.robot_name = robot_name
@@ -19,6 +21,9 @@ class HeightGridVisualizer:
         self.grid_size = grid_size
         self.resolution = resolution
         self.marker_radius = marker_radius
+        self._base_offset = torch.tensor([forward_offset, lateral_offset],
+                                         device=device,
+                                         dtype=dtype)
         self.device = device
         self.dtype = dtype
 
@@ -54,7 +59,7 @@ class HeightGridVisualizer:
                 radius_attr = self._UsdGeom.Sphere.Get(stage, prim_path).GetRadiusAttr()
                 radius_attr.Set(self.marker_radius)
                 # set a light blue display color
-                color = self._Gf.Vec3f(0.5, 0.7, 1.0)
+                color = self._Gf.Vec3f(1.0, 0.3, 0.3)
                 sphere = self._UsdGeom.Sphere.Get(stage, prim_path)
                 sphere.GetDisplayColorAttr().Set([color])
 
@@ -82,7 +87,8 @@ class HeightGridVisualizer:
         rot_xy = rot_mats[:, :2, :2]  # (N,2,2)
 
         offsets = self._grid_offsets.to(device=base_positions.device, dtype=base_positions.dtype)
-        offsets = offsets.unsqueeze(0).expand(local_ids.numel(), -1, -1)  # (n_envs, P, 2)
+        base_off = self._base_offset.to(device=base_positions.device, dtype=base_positions.dtype)
+        offsets = (offsets + base_off).unsqueeze(0).expand(local_ids.numel(), -1, -1)  # (n_envs, P, 2)
 
         world_xy = torch.bmm(offsets, rot_xy.transpose(1, 2))
         world_xy += base_positions[:, :2].unsqueeze(1)

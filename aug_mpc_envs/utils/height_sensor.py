@@ -11,6 +11,8 @@ class HeightGridSensor:
             grid_size: int,
             resolution: float,
             n_envs: int,
+            forward_offset: float = 0.0,
+            lateral_offset: float = 0.0,
             device: str = "cpu",
             dtype: torch.dtype = torch.float32):
         """
@@ -19,6 +21,7 @@ class HeightGridSensor:
             grid_size: number of pixels per side (square grid).
             resolution: meters per pixel.
             n_envs: total number of environments (preallocates output buffer).
+            forward_offset, lateral_offset: offsets (meters) in the base frame to shift the grid center.
             device, dtype: output tensor placement/type.
         """
         if n_envs is None:
@@ -35,6 +38,10 @@ class HeightGridSensor:
         coords = (idx - center) * self._resolution
         grid_y, grid_x = torch.meshgrid(coords, coords, indexing="ij")
         self._grid_offsets = torch.stack([grid_x, grid_y], dim=-1).reshape(-1, 2)
+        self._base_offset = torch.tensor([forward_offset, lateral_offset],
+                                         device=self._device,
+                                         dtype=self._dtype)
+        self._grid_offsets += self._base_offset
 
         # terrain data cached on device to avoid cpu<->gpu copies during read
         self._heightfield = None
@@ -79,7 +86,7 @@ class HeightGridSensor:
 
         rot_xy = rot_mats[:, :2, :2]  # planar rotation
 
-        offsets = self._grid_offsets.unsqueeze(0).expand(num_envs, -1, -1)
+        offsets = (self._grid_offsets).unsqueeze(0).expand(num_envs, -1, -1)
 
         world_xy = torch.bmm(offsets, rot_xy.transpose(1, 2))
         world_xy += basepositions[:, :2].unsqueeze(1)

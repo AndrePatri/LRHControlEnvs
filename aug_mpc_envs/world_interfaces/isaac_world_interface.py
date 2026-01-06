@@ -185,7 +185,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
     def _import_isaac_pkgs(self):
         # we use global, so that we can create the simulation app inside (and so
         # access Isaac's kit) and also expose to all methods the imports
-        global World, omni_kit, get_context, UsdLux, Sdf, Gf, UsdPhysics, PhysicsSchemaTools, UsdShade
+        global World, omni_kit, get_context, UsdLux, Sdf, Gf, UsdPhysics, PhysicsSchemaTools, UsdShade, Vt
         global enable_extension, set_camera_view, _urdf, move_prim, GridCloner, prim_utils
         global get_current_stage, Scene, ArticulationView, RigidPrimView, rep
         global OmniContactSensors, RlTerrains,OmniJntImpCntrl
@@ -193,7 +193,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         global _sensor, _dynamic_control
         global get_prim_at_path
 
-        from pxr import PhysxSchema, UsdGeom, UsdShade
+        from pxr import PhysxSchema, UsdGeom, UsdShade, Vt
 
         from omni.isaac.core.world import World
         from omni.usd import get_context
@@ -321,7 +321,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["use_random_pertub"]=False
         isaac_opts["pert_planar_only"]=True # if True, linear pushes only in xy plane and no torques
 
-        isaac_opts["pert_wrenches_rate"]=4.0 # on average 1 pert every pert_wrenches_rate seconds
+        isaac_opts["pert_wrenches_rate"]=10.0 # on average 1 pert every pert_wrenches_rate seconds
         isaac_opts["pert_wrenches_min_duration"]=0.6
         isaac_opts["pert_wrenches_max_duration"]=3.5 # [s]
         isaac_opts["pert_force_max_weight_scale"]=1.2 # clip force norm to scale*weight
@@ -513,14 +513,14 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         dome_path = "/World/Lighting/AmbientDome"
 
         distantLight = UsdLux.DistantLight.Define(self._stage, Sdf.Path(sun_path))
-        distantLight.CreateIntensityAttr(600.0)
+        distantLight.CreateIntensityAttr(450.0)
         distantLight.CreateAngleAttr(0.5)  # soften shadows a bit
         distantLight.CreateColorAttr(Gf.Vec3f(1.0, 1.0, 1.0))
         # Shadow attr naming differs across versions; set the underlying USD attribute directly.
         distantLight.GetPrim().CreateAttribute("shadow:enable", Sdf.ValueTypeNames.Bool).Set(True)
 
         domeLight = UsdLux.DomeLight.Define(self._stage, Sdf.Path(dome_path))
-        domeLight.CreateIntensityAttr(400.0)
+        domeLight.CreateIntensityAttr(200.0)
         domeLight.CreateExposureAttr(1.0)
         domeLight.CreateColorAttr(Gf.Vec3f(1.0, 1.0, 1.0))
 
@@ -663,9 +663,10 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                     area_factor=0.7,
                     random_n_steps=False
                     )
-                # apply the same visual material as the default ground plane
-                mat_path = self._ensure_groundplane_material()
+                # apply a custom  checker material to the terrain primitives
+                mat_path = self._ensure_lightblue_checker_material()
                 self._apply_checker_material_to_terrain(terrain_root_path=terrain_prim_path, material_path=mat_path)
+                self._add_checker_overlay_plane(terrain_root_path=terrain_prim_path, material_path=mat_path)
             else:
                 ground_type=self._env_opts["ground_type"]
                 Journal.log(self.__class__.__name__,
@@ -766,6 +767,8 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 terrain_utils=self.terrain_generator if not self._env_opts["use_flat_ground"] else None,
                 grid_size=int(self._env_opts["height_sensor_pixels"]),
                 resolution=float(self._env_opts["height_sensor_resolution"]),
+                forward_offset=float(self._env_opts["height_sensor_forward_offset"]),
+                lateral_offset=float(self._env_opts["height_sensor_lateral_offset"]),
                 n_envs=self._num_envs,
                 device=self._device,
                 dtype=self._dtype)
@@ -783,6 +786,8 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                     grid_size=int(self._env_opts["height_sensor_pixels"]),
                     resolution=float(self._env_opts["height_sensor_resolution"]),
                     marker_radius=float(self._env_opts["height_vis_radius"]),
+                    forward_offset=float(self._env_opts["height_sensor_forward_offset"]),
+                    lateral_offset=float(self._env_opts["height_sensor_lateral_offset"]),
                     device=self._device,
                     dtype=self._dtype)
 
@@ -894,6 +899,55 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         physxMaterialAPI.CreateFrictionCombineModeAttr().Set("multiply") # average, min, multiply, max 
         physxMaterialAPI.CreateRestitutionCombineModeAttr().Set("multiply")
 
+    def _get_lightblue_checker_texture_path(self) -> str:
+        tex_rel_path = os.path.join(os.path.dirname(__file__), "..", "assets", "textures", "checkered_terrain.png")
+        return os.path.abspath(tex_rel_path)
+
+    def _ensure_lightblue_checker_material(self):
+        """Create (or reuse) a light-blue checker material for primitive terrains."""
+        stage = get_current_stage()
+        mat_path = "/World/Looks/IbridoCheckerMaterial"
+        mat_prim = stage.GetPrimAtPath(mat_path)
+        if mat_prim.IsValid():
+            return mat_path
+
+        texture_path = self._get_lightblue_checker_texture_path()
+
+        material = UsdShade.Material.Define(stage, mat_path)
+
+        st_reader = UsdShade.Shader.Define(stage, f"{mat_path}/PrimvarReader_st")
+        st_reader.CreateIdAttr("UsdPrimvarReader_float2")
+        st_reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("st")
+        st_reader.CreateOutput("result", Sdf.ValueTypeNames.Float2)
+
+        uv_transform = UsdShade.Shader.Define(stage, f"{mat_path}/UVTransform")
+        uv_transform.CreateIdAttr("UsdTransform2d")
+        # keep UV scale at 1 here; tiling is controlled via mesh UVs
+        uv_transform.CreateInput("in", Sdf.ValueTypeNames.Float2).ConnectToSource(st_reader.GetOutput("result"))
+        uv_transform.CreateInput("scale", Sdf.ValueTypeNames.Float2).Set(Gf.Vec2f(1.0, 1.0))
+        uv_transform.CreateOutput("result", Sdf.ValueTypeNames.Float2)
+
+        tex = UsdShade.Shader.Define(stage, f"{mat_path}/CheckerTex")
+        tex.CreateIdAttr("UsdUVTexture")
+        tex.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(Sdf.AssetPath(texture_path))
+        tex.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(uv_transform.GetOutput("result"))
+        tex.CreateInput("wrapS", Sdf.ValueTypeNames.Token).Set("repeat")
+        tex.CreateInput("wrapT", Sdf.ValueTypeNames.Token).Set("repeat")
+        tex.CreateInput("fallback", Sdf.ValueTypeNames.Color4f).Set(Gf.Vec4f(0.69, 0.85, 1.0, 1.0))
+        tex.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
+        tex.CreateOutput("a", Sdf.ValueTypeNames.Float)
+
+        pbr = UsdShade.Shader.Define(stage, f"{mat_path}/PBRShader")
+        pbr.CreateIdAttr("UsdPreviewSurface")
+        pbr.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(tex.GetOutput("rgb"))
+        pbr.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.45)
+        pbr.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(0.0)
+        pbr.CreateOutput("surface", Sdf.ValueTypeNames.Token)
+
+        material.CreateSurfaceOutput().ConnectToSource(pbr.GetOutput("surface"))
+
+        return mat_path
+
     def _ensure_groundplane_material(self):
         """Guarantee a ground-plane material exists (default checker) and return its path."""
         stage = get_current_stage()
@@ -918,8 +972,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
 
     def _apply_checker_material_to_terrain(self, terrain_root_path: str, material_path: str):
         """Bind the checker material to all terrain prims (visual only)."""
-        if material_path is None:
-            return
+
         stage = get_current_stage()
         mat_prim = stage.GetPrimAtPath(material_path)
         if not mat_prim.IsValid():
@@ -931,6 +984,68 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 continue
             binding = UsdShade.MaterialBindingAPI.Apply(prim)
             binding.Bind(material, UsdShade.Tokens.strongerThanDescendants)
+
+    def _add_checker_overlay_plane(self, terrain_root_path: str, material_path: str):
+        """Create a thin visual-only mesh with UVs so the checker pattern shows up even on cube prims."""
+        stage = get_current_stage()
+        plane_path = f"{terrain_root_path}/visual_checker"
+        plane_prim = stage.GetPrimAtPath(plane_path)
+        if plane_prim.IsValid():
+            # if already exists, just (re)bind material
+            mat_prim = stage.GetPrimAtPath(material_path)
+            if mat_prim.IsValid():
+                UsdShade.MaterialBindingAPI.Apply(plane_prim).Bind(UsdShade.Material(mat_prim), UsdShade.Tokens.strongerThanDescendants)
+            return
+
+        # try to read base slab dimensions/position to size the overlay
+        slab_path = terrain_root_path + "_slab"
+        slab_prim = stage.GetPrimAtPath(slab_path)
+        center = Gf.Vec3f(0.0, 0.0, 0.0)
+        width = float(self._env_opts.get("ground_size", 50.0))
+        length = width
+        thickness = 0.1
+        if slab_prim.IsValid():
+            xformable = UsdGeom.Xformable(slab_prim)
+            for op in xformable.GetOrderedXformOps():
+                if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+                    center = Gf.Vec3f(op.Get())
+                elif op.GetOpType() == UsdGeom.XformOp.TypeScale:
+                    scale = op.Get()
+                    width = float(scale[0])
+                    length = float(scale[1])
+                    thickness = float(scale[2])
+
+        half_w = 0.5 * width
+        half_l = 0.5 * length
+        z = center[2] + 0.5 * thickness + 1e-3  # slightly above the slab to avoid z-fighting
+
+        plane = UsdGeom.Mesh.Define(stage, plane_path)
+        plane.CreatePointsAttr([
+            Gf.Vec3f(center[0] - half_w, center[1] - half_l, z),
+            Gf.Vec3f(center[0] + half_w, center[1] - half_l, z),
+            Gf.Vec3f(center[0] + half_w, center[1] + half_l, z),
+            Gf.Vec3f(center[0] - half_w, center[1] + half_l, z),
+        ])
+        plane.CreateFaceVertexCountsAttr([4])
+        plane.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
+        plane.CreateDoubleSidedAttr(True)
+
+        # coarser tiling so squares are visible (roughly 5 tiles across the width)
+        uv_repeats = max(1, int(width / 10.0))
+        primvars = UsdGeom.PrimvarsAPI(plane)
+        st = primvars.CreatePrimvar("st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex)
+        st.Set(Vt.Vec2fArray([
+            Gf.Vec2f(0.0, 0.0),
+            Gf.Vec2f(uv_repeats, 0.0),
+            Gf.Vec2f(uv_repeats, uv_repeats),
+            Gf.Vec2f(0.0, uv_repeats),
+        ]))
+        st.SetInterpolation(UsdGeom.Tokens.vertex)
+
+        mat_prim = stage.GetPrimAtPath(material_path)
+        if mat_prim.IsValid():
+            material = UsdShade.Material(mat_prim)
+            UsdShade.MaterialBindingAPI.Apply(plane.GetPrim()).Bind(material, UsdShade.Tokens.strongerThanDescendants)
 
     def _is_link(self, prim):
         return prim.GetTypeName() == 'Xform' 
