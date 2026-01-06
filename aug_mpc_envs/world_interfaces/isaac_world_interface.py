@@ -284,10 +284,11 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
             
         # rendering helpers
         isaac_opts["render_to_file"]=False
-        isaac_opts["use_follow_camera"]=False # if True, follow robot during rendering in human mode
+        isaac_opts["use_follow_camera"]=True # if True, follow robot during rendering in human mode
         isaac_opts["render_follow_env_idx"]=0
         isaac_opts["render_follow_robot_idx"]=0
-        isaac_opts["render_follow_offset"]=[2.0, 2.0, 0.35]  
+        isaac_opts["render_follow_offset"]=[-0.2, 3.0, -0.1]  
+        isaac_opts["render_follow_target_offset"]=[1.0, -1.0, 0.0]
         isaac_opts["rendering_dt"]=15*isaac_opts["physics_dt"]
         isaac_opts["camera_prim_path"]="/OmniverseKit_Persp"
         isaac_opts["render_resolution"]=[1280, 720] # [1024, 576]
@@ -667,6 +668,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 mat_path = self._ensure_lightblue_checker_material()
                 self._apply_checker_material_to_terrain(terrain_root_path=terrain_prim_path, material_path=mat_path)
                 self._add_checker_overlay_plane(terrain_root_path=terrain_prim_path, material_path=mat_path)
+                self._add_checker_overlays_on_tiles(terrain_root_path=terrain_prim_path, material_path=mat_path)
             else:
                 ground_type=self._env_opts["ground_type"]
                 Journal.log(self.__class__.__name__,
@@ -900,7 +902,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         physxMaterialAPI.CreateRestitutionCombineModeAttr().Set("multiply")
 
     def _get_lightblue_checker_texture_path(self) -> str:
-        tex_rel_path = os.path.join(os.path.dirname(__file__), "..", "assets", "textures", "checkered_terrain.png")
+        tex_rel_path = os.path.join(os.path.dirname(__file__), "..", "assets", "textures", "ibrido_terrain_texture.png")
         return os.path.abspath(tex_rel_path)
 
     def _ensure_lightblue_checker_material(self):
@@ -933,6 +935,11 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         tex.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(uv_transform.GetOutput("result"))
         tex.CreateInput("wrapS", Sdf.ValueTypeNames.Token).Set("repeat")
         tex.CreateInput("wrapT", Sdf.ValueTypeNames.Token).Set("repeat")
+        tex.CreateInput("minFilter", Sdf.ValueTypeNames.Token).Set("nearest")
+        tex.CreateInput("magFilter", Sdf.ValueTypeNames.Token).Set("nearest")
+        # disable mipmaps to avoid blurring sharp edges
+        tex.CreateInput("mipFilter", Sdf.ValueTypeNames.Token).Set("nearest")
+        tex.CreateInput("enableMipMap", Sdf.ValueTypeNames.Bool).Set(False)
         tex.CreateInput("fallback", Sdf.ValueTypeNames.Color4f).Set(Gf.Vec4f(0.69, 0.85, 1.0, 1.0))
         tex.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
         tex.CreateOutput("a", Sdf.ValueTypeNames.Float)
@@ -1030,8 +1037,8 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         plane.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
         plane.CreateDoubleSidedAttr(True)
 
-        # coarser tiling so squares are visible (roughly 5 tiles across the width)
-        uv_repeats = max(1, int(width / 10.0))
+        # increase tiling density; adjustable via env opt
+        uv_repeats = max(1, int((width / 10.0) * 3.0))
         primvars = UsdGeom.PrimvarsAPI(plane)
         st = primvars.CreatePrimvar("st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex)
         st.Set(Vt.Vec2fArray([
@@ -1046,6 +1053,60 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         if mat_prim.IsValid():
             material = UsdShade.Material(mat_prim)
             UsdShade.MaterialBindingAPI.Apply(plane.GetPrim()).Bind(material, UsdShade.Tokens.strongerThanDescendants)
+
+    def _add_checker_overlays_on_tiles(self, terrain_root_path: str, material_path: str):
+        """Add visual quads on top of each tile cube so the checker texture appears on raised steps."""
+        stage = get_current_stage()
+        mat_prim = stage.GetPrimAtPath(material_path)
+        if not mat_prim.IsValid():
+            return
+        material = UsdShade.Material(mat_prim)
+        for prim in stage.Traverse():
+            path = prim.GetPath().pathString
+            if not path.startswith(terrain_root_path):
+                continue
+            if prim.GetTypeName() != "Cube":
+                continue
+            name = path.split("/")[-1]
+            if "wall" in name or name.endswith("_slab"):
+                continue
+            xformable = UsdGeom.Xformable(prim)
+            center = Gf.Vec3f(0.0, 0.0, 0.0)
+            scale = Gf.Vec3f(1.0, 1.0, 1.0)
+            for op in xformable.GetOrderedXformOps():
+                if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+                    center = Gf.Vec3f(op.Get())
+                elif op.GetOpType() == UsdGeom.XformOp.TypeScale:
+                    scale = Gf.Vec3f(op.Get())
+            width, length, height = float(scale[0]), float(scale[1]), float(scale[2])
+            half_w = 0.5 * width
+            half_l = 0.5 * length
+            z = center[2] + 0.5 * height + 1e-3
+            overlay_path = f"{path}_checker"
+            if stage.GetPrimAtPath(overlay_path).IsValid():
+                UsdShade.MaterialBindingAPI.Apply(stage.GetPrimAtPath(overlay_path)).Bind(material, UsdShade.Tokens.strongerThanDescendants)
+                continue
+            mesh = UsdGeom.Mesh.Define(stage, overlay_path)
+            mesh.CreatePointsAttr([
+                Gf.Vec3f(center[0] - half_w, center[1] - half_l, z),
+                Gf.Vec3f(center[0] + half_w, center[1] - half_l, z),
+                Gf.Vec3f(center[0] + half_w, center[1] + half_l, z),
+                Gf.Vec3f(center[0] - half_w, center[1] + half_l, z),
+            ])
+            mesh.CreateFaceVertexCountsAttr([4])
+            mesh.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
+            mesh.CreateDoubleSidedAttr(True)
+            uv_repeats = max(1, int((width / 10.0) * float(self._env_opts.get("checker_uv_density", 3.0))))
+            primvars = UsdGeom.PrimvarsAPI(mesh)
+            st = primvars.CreatePrimvar("st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex)
+            st.Set(Vt.Vec2fArray([
+                Gf.Vec2f(0.0, 0.0),
+                Gf.Vec2f(uv_repeats, 0.0),
+                Gf.Vec2f(uv_repeats, uv_repeats),
+                Gf.Vec2f(0.0, uv_repeats),
+            ]))
+            st.SetInterpolation(UsdGeom.Tokens.vertex)
+            UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material, UsdShade.Tokens.strongerThanDescendants)
 
     def _is_link(self, prim):
         return prim.GetTypeName() == 'Xform' 
@@ -1103,8 +1164,21 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                         base = pos[eidx].detach().cpu()
                         offset = torch.as_tensor(self._env_opts["render_follow_offset"],
                                                  device=base.device, dtype=base.dtype)
+                        target_offset = torch.as_tensor(self._env_opts["render_follow_target_offset"],
+                                                 device=base.device, dtype=base.dtype)
+                        quat = self._root_q.get(rname, None)
+                        if quat is not None and quat.shape[0] > eidx:
+                            q = quat[eidx].detach().cpu()
+                            w, x, y, z = q.unbind(-1)
+                            yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+                            cy, sy = torch.cos(yaw), torch.sin(yaw)
+                            rot = torch.tensor([[cy, -sy], [sy, cy]], device=base.device, dtype=base.dtype)
+                            offset_xy = torch.matmul(rot, offset[:2])
+                            target_offset_xy = torch.matmul(rot, target_offset[:2])
+                            offset = torch.stack((offset_xy[0], offset_xy[1], offset[2]))
+                            target_offset = torch.stack((target_offset_xy[0], target_offset_xy[1], target_offset[2]))
                         eye = (base + offset).tolist()
-                        target = base.tolist()
+                        target = (base + target_offset).tolist()
                         set_camera_view(eye=eye, target=target, camera_prim_path=self._env_opts["camera_prim_path"])
                        
             self._world.render()
