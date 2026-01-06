@@ -127,11 +127,11 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         self._add_env_opt(env_opts, "task_track_offset", default=1.0)
         self._add_env_opt(env_opts, "task_track_scale", default=1.5)
         self._add_env_opt(env_opts, "task_track_front_weight", default=1.0)
-        self._add_env_opt(env_opts, "task_track_lat_weight", default=env_opts["task_track_front_weight"]/10.0)
-        self._add_env_opt(env_opts, "task_track_vert_weight", default=env_opts["task_track_front_weight"]/10.0)
-        self._add_env_opt(env_opts, "task_track_omega_z_weight", default=1.0)
-        self._add_env_opt(env_opts, "task_track_omega_x_weight", default=0.1)
-        self._add_env_opt(env_opts, "task_track_omega_y_weight", default=0.1)
+        self._add_env_opt(env_opts, "task_track_lat_weight", default=0.05)
+        self._add_env_opt(env_opts, "task_track_vert_weight", default=0.05)
+        self._add_env_opt(env_opts, "task_track_omega_z_weight", default=0.4)
+        self._add_env_opt(env_opts, "task_track_omega_x_weight", default=0.05)
+        self._add_env_opt(env_opts, "task_track_omega_y_weight", default=0.05)
         # if env_opts["add_angvel_ref_rand"]:
         #     env_opts["task_track_omega_x_weight"]=0.0
         #     env_opts["task_track_omega_y_weight"]=0.0
@@ -143,7 +143,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
 
         # energy penalties
         self._add_env_opt(env_opts, "CoT_offset", default=0.3)
-        self._add_env_opt(env_opts, "CoT_scale", default=0.9)
+        self._add_env_opt(env_opts, "CoT_scale", default=0.5)
         self._add_env_opt(env_opts, "power_offset", default=0.1)
         self._add_env_opt(env_opts, "power_scale", default=8e-4)
 
@@ -286,6 +286,12 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         device = "cuda" if self._use_gpu else "cpu"
 
         self._update_jnt_blacklist() # update blacklist for joints
+
+        # constant base-frame unit vectors (reuse to avoid per-call allocations)
+        self._base_x_dir = torch.zeros((self._n_envs, 3), dtype=self._dtype, device=device)
+        self._base_x_dir[:, 0] = 1.0
+        self._base_y_dir = torch.zeros((self._n_envs, 3), dtype=self._dtype, device=device)
+        self._base_y_dir[:, 1] = 1.0
 
         self._twist_ref_lb = torch.full((1, 6), dtype=self._dtype, device=device,
                             fill_value=-1.5) 
@@ -939,13 +945,35 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         cmd_dir=torch.where((v_ref_norm>1e-6), cmd_dir, meas_dir)
 
         gravity_dir = self._robot_state.root_state.get(data_type="gn",gpu=self._use_gpu) # normalized gravity in base frame
+        gravity_dir = gravity_dir/(torch.norm(gravity_dir, dim=1, keepdim=True)+1e-8)
 
         forward_error=torch.sum(delta_v*cmd_dir, dim=1, keepdim=True)
         vertical_error=torch.sum(delta_v*gravity_dir, dim=1, keepdim=True)
         lateral_vec=delta_v - vertical_error*gravity_dir - forward_error*cmd_dir
         lateral_error=torch.norm(lateral_vec, dim=1, keepdim=True)
 
-        full_error=torch.cat((forward_error, lateral_error, vertical_error, task_error[:, 3:6]), dim=1)
+        # angular directional components: use gravity as vertical, project base x onto the world xy plane for roll, and close the triad with pitch
+        base_x = self._base_x_dir
+        base_y = self._base_y_dir
+
+        roll_dir = base_x - torch.sum(base_x*gravity_dir, dim=1, keepdim=True)*gravity_dir
+        roll_norm = torch.norm(roll_dir, dim=1, keepdim=True)
+        roll_dir_alt = base_y - torch.sum(base_y*gravity_dir, dim=1, keepdim=True)*gravity_dir # fallback if base x is almost aligned with gravity
+        roll_norm_alt = torch.norm(roll_dir_alt, dim=1, keepdim=True)
+        use_alt_roll = roll_norm < 1e-6
+        roll_dir = torch.where(use_alt_roll, roll_dir_alt, roll_dir)
+        roll_norm = torch.where(use_alt_roll, roll_norm_alt, roll_norm)
+        roll_dir = roll_dir/(roll_norm+1e-8)
+
+        pitch_dir = torch.cross(gravity_dir, roll_dir, dim=1)
+        pitch_dir = pitch_dir/(torch.norm(pitch_dir, dim=1, keepdim=True)+1e-8)
+
+        delta_omega = task_error[:, 3:6]
+        omega_roll_error = torch.sum(delta_omega*roll_dir, dim=1, keepdim=True)
+        omega_pitch_error = torch.sum(delta_omega*pitch_dir, dim=1, keepdim=True)
+        omega_vertical_error = torch.sum(delta_omega*gravity_dir, dim=1, keepdim=True)
+
+        full_error=torch.cat((forward_error, lateral_error, vertical_error, omega_roll_error, omega_pitch_error, omega_vertical_error), dim=1)
         task_wmse_dir = torch.sum(full_error*full_error*weights, dim=1, keepdim=True)/torch.sum(weights).item()
         return task_wmse_dir # weighted mean square error (along task dimension)
     
