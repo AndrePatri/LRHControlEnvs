@@ -284,19 +284,19 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
             
         # rendering helpers
         isaac_opts["render_to_file"]=False
-        isaac_opts["use_follow_camera"]=True # if True, follow robot during rendering in human mode
+        isaac_opts["use_follow_camera"]=False # if True, follow robot during rendering in human mode
         isaac_opts["render_follow_env_idx"]=0
         isaac_opts["render_follow_robot_idx"]=0
-        isaac_opts["render_follow_offset"]=[-0.2, 3.0, -0.1]  
-        isaac_opts["render_follow_target_offset"]=[1.0, -1.0, 0.0]
+        isaac_opts["render_follow_offset"]=[-0.2, 3.0, 0.1]  
+        isaac_opts["render_follow_target_offset"]=[-0.2, -1.0, 0.0]
         isaac_opts["rendering_dt"]=15*isaac_opts["physics_dt"]
         isaac_opts["camera_prim_path"]="/OmniverseKit_Persp"
         isaac_opts["render_resolution"]=[1280, 720] # [1024, 576]
 
         isaac_opts["render_panoramic_cam"]=True
-        isaac_opts["render_panoramic_cam_height"]=5.0
-        isaac_opts["render_panoramic_cam_target_xy"]=[6.0, 6.0]
-        isaac_opts["render_panoramic_cam_target_z"]=3.0
+        isaac_opts["render_panoramic_cam_height"]=2.0
+        isaac_opts["render_panoramic_cam_target_xy"]=[10.0, 14.]
+        isaac_opts["render_panoramic_cam_target_z"]=1.2
 
         # ground opts
         isaac_opts["use_flat_ground"]=True
@@ -308,7 +308,9 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["terrain_border"]=isaac_opts["ground_size"]/2
         isaac_opts["dh_ground"]=0.03
         isaac_opts["step_height_lb"]=0.08
-        isaac_opts["step_height_ub"]=0.13
+        isaac_opts["step_height_ub"]=0.15
+        isaac_opts["step_width_lb"]=0.5
+        isaac_opts["step_width_ub"]= 1.0
         isaac_opts["contact_prims"] = []
         isaac_opts["sensor_radii"] = 0.1
         isaac_opts["contact_offsets"] = {}
@@ -656,11 +658,13 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                     platform_size=50.0,
                     step_height_lb=self._env_opts["step_height_lb"],
                     step_height_ub=self._env_opts["step_height_ub"],
+                    min_step_width=self._env_opts.get("step_width_lb", None),
+                    max_step_width=self._env_opts.get("step_width_ub", None),
                     position=np.array([0.0, 0.0, 0.0]), 
                     static_friction=self._env_opts["static_friction"], 
                     dynamic_friction=self._env_opts["dynamic_friction"], 
                     restitution=self._env_opts["restitution"],
-                    n_steps=8,
+                    n_steps=25,
                     area_factor=0.7,
                     random_n_steps=False
                     )
@@ -850,7 +854,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 td_dir = self._render_output_dir + "/panoramic_cam"
                 td_offset = self._env_opts["render_panoramic_cam_target_xy"]
                 td_target_z = float(self._env_opts["render_panoramic_cam_target_z"])
-                pos = [-10.0, -10.0, td_height]
+                pos = [8.0, 11.0, td_height]
                 self._panoramic_cam_camera = rep.create.camera(focal_length=12,
                                 name='rendering_camera_panoramic_cam',
                                 clipping_range = (1, 200),

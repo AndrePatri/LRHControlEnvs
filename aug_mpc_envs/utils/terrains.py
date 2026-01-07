@@ -111,6 +111,8 @@ class RlTerrains():
                     step_height_ub: float = 0.15,
                     n_steps: int = 1,
                     area_factor: float = 0.5,
+                    min_step_width: float = None,
+                    max_step_width: float = None,
                     wall_height: float = 2.0,
                     res_low: float = 0.1,
                     res_high: float = 0.03,
@@ -123,6 +125,8 @@ class RlTerrains():
         Create a random tiled step-up terrain using only primitive colliders (boxes + base slab).
         Each tile of size ``platform_size`` has probability ``stairs_ratio`` of being raised
         by ``step_height``. A matching synthetic heightfield is generated for sensing.
+        If min/max step width are provided, each successive platform shrinks by
+        2 * sampled step width instead of using area_factor.
         """
         # Choose resolution: use high resolution when we expect steps
         use_high_res = (stairs_ratio > 0.0) or (n_steps > 1)
@@ -222,9 +226,22 @@ class RlTerrains():
                         steps_for_tile = n_steps
                     accumulated_height = 0.0
                     accumulated_units = 0
+                    curr_start_x = start_x_m
+                    curr_start_y = start_y_m
+                    curr_size_x = size_x
+                    curr_size_y = size_y
+                    use_step_width = (min_step_width is not None and max_step_width is not None)
+                    if use_step_width:
+                        min_w = max(0.0, float(min_step_width))
+                        max_w = max(min_w, float(max_step_width))
                     for level in range(steps_for_tile):
-                        level_size_x = size_x * (shrink_factor ** level)
-                        level_size_y = size_y * (shrink_factor ** level)
+                        if use_step_width:
+                            stair_w = np.random.uniform(min_w, max_w)
+                            level_size_x = curr_size_x - 2.0 * stair_w
+                            level_size_y = curr_size_y - 2.0 * stair_w
+                        else:
+                            level_size_x = size_x * (shrink_factor ** level)
+                            level_size_y = size_y * (shrink_factor ** level)
                         if level_size_x < horizontal_scale or level_size_y < horizontal_scale:
                             break
 
@@ -233,8 +250,12 @@ class RlTerrains():
                         level_units = max(1, int(round(level_height / vertical_scale)))
 
                         # center the reduced platform within the tile bounds
-                        level_start_x = start_x_m + 0.5 * (size_x - level_size_x)
-                        level_start_y = start_y_m + 0.5 * (size_y - level_size_y)
+                        if use_step_width:
+                            level_start_x = curr_start_x + stair_w
+                            level_start_y = curr_start_y + stair_w
+                        else:
+                            level_start_x = start_x_m + 0.5 * (size_x - level_size_x)
+                            level_start_y = start_y_m + 0.5 * (size_y - level_size_y)
                         level_end_x = level_start_x + level_size_x
                         level_end_y = level_start_y + level_size_y
 
@@ -264,6 +285,11 @@ class RlTerrains():
                         tile_mat.CreateDynamicFrictionAttr(dynamic_friction)
                         tile_mat.CreateStaticFrictionAttr(static_friction)
                         tile_mat.CreateRestitutionAttr(restitution)
+                        if use_step_width:
+                            curr_start_x = level_start_x
+                            curr_start_y = level_start_y
+                            curr_size_x = level_size_x
+                            curr_size_y = level_size_y
 
         # store synthetic heightfield for sensors
         # add walls to heightfield borders
