@@ -86,7 +86,7 @@ class FlightPhaseControl(TwistTrackingEnv):
         if self._env_opts["control_fapex"]:
             idx=self._actions_map["flight_apex_start"]
             self._actions_lb[:, idx:(idx+self._n_contacts)]=0.05
-            self._actions_ub[:, idx:(idx+self._n_contacts)]=0.2
+            self._actions_ub[:, idx:(idx+self._n_contacts)]=0.3
             self._is_continuous_actions[idx:(idx+self._n_contacts)]=True
         # flight params (end)
         if self._env_opts["control_fend"]:
