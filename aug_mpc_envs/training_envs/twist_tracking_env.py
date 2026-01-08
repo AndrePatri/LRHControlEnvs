@@ -239,7 +239,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
             obs_dim+=3 # gravity vec from mpc
         if env_opts["use_rhc_avrg_vel_tracking"]:
             obs_dim+=6 # mpc avrg twist
-        if env_opts["add_flight_info"]: # contact pos, remaining duration, length, apex and landing height
+        if env_opts["add_flight_info"]: # contact pos, remaining duration, length, apex, landing height, landing dx, dy
             obs_dim+=self._flight_info_size
         if env_opts["add_flight_settings"]:
             obs_dim+=self._flight_setting_size

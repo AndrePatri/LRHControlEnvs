@@ -28,7 +28,8 @@ class FlightPhaseControl(TwistTrackingEnv):
         self._add_env_opt(env_opts, "control_flength", default=True) 
         self._add_env_opt(env_opts, "control_fapex", default=True) 
         self._add_env_opt(env_opts, "control_fend", default=True) 
-        
+        self._add_env_opt(env_opts, "control_flanding", default=True) 
+
         self._add_env_opt(env_opts, "flength_min", default=5) # substeps
 
         # temporarily creating robot state client to get some data
@@ -50,6 +51,8 @@ class FlightPhaseControl(TwistTrackingEnv):
             actions_dim+=n_contacts
         if env_opts["control_fend"]:
             actions_dim+=n_contacts
+        if env_opts["control_flanding"]:
+            actions_dim+=2*n_contacts
 
         TwistTrackingEnv.__init__(self,
             namespace=namespace,
@@ -94,6 +97,16 @@ class FlightPhaseControl(TwistTrackingEnv):
             self._actions_lb[:, idx:(idx+self._n_contacts)]=-0.2
             self._actions_ub[:, idx:(idx+self._n_contacts)]=0.2
             self._is_continuous_actions[idx:(idx+self._n_contacts)]=True
+        # flight params (landing dx, dy)
+        if self._env_opts["control_flanding"]:
+            idx=self._actions_map["flight_land_dx_start"]
+            self._actions_lb[:, idx:(idx+self._n_contacts)]=-0.5
+            self._actions_ub[:, idx:(idx+self._n_contacts)]=0.5
+            self._is_continuous_actions[idx:(idx+self._n_contacts)]=True
+            idx=self._actions_map["flight_land_dy_start"]
+            self._actions_lb[:, idx:(idx+self._n_contacts)]=-0.5
+            self._actions_ub[:, idx:(idx+self._n_contacts)]=0.5
+            self._is_continuous_actions[idx:(idx+self._n_contacts)]=True
 
         # redefine default actions
         self.default_action[:, :] = (self._actions_ub+self._actions_lb)/2.0
@@ -110,6 +123,12 @@ class FlightPhaseControl(TwistTrackingEnv):
         if self._env_opts["control_fend"]:
             idx=self._actions_map["flight_end_start"]
             self.safe_action[:, idx:(idx+self._n_contacts)]=0.0
+
+        if self._env_opts["control_flanding"]:
+            idx=self._actions_map["flight_land_dx_start"]
+            self.safe_action[:, idx:(idx+self._n_contacts)]=0.0
+            idx=self._actions_map["flight_land_dy_start"]
+            self.safe_action[:, idx:(idx+self._n_contacts)]=0.0 
 
     def _set_rhc_refs(self):
         TwistTrackingEnv._set_rhc_refs(self)
@@ -133,7 +152,17 @@ class FlightPhaseControl(TwistTrackingEnv):
             fend_now=self._rhc_refs.flight_settings_req.get(data_type="end_dpos", gpu=self._use_gpu)
             fend_now[:, :]=action_to_be_applied[:, idx:(idx+self._n_contacts)]
             self._rhc_refs.flight_settings_req.set(data=fend_now, data_type="end_dpos", gpu=self._use_gpu)
-
+        
+        if self._env_opts["control_flanding"]:
+            idx=self._actions_map["flight_land_dx_start"]
+            fland_dx_now=self._rhc_refs.flight_settings_req.get(data_type="land_dx", gpu=self._use_gpu)
+            fland_dx_now[:, :]=action_to_be_applied[:, idx:(idx+self._n_contacts)]
+            self._rhc_refs.flight_settings_req.set(data=fland_dx_now, data_type="land_dx", gpu=self._use_gpu)
+            idx=self._actions_map["flight_land_dy_start"]
+            fland_dy_now=self._rhc_refs.flight_settings_req.get(data_type="land_dy", gpu=self._use_gpu)
+            fland_dy_now[:, :]=action_to_be_applied[:, idx:(idx+self._n_contacts)]
+            self._rhc_refs.flight_settings_req.set(data=fland_dy_now, data_type="land_dy", gpu=self._use_gpu)
+            
     def _write_rhc_refs(self):
         TwistTrackingEnv._write_rhc_refs(self)
         if self._use_gpu:
@@ -173,6 +202,17 @@ class FlightPhaseControl(TwistTrackingEnv):
             for i in range(len(self._contact_names)):
                 contact=self._contact_names[i]
                 action_names[next_idx+i] = f"flight_end_{contact}"
+            next_idx+=len(self._contact_names)
+        if self._env_opts["control_flanding"]:
+            self._actions_map["flight_land_dx_start"]=next_idx
+            for i in range(len(self._contact_names)):
+                contact=self._contact_names[i]
+                action_names[next_idx+i] = f"flight_land_dx_{contact}"
+            next_idx+=len(self._contact_names)
+            self._actions_map["flight_land_dy_start"]=next_idx
+            for i in range(len(self._contact_names)):
+                contact=self._contact_names[i]
+                action_names[next_idx+i] = f"flight_land_dy_{contact}"
             next_idx+=len(self._contact_names)
 
         return action_names
