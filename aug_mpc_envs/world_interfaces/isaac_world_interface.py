@@ -309,8 +309,8 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["dh_ground"]=0.03
         isaac_opts["step_height_lb"]=0.08
         isaac_opts["step_height_ub"]=0.15
-        isaac_opts["step_width_lb"]=0.5
-        isaac_opts["step_width_ub"]= 1.0
+        isaac_opts["step_width_lb"]=1.0
+        isaac_opts["step_width_ub"]= 1.5
         isaac_opts["contact_prims"] = []
         isaac_opts["sensor_radii"] = 0.1
         isaac_opts["contact_offsets"] = {}
@@ -664,7 +664,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                     static_friction=self._env_opts["static_friction"], 
                     dynamic_friction=self._env_opts["dynamic_friction"], 
                     restitution=self._env_opts["restitution"],
-                    n_steps=25,
+                    n_steps=22,
                     area_factor=0.7,
                     random_n_steps=False
                     )

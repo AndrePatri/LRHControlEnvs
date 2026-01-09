@@ -28,7 +28,7 @@ class FlightPhaseControl(TwistTrackingEnv):
         self._add_env_opt(env_opts, "control_flength", default=True) 
         self._add_env_opt(env_opts, "control_fapex", default=True) 
         self._add_env_opt(env_opts, "control_fend", default=True) 
-        self._add_env_opt(env_opts, "control_flanding", default=True) 
+        self._add_env_opt(env_opts, "control_flanding", default=False) 
 
         self._add_env_opt(env_opts, "flength_min", default=5) # substeps
 
