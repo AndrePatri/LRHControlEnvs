@@ -30,7 +30,7 @@ class FlightPhaseControl(TwistTrackingEnv):
         self._add_env_opt(env_opts, "control_fend", default=True) 
         self._add_env_opt(env_opts, "control_flanding", default=False) 
 
-        self._add_env_opt(env_opts, "flength_min", default=5) # substeps
+        self._add_env_opt(env_opts, "flength_min", default=8) # substeps
 
         # temporarily creating robot state client to get some data
         robot_state_tmp = RobotState(namespace=namespace,
@@ -89,12 +89,12 @@ class FlightPhaseControl(TwistTrackingEnv):
         if self._env_opts["control_fapex"]:
             idx=self._actions_map["flight_apex_start"]
             self._actions_lb[:, idx:(idx+self._n_contacts)]=0.05
-            self._actions_ub[:, idx:(idx+self._n_contacts)]=0.3
+            self._actions_ub[:, idx:(idx+self._n_contacts)]=0.35
             self._is_continuous_actions[idx:(idx+self._n_contacts)]=True
         # flight params (end)
         if self._env_opts["control_fend"]:
             idx=self._actions_map["flight_end_start"]
-            self._actions_lb[:, idx:(idx+self._n_contacts)]=-0.2
+            self._actions_lb[:, idx:(idx+self._n_contacts)]=0.0
             self._actions_ub[:, idx:(idx+self._n_contacts)]=0.2
             self._is_continuous_actions[idx:(idx+self._n_contacts)]=True
         # flight params (landing dx, dy)
