@@ -25,7 +25,11 @@ Available environments:
   <img src="docs/hybrid_quadruped_fake_pos_track.gif" alt="Hybrid Quadruped - FakePosTrackingEnv" width="320">
 </p>
 
-- `FlightPhaseControl`: extends `TwistTrackingEnv` exposing additional agent actions allowing it to also specify flight phases properties (length, apex, end). More control over flights becomes necessary when moving from flat terrain to more complex ones.
+- `FlightPhaseControl`: extends `TwistTrackingEnv` exposing additional agent actions allowing it to also specify flight phases properties (length, apex, end). More control over flights becomes necessary when moving from flat terrain to more complex ones:
+<p align="center">
+  <img src="docs/step_pyr_centauro_percep.gif" alt="Hybrid Quadruped - FakePosTrackingEnv" width="320">
+</p>
+
 - `PhaseParametrizationEnv`: built on top of `TwistTrackingEnv`, overrides the *instantaneous* contact actions in favour of a *phase* parametrization, allowing the agent to control per-leg gait frequency/phase offsets (and optionally flight properties).
 - `FakePosTrackEnvPhaseControl`: built on top of `FlightPhaseControl`, adds waypoint tracking (as in `FakePosTrackingEnv`) on top of flight-parameter control.
 - `FakePosEnvPhaseParam`: built on top of `PhaseParametrizationEnv`, additionally implements waypoint tracking (as in `FakePosTrackingEnv`).
