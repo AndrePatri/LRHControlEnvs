@@ -129,7 +129,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         self._add_env_opt(env_opts, "task_track_front_weight", default=1.0)
         self._add_env_opt(env_opts, "task_track_lat_weight", default=0.05)
         self._add_env_opt(env_opts, "task_track_vert_weight", default=0.05)
-        self._add_env_opt(env_opts, "task_track_omega_z_weight", default=0.4)
+        self._add_env_opt(env_opts, "task_track_omega_z_weight", default=0.2)
         self._add_env_opt(env_opts, "task_track_omega_x_weight", default=0.05)
         self._add_env_opt(env_opts, "task_track_omega_y_weight", default=0.05)
         # if env_opts["add_angvel_ref_rand"]:
@@ -143,7 +143,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
 
         # energy penalties
         self._add_env_opt(env_opts, "CoT_offset", default=0.3)
-        self._add_env_opt(env_opts, "CoT_scale", default=0.5)
+        self._add_env_opt(env_opts, "CoT_scale", default=0.3)
         self._add_env_opt(env_opts, "power_offset", default=0.1)
         self._add_env_opt(env_opts, "power_scale", default=8e-4)
 
