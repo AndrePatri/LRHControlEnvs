@@ -140,16 +140,23 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["use_rel_q_from_startup"]=True
         xmj_opts["height_map_resolution"]=0.05
         xmj_opts["height_map_margin"]=0.5
+        xmj_opts["height_sensor_forward_offset"]=0.0
+        xmj_opts["height_sensor_lateral_offset"]=0.0
         xmj_opts["generate_stepup_terrain"]=False
-        xmj_opts["stepup_terrain_size"]=30.0
-        xmj_opts["stepup_stairs_ratio"]=0.5
-        xmj_opts["stepup_platform_size"]=5.0
-        xmj_opts["stepup_step_height"]=0.1
-        xmj_opts["stepup_n_steps"]=1
-        xmj_opts["stepup_area_factor"]=0.5
+        xmj_opts["stepup_terrain_size"]=100.0
+        xmj_opts["stepup_stairs_ratio"]=0.99
+        xmj_opts["stepup_platform_size"]=50.0
+        xmj_opts["stepup_step_height_lb"]=0.08
+        xmj_opts["stepup_step_height_ub"]=0.15
+        xmj_opts["stepup_step_width_lb"]=0.4
+        xmj_opts["stepup_step_width_ub"]=1.5
+        xmj_opts["stepup_n_steps"]=25
+        xmj_opts["stepup_area_factor"]=0.7
         xmj_opts["stepup_res_low"]=0.1
         xmj_opts["stepup_res_high"]=0.03
-        xmj_opts["stepup_position"]=np.array([-5.0, -5.0, 0.0])
+        xmj_opts["stepup_position"]=np.array([0.0, 0.0, 0.0])
+        xmj_opts["stepup_random_n_steps"]=False
+        xmj_opts["stepup_wall_height"]=2.0
         xmj_opts["stepup_seed"]=None
 
         xmj_opts.update(self._env_opts) # update defaults with provided opts
@@ -157,7 +164,6 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["height_sensor_pixels"]=int(xmj_opts["height_sensor_pixels"])
         xmj_opts["height_sensor_resolution"]=float(xmj_opts["height_sensor_resolution"])
         xmj_opts["enable_height_sensor"]=bool(xmj_opts.get("enable_height_sensor", False))
-        xmj_opts["enable_height_vis"]=bool(xmj_opts.get("enable_height_vis", False))
         # keep visualization/state anchored to simulator ground truth when height sensor is on
         if xmj_opts["enable_height_sensor"]:
             xmj_opts["use_mpc_pos_for_robot"]=False
@@ -296,8 +302,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                     terrain_utils=self._height_field_data,
                     grid_size=int(self._env_opts["height_sensor_pixels"]),
                     resolution=float(self._env_opts["height_sensor_resolution"]),
-                    forward_offset=float(self._env_opts.get("height_sensor_forward_offset", 0.0)),
-                    lateral_offset=float(self._env_opts.get("height_sensor_lateral_offset", 0.0)),
+                    forward_offset=float(self._env_opts["height_sensor_forward_offset"]),
+                    lateral_offset=float(self._env_opts["height_sensor_lateral_offset"]),
                     n_envs=self._num_envs,
                     device=self._device,
                     dtype=self._dtype)
@@ -860,38 +866,48 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         return out_path
 
     def _generate_stepup_boxes(self):
-        """Create step-up style boxes similar to Isaac stepup_prim terrain."""
+        """Create step-up style boxes matching Isaac stepup_prim terrain generation."""
         opts = self._env_opts
-        terrain_size = float(opts.get("stepup_terrain_size", 50.0))
-        stairs_ratio = float(opts.get("stepup_stairs_ratio", 0.0))
-        platform_size = float(opts.get("stepup_platform_size", 4.0))
-        step_height = float(opts.get("stepup_step_height", 0.10))
-        n_steps = max(1, int(opts.get("stepup_n_steps", 1)))
-        area_factor = float(opts.get("stepup_area_factor", 0.5))
+        terrain_size = float(opts.get("stepup_terrain_size", 100.0))
+        stairs_ratio = float(opts.get("stepup_stairs_ratio", 0.99))
+        platform_size = float(opts.get("stepup_platform_size", 50.0))
+        step_height_lb = float(opts.get("stepup_step_height_lb", 0.08))
+        step_height_ub = float(opts.get("stepup_step_height_ub", step_height_lb))
+        min_step_width = opts.get("stepup_step_width_lb", None)
+        max_step_width = opts.get("stepup_step_width_ub", None)
+        n_steps = max(1, int(opts.get("stepup_n_steps", 25)))
+        area_factor = float(opts.get("stepup_area_factor", 0.7))
+        wall_height = float(opts.get("stepup_wall_height", 2.0))
         res_low = float(opts.get("stepup_res_low", 0.1))
         res_high = float(opts.get("stepup_res_high", 0.03))
         pos = np.array(opts.get("stepup_position", [0.0, 0.0, 0.0]), dtype=float)
         seed = opts.get("stepup_seed", None)
+        random_n_steps = bool(opts.get("stepup_random_n_steps", False))
 
+        step_height_ub = max(step_height_lb, step_height_ub)
         rng = np.random.default_rng(seed) if seed is not None else np.random.default_rng()
 
         use_high_res = (stairs_ratio > 0.0) or (n_steps > 1)
-        _horizontal_scale = res_high if use_high_res else res_low
+        horizontal_scale = res_high if use_high_res else res_low
+        area_factor = max(min(area_factor, 0.9999), 1e-3)
 
         boxes = []
 
         ground_thickness = 0.1
         base_size = np.array([terrain_size / 2.0, terrain_size / 2.0, ground_thickness / 2.0])
-        # place base so its top sits at z=0 in world frame
-        base_pos = pos + np.array([0.0, 0.0, -ground_thickness / 2.0])
+        base_pos = pos.copy()
         boxes.append({"name": "stepup_base", "size": base_size, "pos": base_pos})
 
         terrain_low_corner = pos + np.array([-terrain_size / 2.0, -terrain_size / 2.0, 0.0])
-        ground_top = 0.0
+        ground_top = base_pos[2] + base_size[2]
 
         n_tiles_x = max(1, int(math.ceil(terrain_size / platform_size)))
         n_tiles_y = max(1, int(math.ceil(terrain_size / platform_size)))
-        shrink_factor = math.sqrt(area_factor) if area_factor > 0.0 else 1.0
+
+        use_step_width = (min_step_width is not None and max_step_width is not None)
+        if use_step_width:
+            min_step_width = max(0.0, float(min_step_width))
+            max_step_width = max(min_step_width, float(max_step_width))
 
         for ix in range(n_tiles_x):
             for iy in range(n_tiles_y):
@@ -908,29 +924,89 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                 if rng.random() >= stairs_ratio:
                     continue
 
-                steps_for_tile = 1 if n_steps <= 1 else int(rng.integers(1, n_steps + 1))
+                tile_center_x = terrain_low_corner[0] + start_x_m + 0.5 * size_x
+                tile_center_y = terrain_low_corner[1] + start_y_m + 0.5 * size_y
 
-                world_start_x = terrain_low_corner[0] + start_x_m
-                world_start_y = terrain_low_corner[1] + start_y_m
+                if n_steps <= 1:
+                    step_height = float(rng.uniform(step_height_lb, step_height_ub))
+                    center_z = ground_top + 0.5 * step_height
+                    boxes.append({
+                        "name": f"stepup_tile_{ix}_{iy}",
+                        "size": np.array([size_x / 2.0, size_y / 2.0, step_height / 2.0]),
+                        "pos": np.array([tile_center_x, tile_center_y, center_z])
+                    })
+                    continue
+
+                shrink_factor = math.sqrt(area_factor)
+                steps_for_tile = int(rng.integers(1, n_steps + 1)) if random_n_steps else n_steps
+
+                accumulated_height = 0.0
+                curr_start_x = start_x_m
+                curr_start_y = start_y_m
+                curr_size_x = size_x
+                curr_size_y = size_y
 
                 for level in range(steps_for_tile):
-                    level_size_x = size_x * (shrink_factor ** level)
-                    level_size_y = size_y * (shrink_factor ** level)
-                    if level_size_x <= _horizontal_scale or level_size_y <= _horizontal_scale:
+                    if use_step_width:
+                        stair_w = float(rng.uniform(min_step_width, max_step_width))
+                        level_size_x = curr_size_x - 2.0 * stair_w
+                        level_size_y = curr_size_y - 2.0 * stair_w
+                    else:
+                        level_size_x = size_x * (shrink_factor ** level)
+                        level_size_y = size_y * (shrink_factor ** level)
+
+                    if level_size_x <= horizontal_scale or level_size_y <= horizontal_scale:
                         break
 
-                    level_start_x = world_start_x + 0.5 * (size_x - level_size_x)
-                    level_start_y = world_start_y + 0.5 * (size_y - level_size_y)
+                    if use_step_width:
+                        level_start_x = curr_start_x + stair_w
+                        level_start_y = curr_start_y + stair_w
+                    else:
+                        level_start_x = start_x_m + 0.5 * (size_x - level_size_x)
+                        level_start_y = start_y_m + 0.5 * (size_y - level_size_y)
 
-                    center_x = level_start_x + 0.5 * level_size_x
-                    center_y = level_start_y + 0.5 * level_size_y
-                    center_z = ground_top + (level + 0.5) * step_height
+                    level_height = float(rng.uniform(step_height_lb, step_height_ub))
+                    accumulated_height += level_height
+                    level_center_x = terrain_low_corner[0] + level_start_x + 0.5 * level_size_x
+                    level_center_y = terrain_low_corner[1] + level_start_y + 0.5 * level_size_y
+                    level_center_z = ground_top + (accumulated_height - 0.5 * level_height)
 
                     boxes.append({
                         "name": f"stepup_tile_{ix}_{iy}_lvl{level}",
-                        "size": np.array([level_size_x / 2.0, level_size_y / 2.0, step_height / 2.0]),
-                        "pos": np.array([center_x, center_y, center_z])
+                        "size": np.array([level_size_x / 2.0, level_size_y / 2.0, level_height / 2.0]),
+                        "pos": np.array([level_center_x, level_center_y, level_center_z])
                     })
+
+                    if use_step_width:
+                        curr_start_x = level_start_x
+                        curr_start_y = level_start_y
+                        curr_size_x = level_size_x
+                        curr_size_y = level_size_y
+
+        if wall_height > 0.0:
+            wall_thickness = 0.1
+            wall_z = ground_top + 0.5 * wall_height
+            half_size = terrain_size / 2.0
+            boxes.append({
+                "name": "stepup_wall_xp",
+                "size": np.array([wall_thickness / 2.0, half_size, wall_height / 2.0]),
+                "pos": np.array([pos[0] + half_size + wall_thickness / 2.0, pos[1], wall_z])
+            })
+            boxes.append({
+                "name": "stepup_wall_xm",
+                "size": np.array([wall_thickness / 2.0, half_size, wall_height / 2.0]),
+                "pos": np.array([pos[0] - half_size - wall_thickness / 2.0, pos[1], wall_z])
+            })
+            boxes.append({
+                "name": "stepup_wall_yp",
+                "size": np.array([half_size, wall_thickness / 2.0, wall_height / 2.0]),
+                "pos": np.array([pos[0], pos[1] + half_size + wall_thickness / 2.0, wall_z])
+            })
+            boxes.append({
+                "name": "stepup_wall_ym",
+                "size": np.array([half_size, wall_thickness / 2.0, wall_height / 2.0]),
+                "pos": np.array([pos[0], pos[1] - half_size - wall_thickness / 2.0, wall_z])
+            })
 
         return boxes
 
