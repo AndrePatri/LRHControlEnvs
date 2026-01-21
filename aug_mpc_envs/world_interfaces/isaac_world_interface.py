@@ -1621,26 +1621,26 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         failing = torch.nonzero(bad_z | bad_tilt, as_tuple=False).flatten()
         if failing.numel() > 0:
             # remediate: lift to terrain+margin, upright (preserve yaw), zero root velocities
-            yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
-            safe_z = (ground_z + margin)[failing]
-            self._root_p[robot_name][failing, 2] = safe_z
-            cos_h = torch.cos(yaw[failing] / 2)
-            sin_h = torch.sin(yaw[failing] / 2)
-            upright = torch.zeros((failing.shape[0], 4), device=self._device, dtype=self._dtype)
-            upright[:, 0] = cos_h
-            upright[:, 3] = sin_h
-            self._root_q[robot_name][failing, :] = upright
-            self._root_v[robot_name][failing, :] = 0.0
-            self._root_omega[robot_name][failing, :] = 0.0
+            # yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+            # safe_z = (ground_z + margin)[failing]
+            # self._root_p[robot_name][failing, 2] = safe_z
+            # cos_h = torch.cos(yaw[failing] / 2)
+            # sin_h = torch.sin(yaw[failing] / 2)
+            # upright = torch.zeros((failing.shape[0], 4), device=self._device, dtype=self._dtype)
+            # upright[:, 0] = cos_h
+            # upright[:, 3] = sin_h
+            # self._root_q[robot_name][failing, :] = upright
+            # self._root_v[robot_name][failing, :] = 0.0
+            # self._root_omega[robot_name][failing, :] = 0.0
 
-            msgs = []
+            msgs = [] # print db message
             if bad_z.any():
                 msgs.append(f"low_z envs {torch.nonzero(bad_z, as_tuple=False).flatten().tolist()}")
             if bad_tilt.any():
                 msgs.append(f"tilt envs {torch.nonzero(bad_tilt, as_tuple=False).flatten().tolist()}")
             Journal.log(self.__class__.__name__,
                         "_post_warmup_validation",
-                        f"Warmup validation adjusted {robot_name}: " + "; ".join(msgs),
+                        f"Warmup validation failures for {robot_name}: " + "; ".join(msgs),
                         LogType.WARN,
                         throw_when_excep=False)
         return failing
