@@ -1996,11 +1996,12 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         self._robots_art_views[robot_name].set_default_state(positions=self._root_p_default[robot_name], 
             orientations=self._root_q_default[robot_name])
         
-    def _zero_angular_velocities(self, robot_name: str, env_indxs: torch.Tensor = None):
+    def _alter_twist_warmup(self, robot_name: str, env_indxs: torch.Tensor = None):
         """Zero angular velocities and joint velocities for the given robot/envs."""
         if env_indxs is None:
             twist = self._robots_art_views[robot_name].get_velocities(clone=True)
-            # twist[:, 0:2] = 0.0
+            twist[:, 0] = 0.0
+            twist[:, 1] = 0.0
             twist[:, 3:] = 0.0  # zero angular part, preserve current linear
             self._robots_art_views[robot_name].set_velocities(velocities=twist, indices=None)
 
@@ -2015,6 +2016,8 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         else:
             twist = self._robots_art_views[robot_name].get_velocities(clone=True, indices=env_indxs)
             # twist[:, 0:2] = 0.0
+            twist[:, 0] = 0.0
+            twist[:, 1] = 0.0
             twist[:, 3:] = 0.0
             self._robots_art_views[robot_name].set_velocities(velocities=twist, indices=env_indxs)
         
