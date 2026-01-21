@@ -414,7 +414,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             else:
                 pos_src = self._root_p[robot_name] if env_indxs is None else self._root_p[robot_name][env_indxs]
                 quat_src = self._root_q[robot_name] if env_indxs is None else self._root_q[robot_name][env_indxs]
-            heights = self._height_sensors[robot_name].read(pos_src, quat_src)
+            heights = self._height_sensors[robot_name].read(pos_src, quat_src)*1.0
             if env_indxs is None:
                 self._height_imgs[robot_name] = heights
             else:
@@ -845,9 +845,6 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                 "pos": " ".join([f"{v:.5f}" for v in pos]),
                 "quat": "1 0 0 0",
                 "material": "groundplane",
-                "friction": "1.0 0.005 0.0001",
-                "solref": "0.02 1",
-                "solimp": "0.9 0.95 0.001 0.5 2",
                 "group": "2",
                 "contype": "1",
                 "conaffinity": "1"
