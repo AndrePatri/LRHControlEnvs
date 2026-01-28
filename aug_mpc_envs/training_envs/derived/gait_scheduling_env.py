@@ -24,6 +24,8 @@ class GaitSchedulingEnv(FakePosTrackingEnvWithDemo):
             timeout_ms: int = 60000,
             env_opts: Dict = {}):
 
+        env_opts["add_heightmap_obs"] = False
+        
         super().__init__(namespace=namespace,
             verbose=verbose,
             vlevel=vlevel,
