@@ -25,7 +25,7 @@ class GaitSchedulingEnv(FakePosTrackingEnvWithDemo):
             env_opts: Dict = {}):
 
         env_opts["add_heightmap_obs"] = False
-        env_opts.setdefault("walk_to_trot_delay_s", 0.8)
+        env_opts.setdefault("walk_to_trot_delay_s", 1.0)
         
         super().__init__(namespace=namespace,
             verbose=verbose,
