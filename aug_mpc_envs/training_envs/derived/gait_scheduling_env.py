@@ -38,14 +38,14 @@ class GaitSchedulingEnv(FakePosTrackingEnvWithDemo):
             env_opts=env_opts)
 
         # Override gait transition defaults for this env
-        self._env_opts["walk_to_trot_thresh_linvel"] = 0.4
+        self._env_opts["walk_to_trot_thresh_linvel"] = 0.6
         self._env_opts["walk_to_trot_thresh_omega"] = 0.5
-        self._env_opts["stopping_thresh"] = self._env_opts.get("stopping_thresh", 0.02)
+        self._env_opts["stopping_thresh"] = self._env_opts.get("stopping_thresh", 0.08)
         # Adaptive gait cadence based on refs: (min,max) event intervals between successive lift-offs
-        self.phase_period_walk_min=0.4
-        self.phase_period_walk_max=0.8
-        self.phase_period_trot_min=0.55
-        self.phase_period_trot_max=1.2
+        self.phase_period_walk_min=0.8
+        self.phase_period_walk_max=1.2
+        self.phase_period_trot_min=1.0
+        self.phase_period_trot_max=1.7
         # phase accumulators and buffers
         self._walk_phase = torch.zeros((self._n_demo_envs, 1), device=self._device, dtype=self._dtype)
         self._trot_phase = torch.zeros_like(self._walk_phase)
