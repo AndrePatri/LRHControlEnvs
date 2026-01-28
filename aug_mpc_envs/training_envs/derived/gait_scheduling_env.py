@@ -25,6 +25,7 @@ class GaitSchedulingEnv(FakePosTrackingEnvWithDemo):
             env_opts: Dict = {}):
 
         env_opts["add_heightmap_obs"] = False
+        env_opts.setdefault("walk_to_trot_delay_s", 0.8)
         
         super().__init__(namespace=namespace,
             verbose=verbose,
@@ -54,6 +55,8 @@ class GaitSchedulingEnv(FakePosTrackingEnvWithDemo):
         self._trot_offsets = None
         self._walk_init_mask = None
         self._trot_init_mask = None
+        self._gait_mode = None  # False -> walk, True -> trot
+        self._trot_delay_timer = None
 
     def _write_rhc_refs(self):
         """Do not touch MPC twist references; only push contact flags if needed."""
@@ -93,6 +96,8 @@ class GaitSchedulingEnv(FakePosTrackingEnvWithDemo):
                 self._prev_contact_trot = torch.ones((self._n_demo_envs, 4), device=self._device, dtype=torch.bool)
                 self._walk_init_mask = torch.zeros((self._n_demo_envs,), device=self._device, dtype=torch.bool)
                 self._trot_init_mask = torch.zeros((self._n_demo_envs,), device=self._device, dtype=torch.bool)
+                self._gait_mode = torch.zeros((self._n_demo_envs,), device=self._device, dtype=torch.bool)
+                self._trot_delay_timer = torch.zeros((self._n_demo_envs, 1), device=self._device, dtype=self._dtype)
 
             # adapt cadence based on ref speed
             speed = rhc_twist_refs[:, 0:2].norm(dim=1, keepdim=True) + rhc_twist_refs[:, 5:6].abs()
@@ -130,38 +135,66 @@ class GaitSchedulingEnv(FakePosTrackingEnvWithDemo):
             have_to_stop = torch.logical_and(have_to_stop_linvel, have_to_stop_omega)
             stop_and_demo = torch.logical_and(have_to_stop.flatten(), demo_mask)
 
-            # Walk contact pattern from phase accumulator (50% duty via sin > 0)
-            walk_phase = self._walk_phase[self._env_to_gait_sched_mapping[self._demo_envs_idxs_bool], :]
-            walk_sin = torch.sin(walk_phase + self._walk_offsets)
-            is_contact_walk = walk_sin > 0.0
-            walk_idxs = self._env_to_gait_sched_mapping[self._demo_envs_idxs_bool]
-            liftoff_walk = torch.logical_and(self._prev_contact_walk, torch.logical_not(is_contact_walk))
-            liftoff_walk = torch.logical_and(liftoff_walk, self._walk_init_mask[walk_idxs].unsqueeze(1))
-            contact_flag_walk = torch.ones_like(is_contact_walk, dtype=self._dtype)
-            contact_flag_walk[liftoff_walk] = -1.0
-            # safety guard: never trigger too many pulses in one step
-            walk_pulses = (contact_flag_walk == -1).sum(dim=1, keepdim=True)
-            if (walk_pulses > 2).any():
-                contact_flag_walk[walk_pulses > 2] = 1.0
-            agent_action[self._demo_envs_idxs, 6:10] = contact_flag_walk
-            self._prev_contact_walk = is_contact_walk.detach().clone()
-            self._walk_init_mask[walk_idxs] = True
-
+            # build per-demo masks
+            demo_idxs = self._env_to_gait_sched_mapping[self._demo_envs_idxs_bool]
+            fast_demo_mask = torch.zeros_like(self._gait_mode)
             if fast_and_demo.any():
-                trot_phase = self._trot_phase[self._env_to_gait_sched_mapping[fast_and_demo], :]
+                fast_demo_mask[self._env_to_gait_sched_mapping[fast_and_demo]] = True
+
+            # accumulate fast time for walk->trot switch (delay)
+            dt = self._substep_dt * self._action_repeat
+            self._trot_delay_timer[fast_demo_mask, 0] += dt
+            self._trot_delay_timer[~fast_demo_mask, 0] = 0.0
+
+            switch_to_trot = torch.logical_and(~self._gait_mode, self._trot_delay_timer[:, 0] >= self._env_opts["walk_to_trot_delay_s"])
+            switch_to_walk = torch.logical_and(self._gait_mode, ~fast_demo_mask)
+
+            if switch_to_trot.any():
+                # avoid liftoff pulses from walk during the switch
+                self._walk_init_mask[switch_to_trot] = False
+            if switch_to_walk.any():
+                self._trot_init_mask[switch_to_walk] = False
+
+            self._gait_mode[switch_to_trot] = True
+            self._gait_mode[switch_to_walk] = False
+
+            active_walk_env = torch.zeros_like(demo_mask)
+            active_trot_env = torch.zeros_like(demo_mask)
+            active_walk_env[self._demo_envs_idxs_bool] = (~self._gait_mode)[demo_idxs]
+            active_trot_env[self._demo_envs_idxs_bool] = self._gait_mode[demo_idxs]
+
+            # Walk contact pattern from phase accumulator (50% duty via sin > 0)
+            if active_walk_env.any():
+                walk_env_idxs = self._env_to_gait_sched_mapping[active_walk_env]
+                walk_phase = self._walk_phase[walk_env_idxs, :]
+                walk_sin = torch.sin(walk_phase + self._walk_offsets)
+                is_contact_walk = walk_sin > 0.0
+                liftoff_walk = torch.logical_and(self._prev_contact_walk[walk_env_idxs, :], torch.logical_not(is_contact_walk))
+                liftoff_walk = torch.logical_and(liftoff_walk, self._walk_init_mask[walk_env_idxs].unsqueeze(1))
+                contact_flag_walk = torch.ones_like(is_contact_walk, dtype=self._dtype)
+                contact_flag_walk[liftoff_walk] = -1.0
+                walk_pulses = (contact_flag_walk == -1).sum(dim=1, keepdim=True)
+                if (walk_pulses > 2).any():
+                    contact_flag_walk[walk_pulses > 2] = 1.0
+                agent_action[active_walk_env, 6:10] = contact_flag_walk
+                self._prev_contact_walk[walk_env_idxs, :] = is_contact_walk.detach().clone()
+                self._walk_init_mask[walk_env_idxs] = True
+
+            if active_trot_env.any():
+                trot_env_idxs = self._env_to_gait_sched_mapping[active_trot_env]
+                trot_phase = self._trot_phase[trot_env_idxs, :]
                 trot_sin = torch.sin(trot_phase + self._trot_offsets)
                 is_contact_trot = trot_sin > 0.0
-                idxs = self._env_to_gait_sched_mapping[fast_and_demo]
-                liftoff_trot = torch.logical_and(self._prev_contact_trot[idxs, :], torch.logical_not(is_contact_trot))
-                liftoff_trot = torch.logical_and(liftoff_trot, self._trot_init_mask[idxs].unsqueeze(1))
+                liftoff_trot = torch.logical_and(self._prev_contact_trot[trot_env_idxs, :], torch.logical_not(is_contact_trot))
+                liftoff_trot = torch.logical_and(liftoff_trot, self._trot_init_mask[trot_env_idxs].unsqueeze(1))
                 contact_flag_trot = torch.ones_like(is_contact_trot, dtype=self._dtype)
                 contact_flag_trot[liftoff_trot] = -1.0
                 trot_pulses = (contact_flag_trot == -1).sum(dim=1, keepdim=True)
                 if (trot_pulses > 2).any():
                     contact_flag_trot[trot_pulses > 2] = 1.0
-                agent_action[fast_and_demo, 6:10] = contact_flag_trot
-                self._prev_contact_trot[idxs, :] = is_contact_trot.detach().clone()
-                self._trot_init_mask[idxs] = True
+                agent_action[active_trot_env, 6:10] = contact_flag_trot
+                self._prev_contact_trot[trot_env_idxs, :] = is_contact_trot.detach().clone()
+                self._trot_init_mask[trot_env_idxs] = True
 
             if stop_and_demo.any():
                 agent_action[stop_and_demo, 6:10] = 1.0
