@@ -20,7 +20,7 @@ import numpy as np
 
 # Import the provided JoyListenerZMQ (assumes it's importable from your path)
 # If it's in another module, change the import accordingly.
-from AugMPCEnvs.aug_mpc_envs.utils.xbot2.listener_xbot_zmq import JoyListenerXbot2ZMQ 
+from aug_mpc_envs.utils.xbot2.listener_xbot_zmq import JoyListenerXbot2ZMQ 
 
 from typing import Optional, Callable, Any
 

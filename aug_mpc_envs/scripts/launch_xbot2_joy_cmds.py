@@ -26,11 +26,10 @@ if __name__ == "__main__":
                           vlevel=VLevel.V2)
 
     # import both classes (assumes they are available at these paths)
-    from AugMPCEnvs.aug_mpc_envs.utils.xbot2.listener_xbot_zmq import JoyListenerXbot2ZMQ 
     from AugMPCEnvs.aug_mpc_envs.utils.xbot2.joy_cmds import RefsFromJoy 
 
     # joystick-driven
-    joy_cmds = JoyListenerXbot2ZMQ(namespace=args.ns,
+    joy_cmds = RefsFromJoy(namespace=args.ns,
                             shared_refs=shared_refs,
                             verbose=True,
                             agent_refs_world=False,
