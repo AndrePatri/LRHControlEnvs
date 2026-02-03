@@ -25,7 +25,10 @@ class GaitSchedulingEnv(FakePosTrackingEnvWithDemo):
             env_opts: Dict = {}):
 
         env_opts["add_heightmap_obs"] = False
-        env_opts.setdefault("walk_to_trot_delay_s", 1.0)
+        env_opts.setdefault("walk_to_trot_delay_s", 0.8)
+        env_opts.setdefault("trot_to_walk_delay_s", 0.5)
+        env_opts.setdefault("enable_gait_transition", True)
+        env_opts.setdefault("default_gait", "trot")
         
         super().__init__(namespace=namespace,
             verbose=verbose,
@@ -38,14 +41,14 @@ class GaitSchedulingEnv(FakePosTrackingEnvWithDemo):
             env_opts=env_opts)
 
         # Override gait transition defaults for this env
-        self._env_opts["walk_to_trot_thresh_linvel"] = 0.6
-        self._env_opts["walk_to_trot_thresh_omega"] = 0.5
         self._env_opts["stopping_thresh"] = self._env_opts.get("stopping_thresh", 0.08)
+        self._env_opts["walk_to_trot_thresh_linvel"] = 0.7
+        self._env_opts["walk_to_trot_thresh_omega"] = 0.6
         # Adaptive gait cadence based on refs: (min,max) event intervals between successive lift-offs
-        self.phase_period_walk_min=0.8
-        self.phase_period_walk_max=1.2
-        self.phase_period_trot_min=1.0
-        self.phase_period_trot_max=1.7
+        self.phase_period_walk_min=0.7
+        self.phase_period_walk_max=1.0
+        self.phase_period_trot_min=0.8
+        self.phase_period_trot_max=1.5
         # phase accumulators and buffers
         self._walk_phase = torch.zeros((self._n_demo_envs, 1), device=self._device, dtype=self._dtype)
         self._trot_phase = torch.zeros_like(self._walk_phase)
@@ -61,6 +64,7 @@ class GaitSchedulingEnv(FakePosTrackingEnvWithDemo):
         self._trot_init_mask = torch.zeros_like(self._walk_init_mask)
         self._gait_mode = torch.zeros((self._n_demo_envs,), device=self._device, dtype=torch.bool)  # False -> walk, True -> trot
         self._trot_delay_timer = torch.zeros((self._n_demo_envs, 1), device=self._device, dtype=self._dtype)
+        self._walk_delay_timer = torch.zeros_like(self._trot_delay_timer)
 
         self._dt = self._substep_dt * self._action_repeat
         
@@ -126,26 +130,39 @@ class GaitSchedulingEnv(FakePosTrackingEnvWithDemo):
             have_to_stop = torch.logical_and(have_to_stop_linvel, have_to_stop_omega)
             stop_and_demo = torch.logical_and(have_to_stop.flatten(), demo_mask)
 
-            # build per-demo masks (recomputed every step)
-            fast_demo_mask = torch.zeros_like(self._gait_mode)
-            if fast_and_demo.any():
-                fast_demo_mask[self._env_to_gait_sched_mapping[fast_and_demo]] = True
+            if self._env_opts["enable_gait_transition"]:
+                # build per-demo masks (recomputed every step)
+                fast_demo_mask = torch.zeros_like(self._gait_mode)
+                if fast_and_demo.any():
+                    fast_demo_mask[self._env_to_gait_sched_mapping[fast_and_demo]] = True
+                slow_demo_mask = torch.zeros_like(self._gait_mode)
+                if have_to_go_slow_and_demo.any():
+                    slow_demo_mask[self._env_to_gait_sched_mapping[have_to_go_slow_and_demo]] = True
 
-            # accumulate fast time for walk->trot switch (delay)
-            self._trot_delay_timer[fast_demo_mask, 0] += self._dt
-            self._trot_delay_timer[~fast_demo_mask, 0] = 0.0
+                # accumulate fast time for walk->trot switch (delay)
+                self._trot_delay_timer[fast_demo_mask, 0] += self._dt
+                self._trot_delay_timer[~fast_demo_mask, 0] = 0.0
+                # accumulate slow time for trot->walk switch (delay)
+                self._walk_delay_timer[slow_demo_mask, 0] += self._dt
+                self._walk_delay_timer[~slow_demo_mask, 0] = 0.0
 
-            switch_to_trot = torch.logical_and(~self._gait_mode, self._trot_delay_timer[:, 0] >= self._env_opts["walk_to_trot_delay_s"])
-            switch_to_walk = torch.logical_and(self._gait_mode, ~fast_demo_mask)
+                switch_to_trot = torch.logical_and(~self._gait_mode, self._trot_delay_timer[:, 0] >= self._env_opts["walk_to_trot_delay_s"])
+                switch_to_walk = torch.logical_and(self._gait_mode, self._walk_delay_timer[:, 0] >= self._env_opts["trot_to_walk_delay_s"])
 
-            if switch_to_trot.any():
-                # avoid liftoff pulses from walk during the switch
-                self._walk_init_mask[switch_to_trot] = False
-            if switch_to_walk.any():
-                self._trot_init_mask[switch_to_walk] = False
+                if switch_to_trot.any():
+                    # avoid liftoff pulses from walk during the switch
+                    self._walk_init_mask[switch_to_trot] = False
+                if switch_to_walk.any():
+                    self._trot_init_mask[switch_to_walk] = False
 
-            self._gait_mode[switch_to_trot] = True
-            self._gait_mode[switch_to_walk] = False
+                self._gait_mode[switch_to_trot] = True
+                self._gait_mode[switch_to_walk] = False
+            else:
+                # force a fixed gait according to default_gait
+                use_trot = self._env_opts["default_gait"].lower() == "trot"
+                self._gait_mode.fill_(use_trot)
+                self._trot_delay_timer.zero_()
+                self._walk_delay_timer.zero_()
 
             active_walk_env = torch.zeros_like(demo_mask)
             active_trot_env = torch.zeros_like(demo_mask)
