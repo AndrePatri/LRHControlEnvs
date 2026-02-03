@@ -196,16 +196,12 @@ class JoyListenerXbot2ZMQ:
         Parse a velocity_command payload with vref = [vx, vy, vz, wx, wy, wz].
         """
         vref = payload.get("vref", []) or []
-        print("AAAAAAAAAA")
-        print(vref)
         # Fill missing entries with zeros
-        vref = list(vref) + [0.0] * max(0, 6 - len(vref))
-
         vx, vy, vz, wx, wy, wz = vref[:6]
         # Clamp to joystick-like normalized range for downstream expectations
         vx = float(np.clip(vx, -1.0, 1.0))
-        vy = float(np.clip(vy, -1.0, 1.0))
-        wz = float(np.clip(wz, -1.0, 1.0))
+        vy = float(np.clip(-vy, -1.0, 1.0))
+        wz = float(np.clip(-wz, -1.0, 1.0))
 
         # reset to neutral
         self.sticks[:] = 0.0
