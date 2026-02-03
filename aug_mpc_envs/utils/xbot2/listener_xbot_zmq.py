@@ -41,9 +41,8 @@ class JoyListenerXbot2ZMQ:
         # bind so the GUI (publisher) can connect
         self.sock.bind(self.connect_addr)
 
-        # subscribe to topic
-        self.topic_bytes = self.topic.encode("utf-8")
-        self.sock.setsockopt(zmq.SUBSCRIBE, self.topic_bytes)
+        # subscribe to all (GUI sends single-frame JSON without topic frame)
+        self.sock.setsockopt_string(zmq.SUBSCRIBE, "")
 
         # state holders (default neutral)
         self.sticks = np.zeros(4, dtype=np.float32)  # left_x,left_y,right_x,right_y
@@ -86,13 +85,11 @@ class JoyListenerXbot2ZMQ:
 
         try:
             while not self.done:
-
                 # poller timeout in milliseconds
                 events = dict(poller.poll(int(self.poll_interval * 1000)))
-                print(events)
                 if self.sock in events:
                     try:
-                        frames = self.sock.recv_multipart(flags=0)
+                        msg_str = self.sock.recv_string(flags=0)
                     except zmq.ZMQError as e:
                         # interrupted or socket closed
                         if self.done:
@@ -100,19 +97,8 @@ class JoyListenerXbot2ZMQ:
                         print("[JoyListenerZMQ] ZMQ recv error:", e)
                         continue
 
-                    if len(frames) != 2:
-                        print("Unexpected frame count:", len(frames))
-                        continue
-
-                    topic_frame, jbytes = frames
-                    # check topic to be safe
-                    if topic_frame != self.topic_bytes:
-                        # ignore unexpected topic
-                        print("Unexpected topic")
-                        continue
-
                     try:
-                        payload = json.loads(jbytes.decode("utf-8"))
+                        payload = json.loads(msg_str)
                     except Exception as e:
                         print("JSON decode error:", e)
                         continue
@@ -141,11 +127,18 @@ class JoyListenerXbot2ZMQ:
 
     def _store_payload_data(self, payload: dict):
         """
-        Parse the minimal GUI payload (linear x/y + yaw) into the internal arrays
-        expected by downstream consumers. All other controls are forced to neutral.
+        Parse incoming payloads.
+        - If payload carries `vref` (twist array), map to sticks/triggers directly.
+        - Otherwise fall back to minimal GUI payload (linear x/y + yaw).
+        All other controls are forced to neutral.
         """
         self.seq = payload.get("seq")
         self.ts = payload.get("timestamp", time.time())
+
+        if "vref" in payload:
+            self._store_vref_payload(payload)
+            return
+
         # minimal GUI publishers may wrap data in "state" or send it top-level
         state = payload.get("state", payload) or {}
         self.name = state.get("name", "minimal_gui")
@@ -196,6 +189,50 @@ class JoyListenerXbot2ZMQ:
         self.info_str = (
             f"[{time.strftime('%H:%M:%S', time.localtime(self.ts))}] "
             f"seq={self.seq} device='{self.name}' lin=({lin_x:.3f},{lin_y:.3f}) yaw={yaw_val:.3f}"
+        )
+
+    def _store_vref_payload(self, payload: dict):
+        """
+        Parse a velocity_command payload with vref = [vx, vy, vz, wx, wy, wz].
+        """
+        vref = payload.get("vref", []) or []
+        print("AAAAAAAAAA")
+        print(vref)
+        # Fill missing entries with zeros
+        vref = list(vref) + [0.0] * max(0, 6 - len(vref))
+
+        vx, vy, vz, wx, wy, wz = vref[:6]
+        # Clamp to joystick-like normalized range for downstream expectations
+        vx = float(np.clip(vx, -1.0, 1.0))
+        vy = float(np.clip(vy, -1.0, 1.0))
+        wz = float(np.clip(wz, -1.0, 1.0))
+
+        # reset to neutral
+        self.sticks[:] = 0.0
+        self.stick_press[:] = False
+        self.triggers[:] = 0.0
+        self.bumpers[:] = False
+        self.face[:] = False
+        self.back_start_home[:] = False
+        self.hat[:] = 0
+
+        # linear -> right stick slots (same as minimal GUI mapping)
+        self.sticks[2] = vx
+        self.sticks[3] = vy
+
+        # yaw rate -> triggers (positive yaw -> left trigger)
+        self.triggers[0] = max(wz, 0.0)
+        self.triggers[1] = max(-wz, 0.0)
+
+        # raw copies
+        self.axes = [vx, vy, vz, wx, wy, wz]
+        self.buttons = []
+        self.hats = []
+
+        self.name = payload.get("task_name", payload.get("type", "vref_cmd"))
+        self.info_str = (
+            f"[{time.strftime('%H:%M:%S', time.localtime(self.ts))}] "
+            f"vref lin=({vx:.3f},{vy:.3f}) yaw={wz:.3f} task='{self.name}'"
         )
 
     def stop(self):
