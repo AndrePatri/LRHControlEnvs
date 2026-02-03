@@ -159,6 +159,10 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["stepup_wall_height"]=2.0
         xmj_opts["stepup_seed"]=None
 
+        xmj_opts["jnt_imp_ramp_time"]=0.1
+        xmj_opts["jnt_imp_ramp_time_onclose"]=0.2
+        xmj_opts["jnt_pos_ramp_time"]=5.0
+
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         xmj_opts["rendering_dt"]=1/xmj_opts["render_fps"]        
         xmj_opts["height_sensor_pixels"]=int(xmj_opts["height_sensor_pixels"])
@@ -336,6 +340,38 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
         self._xmj_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
 
+    def _jnt_imp_reset_overrride(self, 
+        robot_name: str):
+        
+        # before env applies jnt imp reset to robot, we ensure no discountinuities by always ramping impedances 
+        # with the current position as target and no velocity and effort references
+
+        # write joint position targets to current position to avoid jumps  
+        n_jnts=len(self._robot_jnt_names(robot_name=robot_name))
+        null_cmd=torch.zeros((1, n_jnts), 
+                    dtype=self._dtype,
+                    device=self._device)   
+        # reset_q=self._jnts_q[robot_name]
+
+        self._jnt_imp_controllers[robot_name].set_refs(
+            pos_ref=self._homing,
+            vel_ref=null_cmd,
+            eff_ref=null_cmd,
+            robot_indxs = None)
+
+        self._xmj_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[robot_name].get_pvesd())
+        super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
+
+        # ramp position references to avoid jumps
+        # ramp position references slowly (decoupled from impedance ramp)
+        self._xmj_adapter.apply_joint_ref_with_ramp(self._xmj_adapter._commanded_joint_impedances_by_name,
+                                    ramp_time=self._env_opts["jnt_pos_ramp_time"])
+        
+        # ramp impedances
+        self._xmj_adapter.apply_joint_impedances_with_ramp(self._xmj_adapter._commanded_joint_impedances_by_name,
+                                    impedance_ramp_time=self._env_opts["jnt_imp_ramp_time"]) # ramps impeances
+
+
     def _step_world(self): 
         time_elapsed=self._xmj_adapter.step()
         if not (abs(time_elapsed-self.physics_dt())<1e-6):
@@ -420,7 +456,6 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             else:
                 self._height_imgs[robot_name][env_indxs] = heights.clone()
 
-            
     def _read_jnts_state_from_robot(self,
         robot_name: str,
         env_indxs: torch.Tensor = None):            

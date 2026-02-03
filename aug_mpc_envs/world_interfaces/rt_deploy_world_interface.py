@@ -131,6 +131,7 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
 
         xmj_opts["jnt_imp_ramp_time"]=0.1
         xmj_opts["jnt_imp_ramp_time_onclose"]=0.2
+        xmj_opts["jnt_pos_ramp_time"]=3.0
 
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         
@@ -332,12 +333,18 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             vel_ref=null_cmd,
             eff_ref=null_cmd,
             robot_indxs = None)
-        super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
 
         self._ros_xbot_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
+        super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name) # need to be called here to propoerly apply pvesd tensor
+
+        # ramp position references to avoid jumps
+        # ramp position references slowly (decoupled from impedance ramp)
+        self._ros_xbot_adapter.apply_joint_ref_with_ramp(self._ros_xbot_adapter._commanded_joint_impedances_by_name,
+                                    ramp_time=self._env_opts["jnt_pos_ramp_time"])
         
+        # ramp impedances
         self._ros_xbot_adapter.apply_joint_impedances_with_ramp(self._ros_xbot_adapter._commanded_joint_impedances_by_name,
-                                                    impedance_ramp_time=self._env_opts["jnt_imp_ramp_time"]) # ramps impeances
+                                    impedance_ramp_time=self._env_opts["jnt_imp_ramp_time"]) # ramps impeances
 
     # def _set_startup_jnt_imp_gains(self,
     #         robot_name:str, 
