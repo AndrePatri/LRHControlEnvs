@@ -338,9 +338,10 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name) # need to be called here to propoerly apply pvesd tensor
 
         # ramp position references to avoid jumps
-        # ramp position references slowly (decoupled from impedance ramp)
-        self._ros_xbot_adapter.apply_joint_ref_with_ramp(self._ros_xbot_adapter._commanded_joint_impedances_by_name,
-                                    ramp_time=self._env_opts["jnt_pos_ramp_time"])
+        self._ros_xbot_adapter.moveToJointPoseSync(self._ros_xbot_adapter._commanded_joint_impedances_by_name,
+                                    velocity_scaling=1.0, acceleration_scaling=1.0,
+                                    joint_position_tolerance=1e9,
+                                    max_time_s=self._env_opts.get("jnt_pos_ramp_time", self._ros_xbot_adapter.position_ramp_time))
         
         # ramp impedances
         self._ros_xbot_adapter.apply_joint_impedances_with_ramp(self._ros_xbot_adapter._commanded_joint_impedances_by_name,

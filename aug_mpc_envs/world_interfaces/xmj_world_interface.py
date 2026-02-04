@@ -85,6 +85,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             throw_when_excep = True)
 
         self._xmj_adapter_init_tsteps=n_init_step
+        
         super().__init__(name=name,
             robot_names=robot_names,
             robot_urdf_paths=robot_urdf_paths,
@@ -362,14 +363,14 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         self._xmj_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[robot_name].get_pvesd())
         super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
 
-        # ramp position references to avoid jumps
-        # ramp position references slowly (decoupled from impedance ramp)
-        self._xmj_adapter.apply_joint_ref_with_ramp(self._xmj_adapter._commanded_joint_impedances_by_name,
-                                    ramp_time=self._env_opts["jnt_pos_ramp_time"])
+        # ramp position references to avoid jumps using position trajectory
+        self._xmj_adapter.moveToJointPoseSync(self._xmj_adapter._commanded_joint_impedances_by_name,
+                                    joint_position_tolerance=0.2,
+                                    max_time_s=self._env_opts["jnt_pos_ramp_time"])
         
         # ramp impedances
         self._xmj_adapter.apply_joint_impedances_with_ramp(self._xmj_adapter._commanded_joint_impedances_by_name,
-                                    impedance_ramp_time=self._env_opts["jnt_imp_ramp_time"]) # ramps impeances
+                                ramp_time=self._env_opts["jnt_imp_ramp_time"]) # ramps impeances
 
 
     def _step_world(self): 
