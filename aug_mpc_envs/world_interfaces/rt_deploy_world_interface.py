@@ -131,7 +131,7 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
 
         xmj_opts["jnt_imp_ramp_time"]=0.1
         xmj_opts["jnt_imp_ramp_time_onclose"]=0.2
-        xmj_opts["jnt_pos_ramp_time"]=3.0
+        xmj_opts["jnt_pos_ramp_time"]=5.0
 
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         
@@ -326,10 +326,10 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         null_cmd=torch.zeros((1, n_jnts), 
                     dtype=self._dtype,
                     device=self._device)   
-        reset_q=self._jnts_q[robot_name]
-        # reset_q=self._homing
+        # reset_q=self._jnts_q[robot_name]
+        
         self._jnt_imp_controllers[robot_name].set_refs(
-            pos_ref=reset_q,
+            pos_ref=self._homing,
             vel_ref=null_cmd,
             eff_ref=null_cmd,
             robot_indxs = None)
@@ -338,14 +338,15 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name) # need to be called here to propoerly apply pvesd tensor
 
         # ramp position references to avoid jumps
-        self._ros_xbot_adapter.moveToJointPoseSync(self._ros_xbot_adapter._commanded_joint_impedances_by_name,
-                                    velocity_scaling=1.0, acceleration_scaling=1.0,
-                                    joint_position_tolerance=1e9,
-                                    max_time_s=self._env_opts.get("jnt_pos_ramp_time", self._ros_xbot_adapter.position_ramp_time))
-        
+        # self._ros_xbot_adapter.moveToJointPoseSync(self._ros_xbot_adapter._commanded_joint_impedances_by_name,
+        #                             velocity_scaling=1.0, acceleration_scaling=1.0,
+        #                             joint_position_tolerance=1e9,
+        #                             max_time_s=self._env_opts.get("jnt_pos_ramp_time", self._ros_xbot_adapter.position_ramp_time))
+        self._ros_xbot_adapter.apply_joint_ref_with_ramp(self._ros_xbot_adapter._commanded_joint_impedances_by_name,
+                                    ramp_time=self._env_opts["jnt_pos_ramp_time"])
         # ramp impedances
         self._ros_xbot_adapter.apply_joint_impedances_with_ramp(self._ros_xbot_adapter._commanded_joint_impedances_by_name,
-                                    impedance_ramp_time=self._env_opts["jnt_imp_ramp_time"]) # ramps impeances
+                                    ramp_time=self._env_opts["jnt_imp_ramp_time"]) # ramps impeances
 
     # def _set_startup_jnt_imp_gains(self,
     #         robot_name:str, 
