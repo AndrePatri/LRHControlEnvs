@@ -129,9 +129,9 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
 
         xmj_opts["max_imp_torque"]=150.0 # [Nm]
 
-        xmj_opts["jnt_imp_ramp_time"]=0.1
-        xmj_opts["jnt_imp_ramp_time_onclose"]=0.2
-        xmj_opts["jnt_pos_ramp_time"]=5.0
+        xmj_opts["jnt_imp_ramp_time"]=0.5
+        xmj_opts["jnt_pos_ramp_time"]=3.0
+        xmj_opts["jnt_imp_ramp_time_onclose"]=0.5
 
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         

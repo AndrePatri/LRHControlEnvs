@@ -160,9 +160,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["stepup_wall_height"]=2.0
         xmj_opts["stepup_seed"]=None
 
-        xmj_opts["jnt_imp_ramp_time"]=0.1
-        xmj_opts["jnt_imp_ramp_time_onclose"]=0.2
-        xmj_opts["jnt_pos_ramp_time"]=5.0
+        xmj_opts["jnt_imp_ramp_time"]=0.5
+        xmj_opts["jnt_pos_ramp_time"]=3.0
 
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         xmj_opts["rendering_dt"]=1/xmj_opts["render_fps"]        
@@ -368,9 +367,11 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         # self._xmj_adapter.moveToJointPoseSync(pvesd[:, 0],  # only position column
         #                             joint_position_tolerance=0.2,
         #                             max_time_s=self._env_opts["jnt_pos_ramp_time"])
+        # ramp impedances
+
         self._xmj_adapter.apply_joint_ref_with_ramp(self._xmj_adapter._commanded_joint_impedances_by_name,
                                     ramp_time=self._env_opts["jnt_pos_ramp_time"])
-        # ramp impedances
+        
         self._xmj_adapter.apply_joint_impedances_with_ramp(self._xmj_adapter._commanded_joint_impedances_by_name,
                                 ramp_time=self._env_opts["jnt_imp_ramp_time"]) # ramps impeances
 
@@ -399,7 +400,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         return jnt_imp_controller
 
     def _reset_sim(self):
-        self._xmj_adapter.resetWorld()
+        pass
+        # self._xmj_adapter.resetWorld()
         
     def _set_startup_jnt_imp_gains(self,
             robot_name:str, 
@@ -679,7 +681,6 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         self._xmj_adapter.xmj_env().move_to_homing_now()
                 
     def _set_root_to_defconfig(self, robot_name: str):
-
         self._xmj_adapter.xmj_env().set_pi(self._root_p_default[robot_name].numpy())
         self._xmj_adapter.xmj_env().set_qi(self._root_q_default[robot_name].numpy())
 
