@@ -442,7 +442,6 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         return jnt_imp_controller
 
     def _reset_sim(self):
-        # pass
         self._xmj_adapter.resetWorld()
         
     def _set_startup_jnt_imp_gains(self,
