@@ -107,7 +107,23 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         # BaseTask.__init__(self,name=self._name,offset=None)
 
     def is_running(self):
-        return self._xmj_adapter.sim_is_running()
+        ros_control_running=self._xmj_adapter.is_ros_control_running()
+        if not ros_control_running:
+            Journal.log(self.__class__.__name__,
+            "_is_running",
+            "ros_control is not running",
+            LogType.EXCEP,
+            throw_when_excep = False)
+
+        sim_running=self._xmj_adapter.sim_is_running()
+        if not sim_running:
+            Journal.log(self.__class__.__name__,
+            "_is_running",
+            "simulation is not running",
+            LogType.EXCEP,
+            throw_when_excep = False)
+
+        return ros_control_running and sim_running and self._isrunning  
     
     def _pre_setup(self):
         
@@ -160,8 +176,12 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["stepup_wall_height"]=2.0
         xmj_opts["stepup_seed"]=None
 
-        xmj_opts["jnt_imp_ramp_time"]=0.5
-        xmj_opts["jnt_pos_ramp_time"]=3.0
+        xmj_opts["ramp_to_homing"]=True
+        xmj_opts["xbot_homing_on_close"]=False
+        xmj_opts["ramp_impedances"]=True
+        xmj_opts["jnt_imp_ramp_time"]=1.0
+        xmj_opts["jnt_pos_ramp_time"]=4.0
+        xmj_opts["jnt_imp_ramp_time_onclose"]=2.0
 
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         xmj_opts["rendering_dt"]=1/xmj_opts["render_fps"]        
@@ -214,6 +234,15 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         # if "enable_viewport" in sim_params:
         #     self._render = sim_params["enable_viewport"]
 
+    def _setup(self):
+
+        # last thing called before spinning
+        setup_ok=super()._setup()
+
+        self._isrunning=True
+
+        return setup_ok
+    
     def _configure_scene(self):
 
         # environment 
@@ -284,6 +313,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                 srdf_str = f.read()
             self._xmj_adapter.startup(urdf=urdf_str,
                             srdf=srdf_str)
+            self._xmj_adapter.position_ramp_time=self._env_opts["jnt_pos_ramp_time"] # [s]
+            self._xmj_adapter.impedance_ramp_time=self._env_opts["jnt_imp_ramp_time"] # [s]
             self._xmj_adapter.set_filters(set_enabled=True, 
                 profile_name=self._env_opts["xbot2_filter_prof"])
 
@@ -334,47 +365,58 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         pass
 
     def _close(self):
-        pass
-    
+        for i in range(len(self._robot_names)):
+            robot_name = self._robot_names[i]
+
+            # set filters to safe
+            self._xmj_adapter.set_filters(set_enabled=True, 
+                profile_name="safe")
+
+            # resets jnt imp gain to the startups with a ramp
+            self._xmj_adapter.impedance_ramp_time=self._env_opts["jnt_imp_ramp_time_onclose"] # setting slower
+            self._env_opts["ramp_to_homing"]=False # skip homing when closing
+            
+            # read last pos ref from jnt imp control before reset
+            
+            # ramp since impedances will generally be ramped up when cleaning up
+            self._reset_jnt_imp_control(robot_name=robot_name) # will set jnt imp gains to initial vals and 
+            # pos ref to homing and apply them with the adapter
+
+            if self._env_opts["xbot_homing_on_close"]:
+                self._xmj_adapter.trigger_homing() # perform a final
+            # homing to reset the robot to its default xbot state
+
+            self._isrunning=False
+
     def _apply_cmds_to_jnt_imp_control(self, robot_name:str):
         super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
         self._xmj_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
-
+        self._p_ref_reset[robot_name][:, :]= self._jnt_imp_controllers[robot_name].pos_ref() # store last sent pos ref
+        
     def _jnt_imp_reset_overrride(self, 
         robot_name: str):
         
         # before env applies jnt imp reset to robot, we ensure no discountinuities by always ramping impedances 
         # with the current position as target and no velocity and effort references
 
-        # write joint position targets to current position to avoid jumps  
-        n_jnts=len(self._robot_jnt_names(robot_name=robot_name))
-        null_cmd=torch.zeros((1, n_jnts), 
-                    dtype=self._dtype,
-                    device=self._device)   
-        # reset_q=self._jnts_q[robot_name]
-
-        self._jnt_imp_controllers[robot_name].set_refs(
-            pos_ref=self._homing,
-            vel_ref=null_cmd,
-            eff_ref=null_cmd,
-            robot_indxs = None)
-
-        pvesd = self._jnt_imp_controllers[robot_name].get_pvesd()
-        self._xmj_adapter.setJointsImpedanceCommand(pvesd)
-        super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
-
-        # ramp position references to avoid jumps using position trajectory
-        # self._xmj_adapter.moveToJointPoseSync(pvesd[:, 0],  # only position column
-        #                             joint_position_tolerance=0.2,
-        #                             max_time_s=self._env_opts["jnt_pos_ramp_time"])
-        # ramp impedances
-
-        self._xmj_adapter.apply_joint_ref_with_ramp(self._xmj_adapter._commanded_joint_impedances_by_name,
-                                    ramp_time=self._env_opts["jnt_pos_ramp_time"])
-        
-        self._xmj_adapter.apply_joint_impedances_with_ramp(self._xmj_adapter._commanded_joint_impedances_by_name,
-                                ramp_time=self._env_opts["jnt_imp_ramp_time"]) # ramps impeances
-
+        if self._env_opts["ramp_to_homing"]: # ramp position references to target values smoothly
+            self._jnt_imp_controllers[robot_name].set_refs(
+                pos_ref=self._homing,
+                robot_indxs = None)
+            super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name) # need to be called here to propoerly apply pvesd tensor
+            pvesd = self._jnt_imp_controllers[robot_name].get_pvesd()
+            self._xmj_adapter.setJointsImpedanceCommand(pvesd)
+            self._xmj_adapter.apply_joint_ref_with_ramp(pvesd, tolerance=0.1)
+        else: # set p ref to current value to avoid jumps (pref or meas. p?)
+            # reset_ref=self._p_ref_reset[robot_name]
+            reset_ref=self._jnts_q[robot_name]
+            self._jnt_imp_controllers[robot_name].set_refs(
+                pos_ref=reset_ref,
+                robot_indxs = None)
+            
+        if self._env_opts["ramp_impedances"]: # ramp impedances
+            pvesd = self._jnt_imp_controllers[robot_name].get_pvesd()
+            self._xmj_adapter.apply_joint_impedances_with_ramp(pvesd) # ramps impeances
 
     def _step_world(self): 
         time_elapsed=self._xmj_adapter.step()
@@ -400,8 +442,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         return jnt_imp_controller
 
     def _reset_sim(self):
-        pass
-        # self._xmj_adapter.resetWorld()
+        # pass
+        self._xmj_adapter.resetWorld()
         
     def _set_startup_jnt_imp_gains(self,
             robot_name:str, 
@@ -711,6 +753,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
 
         self._root_q_offset={}
         self._root_q_offsetm1={}
+        self._p_ref_reset={}
 
         for i in range(0, len(self._robot_names)):
 
@@ -775,6 +818,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             self._root_q_offsets[robot_name][:, 0] = 1.0 # init to valid identity quaternion
 
             # self._update_root_offsets(robot_name)
+
+            self._p_ref_reset[robot_name] = self._jnts_q[robot_name].clone() # last p ref for set to jnt imp control
 
     def current_tstep(self):
         return self._xmj_adapter.xmj_env().step_counter
