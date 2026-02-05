@@ -129,9 +129,12 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
 
         xmj_opts["max_imp_torque"]=150.0 # [Nm]
 
-        xmj_opts["jnt_imp_ramp_time"]=0.5
-        xmj_opts["jnt_pos_ramp_time"]=3.0
-        xmj_opts["jnt_imp_ramp_time_onclose"]=0.5
+        xmj_opts["ramp_to_homing"]=True
+        xmj_opts["xbot_homing_on_close"]=False
+        xmj_opts["ramp_impedances"]=True
+        xmj_opts["jnt_imp_ramp_time"]=1.0
+        xmj_opts["jnt_pos_ramp_time"]=4.0
+        xmj_opts["jnt_imp_ramp_time_onclose"]=2.0
 
         xmj_opts.update(self._env_opts) # update defaults with provided opts
         
@@ -158,7 +161,7 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
     
     def _setup(self):
         # last thing called before spinning
-        super()._setup()
+        setup_ok=super()._setup()
 
         # for safety: get dtype/device from existing storage
         # assume self._root_q_offset[robot_name] exists and is a torch tensor
@@ -208,6 +211,8 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         self._q_offset_acquired = True
 
         self._isrunning=True
+
+        return setup_ok
                 
     def _configure_scene(self):
         
@@ -233,7 +238,9 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
                 base_link=self._env_opts["base_linkname"])
             # self._ros_xbot_adapter.build_scenario()
             self._ros_xbot_adapter.startup()
-
+            self._ros_xbot_adapter.position_ramp_time=self._env_opts["jnt_pos_ramp_time"] # [s]
+            self._ros_xbot_adapter.impedance_ramp_time=self._env_opts["jnt_imp_ramp_time"] # [s]
+        
             to_monitor=[]
             self._robot_iface_enabled_jnts=self._ros_xbot_adapter.get_robot_interface().getEnabledJointNames()
             
@@ -286,8 +293,19 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
                 profile_name="safe")
             
             # resets jnt imp gain to the startups with a ramp
-            self._ros_xbot_adapter.impedance_ramp_time=self._env_opts["jnt_imp_ramp_time_onclose"] # [s]
-            self._reset_jnt_imp_control(robot_name=robot_name) 
+            self._ros_xbot_adapter.impedance_ramp_time=self._env_opts["jnt_imp_ramp_time_onclose"] # setting slower
+            self._env_opts["ramp_to_homing"]=False # skip homing when closing
+            
+            # read last pos ref from jnt imp control before reset
+            
+            # ramp since impedances will generally be ramped up when cleaning up
+            self._reset_jnt_imp_control(robot_name=robot_name) # will set jnt imp gains to initial vals and 
+            # pos ref to homing and apply them with the adapter
+
+            if self._env_opts["xbot_homing_on_close"]:
+                self._ros_xbot_adapter.trigger_homing() # perform a final
+            # homing to reset the robot to its default xbot state
+
             self._isrunning=False
 
     def _apply_cmds_to_jnt_imp_control(self, robot_name:str):
@@ -313,6 +331,7 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         rospy.sleep(self._env_opts["rt_safety_perf_coeff"]*walltime_to_sleep)
         self._ros_xbot_adapter.apply_cmds_now() # write to robot (there could be
         # communication delays)
+        self._p_ref_reset[robot_name][:, :]= self._jnt_imp_controllers[robot_name].pos_ref() # store last sent pos ref
         self._last_control_time=self._get_world_time(robot_name=robot_name)
     
     def _jnt_imp_reset_overrride(self, 
@@ -321,32 +340,24 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         # before env applies jnt imp reset to robot, we ensure no discountinuities by always ramping impedances 
         # with the current position as target and no velocity and effort references
 
-        # write joint position targets to current position to avoid jumps  
-        n_jnts=len(self._robot_jnt_names(robot_name=robot_name))
-        null_cmd=torch.zeros((1, n_jnts), 
-                    dtype=self._dtype,
-                    device=self._device)   
-        # reset_q=self._jnts_q[robot_name]
-        
-        self._jnt_imp_controllers[robot_name].set_refs(
-            pos_ref=self._homing,
-            vel_ref=null_cmd,
-            eff_ref=null_cmd,
-            robot_indxs = None)
-
-        self._ros_xbot_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
-        super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name) # need to be called here to propoerly apply pvesd tensor
-
-        # ramp position references to avoid jumps
-        # self._ros_xbot_adapter.moveToJointPoseSync(self._ros_xbot_adapter._commanded_joint_impedances_by_name,
-        #                             velocity_scaling=1.0, acceleration_scaling=1.0,
-        #                             joint_position_tolerance=1e9,
-        #                             max_time_s=self._env_opts.get("jnt_pos_ramp_time", self._ros_xbot_adapter.position_ramp_time))
-        self._ros_xbot_adapter.apply_joint_ref_with_ramp(self._ros_xbot_adapter._commanded_joint_impedances_by_name,
-                                    ramp_time=self._env_opts["jnt_pos_ramp_time"])
-        # ramp impedances
-        self._ros_xbot_adapter.apply_joint_impedances_with_ramp(self._ros_xbot_adapter._commanded_joint_impedances_by_name,
-                                    ramp_time=self._env_opts["jnt_imp_ramp_time"]) # ramps impeances
+        if self._env_opts["ramp_to_homing"]: # ramp position references to target values smoothly
+            self._jnt_imp_controllers[robot_name].set_refs(
+                pos_ref=self._homing,
+                robot_indxs = None)
+            super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name) # need to be called here to propoerly apply pvesd tensor
+            pvesd = self._jnt_imp_controllers[robot_name].get_pvesd()
+            self._ros_xbot_adapter.setJointsImpedanceCommand(pvesd)
+            self._ros_xbot_adapter.apply_joint_ref_with_ramp(pvesd, tolerance=0.1)
+        else: # set p ref to current value to avoid jumps (pref or meas. p?)
+            # reset_ref=self._p_ref_reset[robot_name]
+            reset_ref=self._jnts_q[robot_name]
+            self._jnt_imp_controllers[robot_name].set_refs(
+                pos_ref=reset_ref,
+                robot_indxs = None)
+            
+        if self._env_opts["ramp_impedances"]: # ramp impedances
+            pvesd = self._jnt_imp_controllers[robot_name].get_pvesd()
+            self._ros_xbot_adapter.apply_joint_impedances_with_ramp(pvesd) # ramps impeances
 
     # def _set_startup_jnt_imp_gains(self,
     #         robot_name:str, 
@@ -563,7 +574,6 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             msg,
             LogType.WARN,
             throw_when_excep = True)
-        # time.sleep(5.0)
 
     def _get_solver_info(self):
         raise NotImplementedError()
@@ -592,6 +602,7 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         
         self._root_q_offset={}
         self._root_q_offsetm1={}
+        self._p_ref_reset={}
         for i in range(0, len(self._robot_names)):
 
             robot_name = self._robot_names[i]
@@ -650,6 +661,8 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
                                 device=self._device)
             self._root_q_offsets[robot_name][:, 0] = 1.0 # init to valid identity quaternion
 
+            self._p_ref_reset[robot_name] = self._jnts_q[robot_name].clone() # last p ref for set to jnt imp control
+
             # self._update_root_offsets(robot_name)
 
     def current_tstep(self):
@@ -681,8 +694,8 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             Journal.log(self.__class__.__name__,
             "_is_running",
             "ros_control is not running",
-            LogType.WARN,
-            throw_when_excep = True)
+            LogType.EXCEP,
+            throw_when_excep = False)
         
         return running and self._isrunning
     
