@@ -346,27 +346,18 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
                 robot_indxs = None)
             super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name) # need to be called here to propoerly apply pvesd tensor
             pvesd = self._jnt_imp_controllers[robot_name].get_pvesd()
-            self._ros_xbot_adapter.setJointsImpedanceCommand(pvesd)
             self._ros_xbot_adapter.apply_joint_ref_with_ramp(pvesd, tolerance=0.1)
         else: # set p ref to current value to avoid jumps (pref or meas. p?)
-            # reset_ref=self._p_ref_reset[robot_name]
-            reset_ref=self._jnts_q[robot_name]
+            reset_ref=self._p_ref_reset[robot_name]
+            # reset_ref=self._jnts_q[robot_name]
             self._jnt_imp_controllers[robot_name].set_refs(
                 pos_ref=reset_ref,
                 robot_indxs = None)
+            super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
             
         if self._env_opts["ramp_impedances"]: # ramp impedances
             pvesd = self._jnt_imp_controllers[robot_name].get_pvesd()
-            self._ros_xbot_adapter.apply_joint_impedances_with_ramp(pvesd) # ramps impeances
-
-    # def _set_startup_jnt_imp_gains(self,
-    #         robot_name:str, 
-    #         env_indxs: torch.Tensor = None):
-    #     super()._set_startup_jnt_imp_gains(robot_name=robot_name,env_indxs=env_indxs)
-    #     # apply jnt imp cmds to xbot immediately
-    #     # self._ros_xbot_adapter.apply_joint_impedances(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
-    #     self._ros_xbot_adapter.apply_joint_impedances_with_ramp(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
-    #     # self._ros_xbot_adapter.step()
+            self._ros_xbot_adapter.apply_joint_impedances_with_ramp(pvesd, tolerance=0.1) # ramps impeances
 
     def _generate_jnt_imp_control(self, robot_name: str):
         

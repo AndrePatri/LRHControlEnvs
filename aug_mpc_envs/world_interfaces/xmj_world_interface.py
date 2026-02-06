@@ -392,7 +392,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
         self._xmj_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
         self._p_ref_reset[robot_name][:, :]= self._jnt_imp_controllers[robot_name].pos_ref() # store last sent pos ref
-        
+
     def _jnt_imp_reset_overrride(self, 
         robot_name: str):
         
@@ -405,18 +405,18 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                 robot_indxs = None)
             super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name) # need to be called here to propoerly apply pvesd tensor
             pvesd = self._jnt_imp_controllers[robot_name].get_pvesd()
-            self._xmj_adapter.setJointsImpedanceCommand(pvesd)
             self._xmj_adapter.apply_joint_ref_with_ramp(pvesd, tolerance=0.1)
         else: # set p ref to current value to avoid jumps (pref or meas. p?)
-            # reset_ref=self._p_ref_reset[robot_name]
-            reset_ref=self._jnts_q[robot_name]
+            reset_ref=self._p_ref_reset[robot_name]
+            # reset_ref=self._jnts_q[robot_name]
             self._jnt_imp_controllers[robot_name].set_refs(
                 pos_ref=reset_ref,
                 robot_indxs = None)
+            super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
             
         if self._env_opts["ramp_impedances"]: # ramp impedances
             pvesd = self._jnt_imp_controllers[robot_name].get_pvesd()
-            self._xmj_adapter.apply_joint_impedances_with_ramp(pvesd) # ramps impeances
+            self._xmj_adapter.apply_joint_impedances_with_ramp(pvesd, tolerance=0.1) # ramps impeances
 
     def _step_world(self): 
         time_elapsed=self._xmj_adapter.step()
