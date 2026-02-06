@@ -383,7 +383,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             # pos ref to homing and apply them with the adapter
 
             if self._env_opts["xbot_homing_on_close"]:
-                self._xmj_adapter.trigger_homing() # perform a final
+                self._xmj_adapter.trigger_xbot_homing() # perform a final
             # homing to reset the robot to its default xbot state
 
             self._isrunning=False
