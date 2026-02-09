@@ -1470,7 +1470,7 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
     def current_tstep(self):
         self._world.current_time_step_index
     
-    def current_time(self):
+    def world_time(self):
         return self._world.current_time
     
     def physics_dt(self):

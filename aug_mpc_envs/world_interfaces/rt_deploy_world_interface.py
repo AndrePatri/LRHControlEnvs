@@ -21,6 +21,7 @@ import numpy as np
 import math
 
 from typing import Dict, List
+from typing_extensions import override
 
 from EigenIPC.PyEigenIPC import VLevel
 from EigenIPC.PyEigenIPC import LogType
@@ -159,6 +160,7 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
     
         self._configure_scene()
     
+    @override
     def _setup(self):
         # last thing called before spinning
         setup_ok=super()._setup()
@@ -269,15 +271,16 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             self._ros_xbot_adapter.set_filters(set_enabled=True, 
                 profile_name=self._env_opts["xbot2_filter_prof"])
             
-            self._rospy_startime=rospy.get_time()
+            # self._rospy_startime=rospy.get_time()
             self._last_control_time=0.0
             
         self._q_offset_acquired=False
 
+    @override
     def _xrdf_cmds(self, robot_name:str):
         cmds=super()._xrdf_cmds(robot_name=robot_name)
         for i, s in enumerate(cmds):
-            if "floating_joint:=" in s: # mujoco needs a floating joint
+            if "floating_joint:=" in s:
                 cmds[i] = "floating_joint:=true" 
         return cmds
 
@@ -308,13 +311,14 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
 
             self._isrunning=False
 
+    @override
     def _apply_cmds_to_jnt_imp_control(self, robot_name:str):
         super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
         jnt_imp_cmds=self._jnt_imp_controllers[self._robot_names[0]].get_pvesd()
         jnt_imp_cmds[:, 2]=self._env_opts["torque_correction"]*jnt_imp_cmds[:, 2] # scaling efforts for real robot
         jnt_imp_cmds[:, 2]=torch.clamp(jnt_imp_cmds[:, 2], min=-self._env_opts["max_imp_torque"], max=self._env_opts["max_imp_torque"])
         self._ros_xbot_adapter.setJointsImpedanceCommand(jnt_imp_cmds)
-        elapsed_since_last_cmd=self._get_world_time(robot_name=robot_name)-\
+        elapsed_since_last_cmd=self.world_time(robot_name=robot_name)-\
             self._last_control_time
         walltime_to_sleep=self.physics_dt()-elapsed_since_last_cmd
         if walltime_to_sleep<-1e-2:
@@ -325,15 +329,17 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             throw_when_excep = True)
             walltime_to_sleep=0 # do not sleep
         
-        # while self._get_world_time(robot_name=robot_name)-self._last_control_time < walltime_to_sleep:
+        # while self.world_time(robot_name=robot_name)-self._last_control_time < walltime_to_sleep:
         #     ns=1000
         #     PerfSleep.thread_sleep(ns)
-        rospy.sleep(self._env_opts["rt_safety_perf_coeff"]*walltime_to_sleep)
-        self._ros_xbot_adapter.apply_commanded_joint_impedances() # write to robot (there could be
+        rospy.sleep(self._env_opts["rt_safety_perf_coeff"]*walltime_to_sleep) # make sure cmds are applied to
+        # jnt imp controller at a constant rate (rospy will use sim time if enabled, otherwise walltime)
+        self._ros_xbot_adapter.apply_joint_impedances(jnt_imp_cmds) # write to robot (there could be
         # communication delays)
+        self._last_control_time=self.world_time(robot_name=robot_name)
         self._p_ref_reset[robot_name][:, :]= self._jnt_imp_controllers[robot_name].pos_ref() # store last sent pos ref
-        self._last_control_time=self._get_world_time(robot_name=robot_name)
     
+    @override
     def _jnt_imp_reset_overrride(self, 
         robot_name: str):
         
@@ -375,9 +381,6 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
 
     def _step_world(self): # real world steps by itself (hopefully)
         pass
-
-    def _get_world_time(self, robot_name: str): # get relative walltime
-        return rospy.get_time()-self._rospy_startime
     
     def _reset_sim(self):
         self._ros_xbot_adapter.resetWorld()
@@ -391,15 +394,7 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             self._randomize_yaw(robot_name=robot_name,env_indxs=None)
             self._set_root_to_defconfig(robot_name=robot_name)
         
-        # self._reset_sim()
-
-        self._set_jnts_to_homing(robot_name)
-        
-        # we update the robots state 
-        self._read_root_state_from_robot(env_indxs=env_indxs, 
-            robot_name=robot_name)
-        self._read_jnts_state_from_robot(env_indxs=env_indxs,
-            robot_name=robot_name)
+        self._reset_sim()
         
     def _read_root_state_from_robot(self,
             robot_name: str,
@@ -659,9 +654,10 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
     def current_tstep(self):
         return self._ros_xbot_adapter.xmj_env().step_counter
     
-    def current_time(self):
+    def world_time(self, robot_name: str) -> float: # get relative time from last reset
         return self._ros_xbot_adapter.getEnvTimeFromReset()
-    
+        # return rospy.get_time()-self._rospy_startime
+
     def physics_dt(self):
         robot_name = self._robot_names[0]
         return self._cluster_dt[robot_name]

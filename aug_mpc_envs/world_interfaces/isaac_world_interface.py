@@ -26,6 +26,7 @@ import torch
 import numpy as np
 
 from typing import Dict, List
+from typing_extensions import override
 
 from EigenIPC.PyEigenIPC import VLevel
 from EigenIPC.PyEigenIPC import LogType
@@ -1533,7 +1534,8 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 positions=None, # body frame origin
                 is_global=True
                 )
-                        
+
+    @override                    
     def _pre_step(self):
         
         if self._env_opts["use_random_pertub"]:
@@ -1541,6 +1543,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
 
         super()._pre_step()
 
+    @override
     def _pre_step_db(self):
         
         if self._env_opts["use_random_pertub"]:
@@ -1548,6 +1551,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
 
         super()._pre_step_db()
 
+    @override
     def _update_contact_state(self, 
             robot_name: str, 
             env_indxs: torch.Tensor = None):
@@ -2315,11 +2319,13 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                 throw_when_excep = True)
             self._terrain_hit_counts_last_logged[robot_name] = counts.clone()
 
+    @override
     def _post_world_step(self) -> bool:
         res = super()._post_world_step()
         self._maybe_log_terrain_hits()
         return res
 
+    @override
     def _post_world_step_db(self) -> bool:
         res = super()._post_world_step_db()
         self._maybe_log_terrain_hits()
@@ -2328,7 +2334,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
     def current_tstep(self):
         self._world.current_time_step_index
     
-    def current_time(self):
+    def world_time(self, robot_name: str):
         return self._world.current_time
     
     def physics_dt(self):

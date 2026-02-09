@@ -24,6 +24,7 @@ import torch
 import numpy as np
 
 from typing import Dict, List
+from typing_extensions import override
 
 from EigenIPC.PyEigenIPC import VLevel
 from EigenIPC.PyEigenIPC import LogType
@@ -234,6 +235,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         # if "enable_viewport" in sim_params:
         #     self._render = sim_params["enable_viewport"]
 
+    @override
     def _setup(self):
 
         # last thing called before spinning
@@ -354,6 +356,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
 
         self._q_offset_acquired = True
     
+    @override
     def _xrdf_cmds(self, robot_name:str):
         cmds=super()._xrdf_cmds(robot_name=robot_name)
         for i, s in enumerate(cmds):
@@ -388,11 +391,14 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
 
             self._isrunning=False
 
+    @override
     def _apply_cmds_to_jnt_imp_control(self, robot_name:str):
-        super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
-        self._xmj_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
+
+        super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name) # write to interface jnt imp control
+        self._xmj_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd()) # just set cmds, will be applied when stepping world
         self._p_ref_reset[robot_name][:, :]= self._jnt_imp_controllers[robot_name].pos_ref() # store last sent pos ref
 
+    @override
     def _jnt_imp_reset_overrride(self, 
         robot_name: str):
         
@@ -443,14 +449,14 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
 
     def _reset_sim(self):
         self._xmj_adapter.resetWorld()
-        
+    
+    @override
     def _set_startup_jnt_imp_gains(self,
             robot_name:str, 
             env_indxs: torch.Tensor = None):
         super()._set_startup_jnt_imp_gains(robot_name=robot_name,env_indxs=env_indxs)
-        # apply jnt imp cmds to xbot immediately
+        # apply jnt imp cmds to xbot immediately to avoid robot
         self._xmj_adapter.apply_joint_impedances(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd())
-        # self._xmj_adapter.step()
 
     def _reset_state(self,
             robot_name: str,
@@ -461,13 +467,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             self._randomize_yaw(robot_name=robot_name,env_indxs=None)
             self._set_root_to_defconfig(robot_name=robot_name)
         
-        self._reset_sim()
-        
-        # we update the robots state 
-        self._read_root_state_from_robot(env_indxs=env_indxs, 
-            robot_name=robot_name)
-        self._read_jnts_state_from_robot(env_indxs=env_indxs,
-            robot_name=robot_name)
+        self._reset_sim() # moves robot to homing and default root config in sim, so that we can read these values as initial state for the robot before applying any randomization
         
     def _read_root_state_from_robot(self,
             robot_name: str,
@@ -719,11 +719,13 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         self._jnts_eff[robot_name][env_indxs, :] = jnt_state_from_xbot[2,:]
 
     def _set_jnts_to_homing(self, robot_name: str):
-        self._xmj_adapter.xmj_env().move_to_homing_now()
+        pass
+        # self._xmj_adapter.xmj_env().move_to_homing_now()
                 
     def _set_root_to_defconfig(self, robot_name: str):
         self._xmj_adapter.xmj_env().set_pi(self._root_p_default[robot_name].numpy())
         self._xmj_adapter.xmj_env().set_qi(self._root_q_default[robot_name].numpy())
+        # self._xmj_adapter.xmj_env().move_base_to_now()
 
     def _get_solver_info(self):
         raise NotImplementedError()
@@ -823,7 +825,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
     def current_tstep(self):
         return self._xmj_adapter.xmj_env().step_counter
     
-    def current_time(self):
+    def world_time(self, robot_name: str):
         return self._xmj_adapter.getEnvTimeFromReset()
     
     def physics_dt(self):
