@@ -303,7 +303,7 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             # pos ref to homing and apply them with the adapter
 
             if self._env_opts["xbot_homing_on_close"]:
-                self._ros_xbot_adapter.trigger_homing() # perform a final
+                self._ros_xbot_adapter.trigger_xbot_homing() # perform a final
             # homing to reset the robot to its default xbot state
 
             self._isrunning=False
@@ -329,7 +329,7 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         #     ns=1000
         #     PerfSleep.thread_sleep(ns)
         rospy.sleep(self._env_opts["rt_safety_perf_coeff"]*walltime_to_sleep)
-        self._ros_xbot_adapter.apply_cmds_now() # write to robot (there could be
+        self._ros_xbot_adapter.apply_commanded_joint_impedances() # write to robot (there could be
         # communication delays)
         self._p_ref_reset[robot_name][:, :]= self._jnt_imp_controllers[robot_name].pos_ref() # store last sent pos ref
         self._last_control_time=self._get_world_time(robot_name=robot_name)
@@ -555,7 +555,7 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         self._jnts_eff[robot_name][env_indxs, :] = jnt_state_from_xbot[2,:]
 
     def _set_jnts_to_homing(self, robot_name: str):
-        # self._ros_xbot_adapter.trigger_homing() # blocking, moves the robot using plugins
+        # self._ros_xbot_adapter.trigger_xbot_homing() # blocking, moves the robot using plugins
     	pass
     
     def _set_root_to_defconfig(self, robot_name: str):
