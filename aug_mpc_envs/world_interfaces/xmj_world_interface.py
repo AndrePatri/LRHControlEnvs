@@ -652,12 +652,6 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                                                         self._root_q[robot_name], 
                                                         dt)
             
-            Journal.log(self.__class__.__name__,
-                "_get_root_state_xbot",
-                "Reading root state with differentiation not supported yet!!",
-                LogType.EXCEP,
-                throw_when_excep = True)
-            
             # self._root_a[robot_name][env_indxs, :] = (self._root_v[robot_name][env_indxs, :] - \
             #                                     self._root_v_prev[robot_name][env_indxs, :]) / dt 
             self._root_alpha[robot_name][env_indxs, :] = (self._root_omega[robot_name][env_indxs, :] - \
