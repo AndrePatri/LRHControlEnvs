@@ -1541,7 +1541,9 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         if self._env_opts["use_random_pertub"]:
             self._process_perturbations()
 
-        super()._pre_step()
+        success=super()._pre_step()
+
+        return success
 
     @override
     def _pre_step_db(self):
@@ -1549,7 +1551,9 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         if self._env_opts["use_random_pertub"]:
             self._process_perturbations()
 
-        super()._pre_step_db()
+        success=super()._pre_step_db()
+
+        return success
 
     @override
     def _update_contact_state(self, 
