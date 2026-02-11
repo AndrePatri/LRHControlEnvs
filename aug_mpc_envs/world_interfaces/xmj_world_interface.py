@@ -477,12 +477,12 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             ):
         
         if (not self._env_opts["state_from_xbot"]):
-            self._get_root_state(numerical_diff=self._env_opts["use_diff_vels"],
+            self._get_root_state(numerical_diff=False,
                     env_indxs=env_indxs,
                     robot_name=robot_name)
         else:
             # raise NotImplementedError("Getting root state from xbot not implemented yet !")
-            self._get_root_state_xbot(numerical_diff=self._env_opts["use_diff_vels"],
+            self._get_root_state_xbot(numerical_diff=False,
                     env_indxs=env_indxs,
                     robot_name=robot_name)
 
@@ -646,16 +646,23 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
 
         else:
             # differentiate numerically
+
+            Journal.log(self.__class__.__name__,
+                "_get_root_state_xbot",
+                "Reading root state with differentiation not supported yet!!",
+                LogType.EXCEP,
+                throw_when_excep = True)
+            
             # self._root_v[robot_name][:, :] = (self._root_p[robot_name] - \
             #                                 self._root_p_prev[robot_name]) / dt 
-            self._root_omega[robot_name][:, :] = quat_to_omega(self._root_q_prev[robot_name], 
-                                                        self._root_q[robot_name], 
-                                                        dt)
-            
+            # self._root_omega[robot_name][:, :] = quat_to_omega(self._root_q_prev[robot_name], 
+            #                                             self._root_q[robot_name], 
+            #                                             dt)
+        
             # self._root_a[robot_name][env_indxs, :] = (self._root_v[robot_name][env_indxs, :] - \
             #                                     self._root_v_prev[robot_name][env_indxs, :]) / dt 
-            self._root_alpha[robot_name][env_indxs, :] = (self._root_omega[robot_name][env_indxs, :] - \
-                                            self._root_omega_prev[robot_name][env_indxs, :]) / dt 
+            # self._root_alpha[robot_name][env_indxs, :] = (self._root_omega[robot_name][env_indxs, :] - \
+            #                                 self._root_omega_prev[robot_name][env_indxs, :]) / dt 
             
         # update "previous" data for numerical differentiation
         # self._root_p_prev[robot_name][:, :] = self._root_p[robot_name]
@@ -669,7 +676,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         #  no need to rotate robot twist in base local
         self._root_omega_base_loc[robot_name][:, :]=self._root_omega[robot_name]
         self._root_a_base_loc[robot_name][:, :]=self._root_a[robot_name]
-        self._root_alpha_base_loc[robot_name][:, :]=self._root_alpha[robot_name]
+        # self._root_alpha_base_loc[robot_name][:, :]=self._root_alpha[robot_name]
             
     def _get_robots_jnt_state(self, 
         robot_name: str,
