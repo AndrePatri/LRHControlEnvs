@@ -116,7 +116,7 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         xmj_opts["xmj_files_dir"]=None
 
         xmj_opts["rt_safety_perf_coeff"]=1.0
-        xmj_opts["use_sim_time"]=False
+        xmj_opts["is_sim"]=False
 
         xmj_opts["xbot2_filter_prof"]="medium"
         
@@ -237,7 +237,8 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
                 fallback_cmd_damping=60.0,
                 allow_fallback=True,
                 enable_filters=True,
-                base_link=self._env_opts["base_linkname"])
+                base_link=self._env_opts["base_linkname"],
+                is_simulated=self._env_opts["is_sim"])
             # self._ros_xbot_adapter.build_scenario()
             self._ros_xbot_adapter.startup()
             self._ros_xbot_adapter.position_ramp_time=self._env_opts["jnt_pos_ramp_time"] # [s]
@@ -271,8 +272,10 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             self._ros_xbot_adapter.set_filters(set_enabled=True, 
                 profile_name=self._env_opts["xbot2_filter_prof"])
             
-            # self._rospy_startime=rospy.get_time()
-            self._last_control_time=0.0
+        # self._rospy_startime=rospy.get_time()
+        self._last_control_time=0.0
+        self._last_jntv_numdiff_time=0.0
+        self._last_twist_numdiff_time=0.0
             
         self._q_offset_acquired=False
 
@@ -384,15 +387,14 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
     
     def _reset_sim(self):
         self._ros_xbot_adapter.resetWorld()
+        self._last_control_time=0.0
+        self._last_jntv_numdiff_time=0.0
+        self._last_twist_numdiff_time=0.0
     
     def _reset_state(self,
             robot_name: str,
             env_indxs: torch.Tensor = None,
             randomize: bool = False):
-
-        if randomize:
-            self._randomize_yaw(robot_name=robot_name,env_indxs=None)
-            self._set_root_to_defconfig(robot_name=robot_name)
         
         self._reset_sim()
         
@@ -471,7 +473,8 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             # no offset acquired: store raw IMU quaternion (ensure dtype/device)
             self._root_q[robot_name][:, :] = torch.from_numpy(q).reshape(self._num_envs, -1).to(self._dtype)
 
-        dt=self._cluster_dt[robot_name] # getting diff state always at cluster rate
+        # dt=self._cluster_dt[robot_name] # getting diff state always at cluster rate
+        dt=self.world_time(robot_name=robot_name)-self._last_twist_numdiff_time
 
         if not numerical_diff:
             # we get velocities from the simulation. This is not good since 
@@ -485,9 +488,6 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             self._root_alpha[robot_name][env_indxs, :] = (self._root_omega[robot_name][env_indxs, :] - \
                                             self._root_omega_prev[robot_name][env_indxs, :]) / dt 
             
-            # self._root_v_prev[robot_name][env_indxs, :] = self._root_v[robot_name][env_indxs, :] 
-            self._root_omega_prev[robot_name][env_indxs, :] = self._root_omega[robot_name][env_indxs, :]
-
         else:
             # differentiate numerically
             # self._root_v[robot_name][:, :] = (self._root_p[robot_name] - \
@@ -504,14 +504,17 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             
             # self._root_a[robot_name][env_indxs, :] = (self._root_v[robot_name][env_indxs, :] - \
             #                                     self._root_v_prev[robot_name][env_indxs, :]) / dt 
+        
             self._root_alpha[robot_name][env_indxs, :] = (self._root_omega[robot_name][env_indxs, :] - \
                                             self._root_omega_prev[robot_name][env_indxs, :]) / dt 
-            
-            # update "previous" data for numerical differentiation
-            # self._root_p_prev[robot_name][:, :] = self._root_p[robot_name]
-            self._root_q_prev[robot_name][:, :] = self._root_q[robot_name]
-            # self._root_v_prev[robot_name][env_indxs, :] = self._root_v[robot_name][env_indxs, :] 
-            self._root_omega_prev[robot_name][env_indxs, :] = self._root_omega[robot_name][env_indxs, :]
+        
+        self._last_twist_numdiff_time=self.world_time(robot_name=robot_name)
+        
+        # update "previous" data for numerical differentiation
+        # self._root_p_prev[robot_name][:, :] = self._root_p[robot_name]
+        self._root_q_prev[robot_name][:, :] = self._root_q[robot_name]
+        # self._root_v_prev[robot_name][env_indxs, :] = self._root_v[robot_name][env_indxs, :] 
+        self._root_omega_prev[robot_name][env_indxs, :] = self._root_omega[robot_name][env_indxs, :]
 
         world2base_frame3D(v_w=self._gravity_normalized[robot_name],q_b=self._root_q[robot_name],
                 v_out=self._gravity_normalized_base_loc[robot_name])
@@ -537,15 +540,20 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
 
         self._jnts_q[robot_name][:, :] = jnt_state_from_xbot[0,:]
 
-        dt= self.physics_dt() if self._override_low_lev_controller else self._cluster_dt[robot_name]
+        dt= None
+        if numerical_diff:
+            # dt= self.physics_dt() if self._override_low_lev_controller else self._cluster_dt[robot_name]
+            dt=self.world_time(robot_name=robot_name)-self._last_jntv_numdiff_time
 
         if dt is None:
             self._jnts_v[robot_name][:, :] = jnt_state_from_xbot[1,:]
         else: 
-            self._jnts_v[robot_name][:, :] = self._jnts_v[robot_name][:, :] = (self._jnts_q[robot_name] - \
+            self._jnts_v[robot_name][:, :] = (self._jnts_q[robot_name] - \
                 self._jnts_q_prev[robot_name]) / dt
             
             self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name]
+
+            self._last_jntv_numdiff_time=self.world_time(robot_name=robot_name)
 
         self._jnts_eff[robot_name][env_indxs, :] = jnt_state_from_xbot[2,:]
 

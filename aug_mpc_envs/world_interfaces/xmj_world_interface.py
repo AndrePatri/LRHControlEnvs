@@ -354,6 +354,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
 
             self.scene_setup_completed = True
 
+        # self._rospy_startime=rospy.get_time()
+
         self._q_offset_acquired = True
     
     @override
@@ -628,7 +630,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             # no offset acquired: store raw IMU quaternion (ensure dtype/device)
             self._root_q[robot_name][:, :] = torch.from_numpy(q).reshape(self._num_envs, -1).to(self._dtype)
 
-        dt=self._cluster_dt[robot_name] # getting diff state always at cluster rate
+        dt=self._cluster_dt[robot_name] # getting diff state always at cluster rate sim we are in sim and we can enforce a constant rate
 
         if not numerical_diff:
             # we get velocities from the simulation. This is not good since 
@@ -641,9 +643,6 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
 
             self._root_alpha[robot_name][env_indxs, :] = (self._root_omega[robot_name][env_indxs, :] - \
                                             self._root_omega_prev[robot_name][env_indxs, :]) / dt 
-            
-            # self._root_v_prev[robot_name][env_indxs, :] = self._root_v[robot_name][env_indxs, :] 
-            self._root_omega_prev[robot_name][env_indxs, :] = self._root_omega[robot_name][env_indxs, :]
 
         else:
             # differentiate numerically
@@ -664,11 +663,11 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             self._root_alpha[robot_name][env_indxs, :] = (self._root_omega[robot_name][env_indxs, :] - \
                                             self._root_omega_prev[robot_name][env_indxs, :]) / dt 
             
-            # update "previous" data for numerical differentiation
-            # self._root_p_prev[robot_name][:, :] = self._root_p[robot_name]
-            self._root_q_prev[robot_name][:, :] = self._root_q[robot_name]
-            # self._root_v_prev[robot_name][env_indxs, :] = self._root_v[robot_name][env_indxs, :] 
-            self._root_omega_prev[robot_name][env_indxs, :] = self._root_omega[robot_name][env_indxs, :]
+        # update "previous" data for numerical differentiation
+        # self._root_p_prev[robot_name][:, :] = self._root_p[robot_name]
+        self._root_q_prev[robot_name][:, :] = self._root_q[robot_name]
+        # self._root_v_prev[robot_name][env_indxs, :] = self._root_v[robot_name][env_indxs, :] 
+        self._root_omega_prev[robot_name][env_indxs, :] = self._root_omega[robot_name][env_indxs, :]
 
         world2base_frame3D(v_w=self._gravity_normalized[robot_name],q_b=self._root_q[robot_name],
                 v_out=self._gravity_normalized_base_loc[robot_name])
@@ -706,12 +705,14 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
 
         self._jnts_q[robot_name][:, :] = jnt_state_from_xbot[0,:]
 
-        dt= self.physics_dt() if self._override_low_lev_controller else self._cluster_dt[robot_name]
+        dt= None
+        if numerical_diff:
+            dt= self.physics_dt() if self._override_low_lev_controller else self._cluster_dt[robot_name]
 
         if dt is None:
             self._jnts_v[robot_name][:, :] = jnt_state_from_xbot[1,:]
         else: 
-            self._jnts_v[robot_name][:, :] = self._jnts_v[robot_name][:, :] = (self._jnts_q[robot_name] - \
+            self._jnts_v[robot_name][:, :] = (self._jnts_q[robot_name] - \
                 self._jnts_q_prev[robot_name]) / dt
             
             self._jnts_q_prev[robot_name][:, :] = self._jnts_q[robot_name]
