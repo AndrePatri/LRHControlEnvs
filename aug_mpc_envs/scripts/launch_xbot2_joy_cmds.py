@@ -24,7 +24,7 @@ if __name__ == "__main__":
                           vlevel=VLevel.V2)
 
     # import both classes (assumes they are available at these paths)
-    from AugMPCEnvs.aug_mpc_envs.utils.xbot2.joy_cmds import RefsFromJoy 
+    from aug_mpc_envs.utils.xbot2.joy_cmds import RefsFromJoy 
 
     # joystick-driven
     joy_cmds = RefsFromJoy(namespace=args.ns,

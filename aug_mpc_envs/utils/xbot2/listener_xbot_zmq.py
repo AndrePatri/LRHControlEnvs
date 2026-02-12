@@ -135,62 +135,8 @@ class JoyListenerXbot2ZMQ:
         self.seq = payload.get("seq")
         self.ts = payload.get("timestamp", time.time())
 
-        if "vref" in payload:
-            self._store_vref_payload(payload)
-            return
-
-        # minimal GUI publishers may wrap data in "state" or send it top-level
-        state = payload.get("state", payload) or {}
-        self.name = state.get("name", "minimal_gui")
-
-        # Clear previous arrays to defaults
-        self.sticks[:] = 0.0
-        self.stick_press[:] = False
-        self.triggers[:] = 0.0
-        self.bumpers[:] = False
-        self.face[:] = False
-        self.back_start_home[:] = False
-        self.hat[:] = 0
-
-        # Helper to pick the first available key in a list
-        def pick(keys, default=0.0):
-            for k in keys:
-                if k in state and state[k] is not None:
-                    return state[k]
-            return default
-
-        linear = state.get("linear") or state.get("lin") or {}
-        angular = state.get("angular") or {}
-        axes_dict = state.get("axes") if isinstance(state.get("axes"), dict) else {}
-
-        lin_x = axes_dict.get("x", linear.get("x", pick(["vx", "x", "lin_x"], 0.0)))
-        lin_y = axes_dict.get("y", linear.get("y", pick(["vy", "y", "lin_y"], 0.0)))
-        yaw_val = axes_dict.get("yaw", axes_dict.get("z",
-                    angular.get("z", angular.get("yaw", pick(["yaw_rate", "yaw", "w", "omega", "omega_z"], 0.0)))))
-
-        # Clamp to joystick-like normalized range
-        lin_x = float(np.clip(lin_x, -1.0, 1.0))
-        lin_y = float(np.clip(lin_y, -1.0, 1.0))
-        yaw_val = float(np.clip(yaw_val, -1.0, 1.0))
-
-        # Map left pad -> linear velocity (use right-stick slots consumed by RefsFromJoy)
-        self.sticks[2] = lin_x   # lateral
-        self.sticks[3] = lin_y   # forward/back
-
-        # Map yaw slider -> triggers difference (same sign convention downstream expects)
-        self.triggers[0] = max(yaw_val, 0.0)   # positive yaw -> left trigger
-        self.triggers[1] = max(-yaw_val, 0.0)  # negative yaw -> right trigger
-
-        # store lightweight raw copies for debug printing
-        self.axes = [lin_x, lin_y, yaw_val]
-        self.buttons = []
-        self.hats = []
-
-        self.info_str = (
-            f"[{time.strftime('%H:%M:%S', time.localtime(self.ts))}] "
-            f"seq={self.seq} device='{self.name}' lin=({lin_x:.3f},{lin_y:.3f}) yaw={yaw_val:.3f}"
-        )
-
+        self._store_vref_payload(payload)
+            
     def _store_vref_payload(self, payload: dict):
         """
         Parse a velocity_command payload with vref = [vx, vy, vz, wx, wy, wz].
@@ -213,12 +159,12 @@ class JoyListenerXbot2ZMQ:
         self.hat[:] = 0
 
         # linear -> right stick slots (same as minimal GUI mapping)
-        self.sticks[2] = vx
-        self.sticks[3] = vy
+        self.sticks[3] = vx
+        self.sticks[2] = vy
 
         # yaw rate -> triggers (positive yaw -> left trigger)
-        self.triggers[0] = max(wz, 0.0)
-        self.triggers[1] = max(-wz, 0.0)
+        self.triggers[0] = max(-wz, 0.0)
+        self.triggers[1] = max(wz, 0.0)
 
         # raw copies
         self.axes = [vx, vy, vz, wx, wy, wz]
@@ -250,26 +196,6 @@ class JoyListenerXbot2ZMQ:
             # join thread
             if self.listener_thread and self.listener_thread.is_alive():
                 self.listener_thread.join(timeout=1.0)
-
-    # def pretty_print_payload(self, payload: dict):
-    #     """
-    #     Pretty print a payload (same as earlier helper).
-    #     """
-    #     seq = payload.get("seq")
-    #     ts = payload.get("timestamp")
-    #     state = payload.get("state", {})
-    #     name = state.get("name", "<unknown>")
-    #     axes = state.get("axes", [])
-    #     buttons = state.get("buttons", [])
-    #     hats = state.get("hats", [])
-    #     print(
-    #         f"[{time.strftime('%H:%M:%S', time.localtime(ts))}] seq={seq} device='{name}' axes={len(axes)} buttons={len(buttons)} hats={len(hats)}"
-    #     )
-    #     # Small summary of first few values for readability:
-    #     print("  axes:", [round(a, 3) for a in axes[:8]])
-    #     print("  buttons:", buttons[:16])
-    #     print("  hats:", hats)
-    #     print("-" * 50)
 
     def pretty_print_payload(self, payload: dict = None):
         """

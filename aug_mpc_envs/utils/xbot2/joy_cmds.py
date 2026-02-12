@@ -44,8 +44,8 @@ class RefsFromJoy:
         self._shared_refs = shared_refs
 
         # navigation / twist flags (same as RefsFromJoy)
-        self.enable_linvel = False
-        self.enable_omega = False
+        self.enable_linvel = True
+        self.enable_omega = True
         self.enable_pos = False
         self.enable_linvelz = False
 
