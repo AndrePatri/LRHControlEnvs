@@ -50,7 +50,7 @@ class GaitSchedulingEnv(FakePosTrackingEnvWithDemo):
         # Adaptive gait cadence based on refs: (min,max) event intervals between successive lift-offs
         self.phase_period_walk_min=0.7
         self.phase_period_walk_max=1.0
-        self.phase_period_trot_min=0.8
+        self.phase_period_trot_min=0.65
         self.phase_period_trot_max=1.5
         # phase accumulators and buffers
         self._walk_phase = torch.zeros((self._n_demo_envs, 1), device=self._device, dtype=self._dtype)
@@ -96,7 +96,7 @@ class GaitSchedulingEnv(FakePosTrackingEnvWithDemo):
     def _compute_speed_terms(self, rhc_twist_refs):
         speed_lin = rhc_twist_refs[:, 0:2].norm(dim=1, keepdim=True)
         speed_yaw = rhc_twist_refs[:, 5:6].abs()
-        speed = speed_lin + speed_yaw
+        speed = torch.maximum(speed_lin, speed_yaw)
         walk_event = self._map_period(speed, self.phase_period_walk_min, self.phase_period_walk_max)
         trot_event = self._map_period(speed, self.phase_period_trot_min, self.phase_period_trot_max)
         walk_period_full = walk_event * 4
