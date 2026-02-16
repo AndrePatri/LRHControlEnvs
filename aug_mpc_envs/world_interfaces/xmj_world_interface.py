@@ -38,8 +38,6 @@ from adarl_ros.adapters.XbotMjAdapter import XbotMjAdapter
 from xbot2_mujoco.PyXbotMjSim import LoadingUtils
 from mpc_hive.utilities.math_utils_torch import world2base_frame,world2base_frame3D
 
-from mpc_hive.utilities.math_utils_torch import quaternion_multiply
-
 from aug_mpc.world_interfaces.world_interface_base import AugMPCWorldInterfaceBase
 
 class XMjSimEnv(AugMPCWorldInterfaceBase):
@@ -356,8 +354,6 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
 
         # self._rospy_startime=rospy.get_time()
 
-        self._q_offset_acquired = True
-    
     @override
     def _xrdf_cmds(self, robot_name:str):
         cmds=super()._xrdf_cmds(robot_name=robot_name)
@@ -610,26 +606,10 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             # in sim we get pos from sim
             self._root_p[robot_name][:, :] = torch.from_numpy(self._xmj_adapter.xmj_env().p).reshape(self._num_envs, -1).to(self._dtype)
 
-        if self._root_q_offset[robot_name] is not None and self._q_offset_acquired:
-            
-            # extract yaw-only part of incoming q
-            yaw_q = self.yaw_quat(self.quat_to_yaw(q))
-
-            # pitch-roll part: q_pr = q_yaw^{-1} * q_full  (so q_full = q_yaw * q_pr)
-            yaw_q_inv=  self._quat_inverse(yaw_q)
-            q_pr = quaternion_multiply(yaw_q_inv.flatten(), q.flatten())
-
-            # adjusted yaw = offsetm1 * q_yaw  (offsetm1 maps from rhc frame to sim frame; we apply its inverse stored earlier)
-
-            adjusted_yaw = quaternion_multiply(self._root_q_offsetm1[robot_name].flatten(), yaw_q.flatten())
-
-            # new quaternion: adjusted_yaw * q_pr  (applies yaw offset only, keeps pitch+roll from IMU)
-            self._root_q[robot_name][:, :] = quaternion_multiply(adjusted_yaw, q_pr)
-
-        else:
-            # no offset acquired: store raw IMU quaternion (ensure dtype/device)
-            self._root_q[robot_name][:, :] = torch.from_numpy(q).reshape(self._num_envs, -1).to(self._dtype)
-
+        # store raw IMU quaternion (ensure dtype/device). Startup yaw-rel projection
+        # for MPC state publishing is now handled in the base world interface.
+        self._root_q[robot_name][:, :] = torch.from_numpy(q).reshape(self._num_envs, -1).to(self._dtype)
+        
         dt=self._cluster_dt[robot_name] # getting diff state always at cluster rate sim we are in sim and we can enforce a constant rate
 
         if not numerical_diff:
@@ -754,8 +734,6 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
     
     def _init_robots_state(self):
 
-        self._root_q_offset={}
-        self._root_q_offsetm1={}
         self._p_ref_reset={}
 
         for i in range(0, len(self._robot_names)):
@@ -771,10 +749,6 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             self._root_q[robot_name] = torch.from_numpy(self._xmj_adapter.xmj_env().q.copy()).reshape(self._num_envs, -1).to(self._dtype)
             self._root_q_prev[robot_name] = self._root_q[robot_name].clone()
             self._root_q_default[robot_name] = self._root_q[robot_name].clone()
-            self._root_q_offset[robot_name]=None
-            if self._env_opts["use_rel_q_from_startup"]:
-                self._root_q_offset[robot_name]=self._root_q[robot_name].clone()
-                self._root_q_offsetm1[robot_name]=self._root_q[robot_name].clone()
 
             # jnt q (measured, previous, default)
             self._jnts_q[robot_name] = torch.from_numpy(self._xmj_adapter.xmj_env().jnts_q.copy()).reshape(self._num_envs, -1).to(self._dtype)
@@ -845,20 +819,6 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
     
     def _robot_jnt_names(self, robot_name: str):
         return self._xmj_adapter.xmj_env().jnt_names()
-    
-    def quat_to_yaw(self, q : torch.Tensor):
-        w, x, y, z = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
-
-        return math.atan2(2.0*(w*z + x*y), 1.0 - 2.0*(y*y + z*z))
-
-    def yaw_quat(self, yaw):
-        return torch.tensor([math.cos(yaw/2.0), 0.0, 0.0, math.sin(yaw/2.0)], dtype=self._dtype, device=self._device)
-
-    def _quat_inverse(self, q: torch.Tensor) -> torch.Tensor:
-        # inverse for unit quaternion: [w, -x, -y, -z]
-        qi = q.clone()
-        qi[..., 1:] = -qi[..., 1:]
-        return qi
 
     def _prepare_world_xml(self):
         """Optionally augment the base world.xml with procedural step-up tiles and return the path to use."""

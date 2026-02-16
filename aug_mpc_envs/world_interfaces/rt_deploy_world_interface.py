@@ -18,7 +18,6 @@
 
 import torch
 import numpy as np
-import math
 
 from typing import Dict, List
 from typing_extensions import override
@@ -31,8 +30,6 @@ from aug_mpc_envs.utils.math_utils import quat_to_omega
 from aug_mpc_envs.utils.xmj_jnt_imp_cntrl import XMjJntImpCntrl
 from adarl_ros.adapters.XbotMjAdapter import RosXbotAdapter
 from mpc_hive.utilities.math_utils_torch import world2base_frame3D
-
-from mpc_hive.utilities.math_utils_torch import quaternion_multiply
 
 import rospy
 
@@ -165,53 +162,6 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         # last thing called before spinning
         setup_ok=super()._setup()
 
-        # for safety: get dtype/device from existing storage
-        # assume self._root_q_offset[robot_name] exists and is a torch tensor
-        for i in range(len(self._robot_names)):
-            robot_name = self._robot_names[i]
-            if self._root_q_offset[robot_name] is not None:
-                # get rhc quaternion from cluster (assumed torch)
-                actions = self.cluster_servers[robot_name].get_actions()
-                rhc_q = actions.root_state.get(data_type="q", gpu=self._use_gpu)  # expecting torch tensor
-                # ensure shape: (num_envs,4) or (1,4)
-                if rhc_q.dim() == 1:
-                    rhc_q = rhc_q.unsqueeze(0)
-                rhc_q = rhc_q.to(self._dtype)
-
-                # get robot (sim) quaternion stored in self._root_q (torch)
-                robot_q = self._root_q[robot_name][:, :].to(self._dtype)
-
-                # normalize both
-
-                # extract yaw-only quaternions (vectorized)
-                yaw_rhc = self.quat_to_yaw(rhc_q)                # (num_envs,) or (1,)
-                yaw_robot = self.quat_to_yaw(robot_q)            # (num_envs,)
-
-                # build yaw-only quaternions
-                device = self._root_q_offset[robot_name].device
-                rhc_yaw_q = self.yaw_quat(yaw_rhc)
-                robot_yaw_q = self.yaw_quat(yaw_robot)
-
-                # offset = rhc_yaw^{-1} * robot_yaw  so that rhc_yaw * offset = robot_yaw
-                offset = quaternion_multiply(self._quat_inverse(rhc_yaw_q), robot_yaw_q)  # shape: (num_envs,4) or (1,4)
-
-                # store offset into tensors; match layout (repeat if needed)
-                # if storage expects one row per env, ensure shape matches
-                # self._root_q_offset[robot_name] assumed shape (num_envs,4)
-                storage_shape = self._root_q_offset[robot_name].shape
-                if offset.shape[0] == 1 and storage_shape[0] > 1:
-                    offset_to_store = offset.repeat(storage_shape[0], 1)
-                else:
-                    offset_to_store = offset.reshape(storage_shape)
-
-                self._root_q_offset[robot_name][:, :] = offset_to_store.to(self._dtype).to(device)
-
-                # store inverse of offset for runtime use
-                offsetm1=self._quat_inverse(offset_to_store)
-                self._root_q_offsetm1[robot_name][:, :] = offsetm1.to(self._dtype).to(device)
-
-        self._q_offset_acquired = True
-
         self._isrunning=True
 
         return setup_ok
@@ -276,8 +226,6 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         self._last_control_time=0.0
         self._last_jntv_numdiff_time=0.0
         self._last_twist_numdiff_time=0.0
-            
-        self._q_offset_acquired=False
 
     @override
     def _xrdf_cmds(self, robot_name:str):
@@ -453,25 +401,9 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         else:
             raise NotImplementedError("Only root position from MPC is implemented. No odometry available yet.")
 
-        if self._root_q_offset[robot_name] is not None and self._q_offset_acquired:
-
-            # extract yaw-only part of incoming q
-            yaw_q = self.yaw_quat(self.quat_to_yaw(q))
-
-            # pitch-roll part: q_pr = q_yaw^{-1} * q_full  (so q_full = q_yaw * q_pr)
-            yaw_q_inv=  self._quat_inverse(yaw_q)
-            q_pr = quaternion_multiply(yaw_q_inv.flatten(), q.flatten())
-
-            # adjusted yaw = offsetm1 * q_yaw  (offsetm1 maps from rhc frame to sim frame; we apply its inverse stored earlier)
-
-            adjusted_yaw = quaternion_multiply(self._root_q_offsetm1[robot_name].flatten(), yaw_q.flatten())
-
-            # new quaternion: adjusted_yaw * q_pr  (applies yaw offset only, keeps pitch+roll from IMU)
-            self._root_q[robot_name][:, :] = quaternion_multiply(adjusted_yaw, q_pr)
-
-        else:
-            # no offset acquired: store raw IMU quaternion (ensure dtype/device)
-            self._root_q[robot_name][:, :] = torch.from_numpy(q).reshape(self._num_envs, -1).to(self._dtype)
+        # store raw IMU quaternion (ensure dtype/device). Startup yaw-rel projection
+        # for MPC state publishing is now handled in the base world interface.
+        self._root_q[robot_name][:, :] = torch.from_numpy(q).reshape(self._num_envs, -1).to(self._dtype)
 
         # dt=self._cluster_dt[robot_name] # getting diff state always at cluster rate
         dt=self.world_time(robot_name=robot_name)-self._last_twist_numdiff_time
@@ -594,8 +526,6 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
     
     def _init_robots_state(self):
         
-        self._root_q_offset={}
-        self._root_q_offsetm1={}
         self._p_ref_reset={}
         for i in range(0, len(self._robot_names)):
 
@@ -611,10 +541,6 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             self._root_q[robot_name][:, 0]=1
             self._root_q_prev[robot_name] = self._root_q[robot_name].clone()
             self._root_q_default[robot_name] = self._root_q[robot_name].clone()
-            self._root_q_offset[robot_name]=None
-            if  self._env_opts["use_rel_q_from_startup"]:
-                self._root_q_offset[robot_name]=self._root_q[robot_name].clone()
-                self._root_q_offsetm1[robot_name]=self._root_q[robot_name].clone()
 
             # jnt q (measured, previous, default)
             n_jnts=len(self._robot_iface_enabled_jnts)
@@ -693,17 +619,3 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             throw_when_excep = False)
         
         return running and self._isrunning
-    
-    def quat_to_yaw(self, q : torch.Tensor):
-        w, x, y, z = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
-
-        return math.atan2(2.0*(w*z + x*y), 1.0 - 2.0*(y*y + z*z))
-
-    def yaw_quat(self, yaw):
-        return torch.tensor([math.cos(yaw/2.0), 0.0, 0.0, math.sin(yaw/2.0)], dtype=self._dtype, device=self._device)
-
-    def _quat_inverse(self, q: torch.Tensor) -> torch.Tensor:
-        # inverse for unit quaternion: [w, -x, -y, -z]
-        qi = q.clone()
-        qi[..., 1:] = -qi[..., 1:]
-        return qi
