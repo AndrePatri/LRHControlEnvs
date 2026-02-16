@@ -2247,8 +2247,6 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
                                 device=self._device)
             self._root_q_offsets[robot_name][:, 0] = 1.0 # init to valid identity quaternion
 
-            self._update_root_offsets(robot_name)
-
             # boolean active flag per env
             self._pert_active[robot_name] = torch.zeros((self._num_envs,), dtype=torch.bool, device=self._device)
             # remaining steps as integer tensor
