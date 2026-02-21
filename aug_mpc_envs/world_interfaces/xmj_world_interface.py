@@ -191,6 +191,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         if xmj_opts["enable_height_sensor"]:
             xmj_opts["use_mpc_pos_for_robot"]=False
         
+        xmj_opts["run_cluster_bootstrap"] = True # to avoid initial jumps
+
         if not xmj_opts["use_gpu"]: # don't use GPU at all
             xmj_opts["use_gpu_pipeline"]=False
             xmj_opts["device"]="cpu"
