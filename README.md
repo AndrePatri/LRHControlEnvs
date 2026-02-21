@@ -9,7 +9,7 @@ Available interfaces:
 - `IsaacSimEnv`: main training and evaluation vectorized interface built on top of the Isaac Sim simulator (v4.2).
 - `Isaac5xSimEnv`: WIP -- port of `IsaacSimEnv` for Isaac Sim 5.2.
 - `XMjSimEnv`: non-vectorized MuJoCo interface on CPU via [xbot2_mujoco](https://github.com/AndrePatri/xbot2_mujoco) for sim-to-sim validation before hardware deployment.
-- `RtDeploymentEnv`: real-time deployment through [xbot2](https://advrhumanoids.github.io/xbot2/master/index.html) and [adarl_ros](git@gitlab.com:crzz/adarl_ros.git).
+- `RtDeploymentEnv`: real-time deployment through [xbot2](https://advrhumanoids.github.io/xbot2/master/index.html) and [adarl_ros](https://github.com/c-rizz/adarl_ros).
 
 <p align="center">
   <img src="docs/imgs/centauro_sims.png" alt="Centauro simulations" width="420">
