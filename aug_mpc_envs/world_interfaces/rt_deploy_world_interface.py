@@ -103,48 +103,50 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         self._render = False
 
     def _parse_env_opts(self):
-        xmj_opts={}
-        xmj_opts["use_gpu"]=False
-        xmj_opts["state_from_xbot"]=True
-        xmj_opts["device"]="cpu"
-        xmj_opts["gravity"] = np.array([0.0, 0.0, -9.81])
-        xmj_opts["use_diff_vels"] = False
+        rt_opts={}
+        rt_opts["use_gpu"]=False
+        rt_opts["state_from_xbot"]=True
+        rt_opts["device"]="cpu"
+        rt_opts["gravity"] = np.array([0.0, 0.0, -9.81])
+        rt_opts["use_diff_vels"] = False
 
-        xmj_opts["xmj_files_dir"]=None
+        rt_opts["xmj_files_dir"]=None
 
-        xmj_opts["rt_safety_perf_coeff"]=1.0
-        xmj_opts["is_sim"]=False
+        rt_opts["rt_safety_perf_coeff"]=1.0
+        rt_opts["is_sim"]=False
 
-        xmj_opts["xbot2_filter_prof"]="medium"
+        rt_opts["xbot2_filter_prof"]="medium"
         
-        xmj_opts["base_linkname"]="base_link"
+        rt_opts["base_linkname"]="base_link"
 
-        xmj_opts["use_mpc_pos_for_robot"]=True
-        xmj_opts["use_rel_q_from_startup"]=True
+        rt_opts["use_mpc_pos_for_robot"]=True
+        rt_opts["use_rel_q_from_startup"]=True
 
-        xmj_opts["torque_correction"]=1.0 # correction factor for torques sent to real robot
+        rt_opts["torque_correction"]=1.0 # correction factor for torques sent to real robot
         # (useful if no torque sensors are available)
 
-        xmj_opts["max_imp_torque"]=150.0 # [Nm]
+        rt_opts["max_imp_torque"]=150.0 # [Nm]
 
-        xmj_opts["ramp_to_homing"]=True
-        xmj_opts["xbot_homing_on_close"]=False
-        xmj_opts["ramp_impedances"]=True
-        xmj_opts["jnt_imp_ramp_time"]=1.0
-        xmj_opts["jnt_pos_ramp_time"]=4.0
-        xmj_opts["jnt_imp_ramp_time_onclose"]=2.0
+        rt_opts["ramp_to_homing"]=True
+        rt_opts["xbot_homing_on_close"]=False
+        rt_opts["ramp_impedances"]=True
+        rt_opts["jnt_imp_ramp_time"]=1.0
+        rt_opts["jnt_pos_ramp_time"]=4.0
+        rt_opts["jnt_imp_ramp_time_onclose"]=2.0
 
-        xmj_opts.update(self._env_opts) # update defaults with provided opts
+        rt_opts.update(self._env_opts) # update defaults with provided opts
         
-        xmj_opts["use_gpu_pipeline"]=False
-        xmj_opts["device"]="cpu"
-        xmj_opts["sim_device"]="cpu"
+        rt_opts["use_gpu_pipeline"]=False
+        rt_opts["device"]="cpu"
+        rt_opts["sim_device"]="cpu"
+        rt_opts["run_cluster_bootstrap"] = True # to avoid initial jumps
+
         # overwrite env opts in case some sim params were missing
-        self._env_opts=xmj_opts
+        self._env_opts=rt_opts
 
         # update device flag based on sim opts
-        self._device=xmj_opts["device"]
-        self._use_gpu=xmj_opts["use_gpu"]
+        self._device=rt_opts["device"]
+        self._use_gpu=rt_opts["use_gpu"]
 
     def _init_world(self):
     
