@@ -31,8 +31,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
             timeout_ms: int = 60000,
             env_opts: Dict = {}):
         
-        env_name = "LinVelTrack"
-        device = "cuda" if use_gpu else "cpu"
+        env_name = "TwistTrackingEnv"
 
         self._add_env_opt(env_opts, "srew_drescaling", 
             False)
