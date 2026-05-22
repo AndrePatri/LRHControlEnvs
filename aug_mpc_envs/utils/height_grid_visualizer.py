@@ -1,4 +1,4 @@
-# Debug visualizer for height grid samples (IsaacSim 4.x).
+# Debug visualizer for height grid samples in Isaac Sim.
 # Creates individual non-physical spheres at sampled world positions.
 
 import torch
@@ -28,8 +28,12 @@ class HeightGridVisualizer:
         self.dtype = dtype
 
         # lazy import Isaac APIs (requires SimulationApp already started)
-        from omni.isaac.core.utils import prims as prim_utils
-        from omni.isaac.core.utils.stage import get_current_stage
+        try:
+            from isaacsim.core.utils import prims as prim_utils
+            from isaacsim.core.utils.stage import get_current_stage
+        except ImportError:
+            from omni.isaac.core.utils import prims as prim_utils
+            from omni.isaac.core.utils.stage import get_current_stage
         from pxr import UsdGeom, Gf
 
         self._prim_utils = prim_utils
