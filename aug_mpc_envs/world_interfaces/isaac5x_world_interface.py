@@ -19,6 +19,7 @@ from isaacsim import SimulationApp
 
 import carb
 
+import copy
 import os
 import math
 import shutil
@@ -27,7 +28,7 @@ import xml.etree.ElementTree as ET
 import torch
 import numpy as np
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 from typing_extensions import override
 
 from EigenIPC.PyEigenIPC import VLevel
@@ -167,6 +168,7 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
         self._robot_n_links={}
         self._robot_n_dofs={}
         self._robot_dof_names={}
+        self._isaac_import_urdf_paths={}
         self._distr_offset={} # decribed how robots within each env are distributed
         self._spawning_radius=self._env_opts["spawning_radius"] # [m] -> default distance between roots of robots in a single
         self._height_sensors={}
@@ -186,14 +188,14 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
     def _import_isaac_pkgs(self):
         # we use global, so that we can create the simulation app inside (and so
         # access Isaac's kit) and also expose to all methods the imports
-        global World, omni_kit, get_context, UsdLux, Sdf, Gf, UsdPhysics, PhysicsSchemaTools, UsdShade, Vt
+        global World, omni_kit, get_context, Usd, UsdLux, Sdf, Gf, UsdPhysics, PhysicsSchemaTools, UsdShade, Vt
         global enable_extension, set_camera_view, _urdf, move_prim, GridCloner, prim_utils
         global get_current_stage, Articulation, RigidPrim, rep
         global OmniContactSensors, RlTerrains, OmniJntImpCntrl
         global PhysxSchema, UsdGeom
         global get_prim_at_path
 
-        from pxr import PhysxSchema, UsdGeom, UsdShade, Vt
+        from pxr import PhysxSchema, Usd, UsdGeom, UsdShade, Vt
         from pxr import UsdLux, Sdf, Gf, UsdPhysics, PhysicsSchemaTools
 
         from omni.usd import get_context
@@ -228,6 +230,10 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["is_fixed_base"]=False
         isaac_opts["merge_fixed_jnts"]=True
         isaac_opts["self_collide"]=True
+        isaac_opts["filter_adjacent_self_collisions"]=True
+        isaac_opts["apply_srdf_collision_filters"]=True
+        isaac_opts["self_collision_filter_target_mode"]="link"
+        isaac_opts["self_collision_filter_kinematic_depth"]=2
         isaac_opts["sim_device"]="cuda" if isaac_opts["use_gpu"] else "cpu"
         isaac_opts["physics_dt"]=1e-3
         isaac_opts["gravity"] = np.array([0.0, 0.0, -9.81])
@@ -885,6 +891,7 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
 
         self.apply_collision_filters(self._physics_context.prim_path,
                             "/World/collisions")
+        self._apply_self_collision_filters()
 
         self._reset_sim()
 
@@ -1706,14 +1713,15 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
         # import_config.default_drive_type = _urdf.UrdfJointTargetType.JOINT_DRIVE_POSITION
         # import URDF
 
-        # fixing fucking USD "feature" of not supporting dashes in mesh files
-        modified_urdf_path=self._remove_dashes(self._urdf_dump_paths[robot_name])
+        modified_urdf_path = self._urdf_dump_paths[robot_name]
+        if merge_fixed:
+            modified_urdf_path = self._collapse_fixed_joints(modified_urdf_path, robot_name)
+        modified_urdf_path = self._remove_dashes(modified_urdf_path)
 
         robot_base_prim_path = self._env_opts["template_env_ns"] + "/" + robot_name
         import_workdir = os.path.join("/tmp", "aug_mpc_isaac5_urdf_import", robot_name)
         shutil.rmtree(import_workdir, ignore_errors=True)
         os.makedirs(import_workdir, exist_ok=True)
-        robot_usd_path = os.path.join(import_workdir, f"{robot_name}.usd")
         old_cwd = os.getcwd()
         try:
             os.chdir(import_workdir)
@@ -1721,7 +1729,6 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
                 "URDFParseAndImportFile",
                 urdf_path=modified_urdf_path,
                 import_config=import_config,
-                dest_path=robot_usd_path,
                 # get_articulation_root=True,
             )
         finally:
@@ -1739,8 +1746,7 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
                 LogType.EXCEP,
                 throw_when_excep = True)
 
-        robot_ref_prim = get_current_stage().DefinePrim(robot_base_prim_path, "Xform")
-        robot_ref_prim.GetReferences().AddReference(robot_usd_path, robot_prim_path_default)
+        move_prim(robot_prim_path_default, robot_base_prim_path)
 
         robot_base_prim = prim_utils.get_prim_at_path(robot_base_prim_path)
         children = prim_utils.get_prim_children(robot_base_prim)
@@ -1749,7 +1755,465 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
             f"Imported robot URDF children: {children}",
             LogType.STAT)
 
+        self._isaac_import_urdf_paths[robot_name] = modified_urdf_path
+
         return success
+
+    def _apply_self_collision_filters(self):
+        for robot_idx, robot_name in enumerate(self._robot_names):
+            if not self._self_collide[robot_idx]:
+                continue
+
+            urdf_path = self._isaac_import_urdf_paths.get(robot_name)
+            total_applied = 0
+            total_skipped = 0
+            missing_links = set()
+            n_adjacent_pairs = 0
+
+            for env_path in self._envs_prim_paths:
+                robot_base_prim_path = f"{env_path}/{robot_name}"
+                if self._env_opts["filter_adjacent_self_collisions"] and urdf_path is not None:
+                    stats = self._apply_urdf_adjacent_collision_filters(
+                        robot_name,
+                        robot_base_prim_path,
+                        urdf_path,
+                        log=False,
+                    )
+                    total_applied += stats["applied"]
+                    total_skipped += stats["skipped"]
+                    missing_links.update(stats["missing_links"])
+                    n_adjacent_pairs = max(n_adjacent_pairs, stats["n_link_pairs"])
+
+                if self._env_opts["apply_srdf_collision_filters"]:
+                    stats = self._apply_srdf_collision_filters(
+                        robot_name,
+                        robot_base_prim_path,
+                        log=False,
+                    )
+                    total_applied += stats["applied"]
+                    total_skipped += stats["skipped"]
+                    missing_links.update(stats["missing_links"])
+
+            Journal.log(
+                self.__class__.__name__,
+                "_apply_self_collision_filters",
+                f"Applied {total_applied} self-collision filtered-pair targets for {robot_name} "
+                f"over {len(self._envs_prim_paths)} envs; adjacent link pairs: {n_adjacent_pairs}; "
+                f"target mode: {self._env_opts['self_collision_filter_target_mode']}; "
+                f"kinematic depth: {self._env_opts['self_collision_filter_kinematic_depth']}; "
+                f"skipped {total_skipped} pairs; missing/collapsed links: {sorted(missing_links)}",
+                LogType.STAT,
+            )
+
+    def _apply_urdf_adjacent_collision_filters(
+        self,
+        robot_name: str,
+        robot_base_prim_path: str,
+        urdf_path: str,
+        log: bool = True,
+    ):
+        pairs = self._urdf_link_pairs_within_tree_depth(
+            urdf_path,
+            depth=int(self._env_opts["self_collision_filter_kinematic_depth"]),
+        )
+        return self._apply_link_collision_filters(
+            robot_name=robot_name,
+            robot_base_prim_path=robot_base_prim_path,
+            pairs=pairs,
+            source="URDF adjacent joints",
+            log=log,
+        )
+
+    def _apply_srdf_collision_filters(self, robot_name: str, robot_base_prim_path: str, log: bool = True):
+        srdf_path = self._env_opts.get("collision_filter_srdf_path", None)
+        if srdf_path is None:
+            srdf_path = self._srdf_dump_paths.get(robot_name)
+        if srdf_path is None or not os.path.isfile(srdf_path):
+            if log:
+                Journal.log(
+                    self.__class__.__name__,
+                    "_apply_srdf_collision_filters",
+                    f"No SRDF found for {robot_name}; leaving Isaac self-collision pairs unfiltered.",
+                    LogType.WARN,
+                    throw_when_excep=False,
+                )
+            return {"applied": 0, "skipped": 0, "missing_links": set(), "n_link_pairs": 0}
+
+        pairs = []
+        for disabled in ET.parse(srdf_path).getroot().findall(".//disable_collisions"):
+            link1 = disabled.get("link1")
+            link2 = disabled.get("link2")
+            if link1 is None or link2 is None:
+                continue
+            pairs.append((link1, link2))
+
+        return self._apply_link_collision_filters(
+            robot_name=robot_name,
+            robot_base_prim_path=robot_base_prim_path,
+            pairs=pairs,
+            source="SRDF disabled collisions",
+            log=log,
+        )
+
+    def _apply_link_collision_filters(
+        self,
+        robot_name: str,
+        robot_base_prim_path: str,
+        pairs: List[Tuple[str, str]],
+        source: str,
+        log: bool = True,
+    ):
+        unique_pairs = self._dedupe_link_pairs(pairs)
+        applied = 0
+        skipped = 0
+        missing_links = set()
+
+        for link1, link2 in unique_pairs:
+            prims1 = self._collision_filter_targets(robot_base_prim_path, link1)
+            prims2 = self._collision_filter_targets(robot_base_prim_path, link2)
+            if not prims1 or not prims2:
+                skipped += 1
+                if not prims1:
+                    missing_links.add(link1)
+                if not prims2:
+                    missing_links.add(link2)
+                continue
+            for prim1 in prims1:
+                api1 = UsdPhysics.FilteredPairsAPI.Apply(prim1)
+                rel1 = api1.CreateFilteredPairsRel()
+                for prim2 in prims2:
+                    if prim1.GetPath() == prim2.GetPath():
+                        continue
+                    rel1.AddTarget(prim2.GetPath())
+                    applied += 1
+
+                    api2 = UsdPhysics.FilteredPairsAPI.Apply(prim2)
+                    api2.CreateFilteredPairsRel().AddTarget(prim1.GetPath())
+                    applied += 1
+
+        if log:
+            Journal.log(
+                self.__class__.__name__,
+                "_apply_link_collision_filters",
+                f"Applied {applied} {source} filtered-pair targets for {robot_name} "
+                f"from {len(unique_pairs)} link pairs; "
+                f"skipped {skipped} pairs; missing/collapsed links: {sorted(missing_links)}",
+                LogType.STAT,
+            )
+        return {
+            "applied": applied,
+            "skipped": skipped,
+            "missing_links": missing_links,
+            "n_link_pairs": len(unique_pairs),
+        }
+
+    def _urdf_joint_link_pairs(self, urdf_path: str) -> List[Tuple[str, str]]:
+        root = ET.parse(urdf_path).getroot()
+        pairs = []
+        for joint in root.findall("joint"):
+            parent_elem = joint.find("parent")
+            child_elem = joint.find("child")
+            if parent_elem is None or child_elem is None:
+                continue
+            parent = parent_elem.get("link")
+            child = child_elem.get("link")
+            if parent is None or child is None:
+                continue
+            pairs.append((parent, child))
+        return pairs
+
+    def _urdf_link_pairs_within_tree_depth(self, urdf_path: str, depth: int) -> List[Tuple[str, str]]:
+        if depth <= 1:
+            return self._urdf_joint_link_pairs(urdf_path)
+
+        root = ET.parse(urdf_path).getroot()
+        link_names = [link.get("name") for link in root.findall("link") if link.get("name") is not None]
+        adjacency = {name: set() for name in link_names}
+        for parent, child in self._urdf_joint_link_pairs(urdf_path):
+            adjacency.setdefault(parent, set()).add(child)
+            adjacency.setdefault(child, set()).add(parent)
+
+        pairs = []
+        for link in link_names:
+            visited = {link}
+            frontier = {link}
+            for _ in range(depth):
+                next_frontier = set()
+                for current in frontier:
+                    for neighbor in adjacency.get(current, set()):
+                        if neighbor in visited:
+                            continue
+                        visited.add(neighbor)
+                        next_frontier.add(neighbor)
+                        pairs.append((link, neighbor))
+                frontier = next_frontier
+                if not frontier:
+                    break
+        return self._dedupe_link_pairs(pairs)
+
+    def _dedupe_link_pairs(self, pairs: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+        seen: Set[Tuple[str, str]] = set()
+        unique_pairs = []
+        for link1, link2 in pairs:
+            if link1 == link2:
+                continue
+            key = tuple(sorted((link1, link2)))
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_pairs.append((link1, link2))
+        return unique_pairs
+
+    def _collision_filter_targets(self, robot_base_prim_path: str, link_name: str):
+        candidate_roots = [
+            f"{robot_base_prim_path}/{link_name}",
+            f"{robot_base_prim_path}/collisions/{link_name}",
+            f"{robot_base_prim_path}/{link_name}/collisions",
+            f"{robot_base_prim_path}/{link_name}/collisions/{link_name}",
+        ]
+
+        if self._env_opts["self_collision_filter_target_mode"] == "link":
+            for root_path in candidate_roots:
+                root_prim = prim_utils.get_prim_at_path(root_path)
+                if root_prim and root_prim.IsValid():
+                    return [root_prim]
+            return []
+
+        targets = []
+        seen_paths = set()
+        for root_path in candidate_roots:
+            root_prim = prim_utils.get_prim_at_path(root_path)
+            if not root_prim or not root_prim.IsValid():
+                continue
+            for prim in self._collision_filter_targets_from_root(root_prim):
+                prim_path = prim.GetPath()
+                if prim_path in seen_paths:
+                    continue
+                seen_paths.add(prim_path)
+                targets.append(prim)
+
+        return targets
+
+    def _collision_filter_targets_from_root(self, root_prim):
+        mode = self._env_opts["self_collision_filter_target_mode"]
+        if mode == "link":
+            return [root_prim]
+
+        targets = []
+        if mode == "all":
+            targets.append(root_prim)
+
+        for prim in Usd.PrimRange(root_prim):
+            if prim.GetPath() == root_prim.GetPath():
+                continue
+            prim_path = str(prim.GetPath())
+            if (
+                "/collisions/" in prim_path
+                or prim_path.endswith("/collisions")
+                or prim.HasAPI(UsdPhysics.CollisionAPI)
+            ):
+                targets.append(prim)
+        if mode not in ("all", "collision"):
+            Journal.log(
+                self.__class__.__name__,
+                "_collision_filter_targets_from_root",
+                f"Unsupported self_collision_filter_target_mode={mode}; using link prim targets.",
+                LogType.WARN,
+                throw_when_excep=False,
+            )
+            return [root_prim]
+        return targets
+
+    def _collapse_fixed_joints(self, urdf_path: str, robot_name: str) -> str:
+        tree = ET.parse(urdf_path)
+        root = tree.getroot()
+        collapsed_links = []
+        changed = True
+
+        while changed:
+            changed = False
+            links = {link.get("name"): link for link in root.findall("link")}
+            joints = list(root.findall("joint"))
+
+            for joint in joints:
+                if joint.get("type") != "fixed":
+                    continue
+
+                parent_elem = joint.find("parent")
+                child_elem = joint.find("child")
+                if parent_elem is None or child_elem is None:
+                    continue
+
+                parent_name = parent_elem.get("link")
+                child_name = child_elem.get("link")
+                parent_link = links.get(parent_name)
+                child_link = links.get(child_name)
+                if parent_link is None or child_link is None:
+                    continue
+
+                T_parent_child = self._urdf_origin_transform(joint.find("origin"))
+                self._merge_link_inertia(parent_link, child_link, T_parent_child)
+
+                for tag in ("visual", "collision"):
+                    for geom in list(child_link.findall(tag)):
+                        moved = copy.deepcopy(geom)
+                        self._set_urdf_origin_transform(
+                            moved,
+                            T_parent_child @ self._urdf_origin_transform(moved.find("origin")),
+                        )
+                        parent_link.append(moved)
+
+                for downstream_joint in joints:
+                    downstream_parent = downstream_joint.find("parent")
+                    if downstream_parent is None or downstream_parent.get("link") != child_name:
+                        continue
+                    downstream_parent.set("link", parent_name)
+                    self._set_urdf_origin_transform(
+                        downstream_joint,
+                        T_parent_child @ self._urdf_origin_transform(downstream_joint.find("origin")),
+                    )
+
+                root.remove(joint)
+                root.remove(child_link)
+                collapsed_links.append(child_name)
+                changed = True
+                break
+
+        if not collapsed_links:
+            return urdf_path
+
+        out_path = os.path.join(
+            os.path.dirname(os.path.abspath(urdf_path)),
+            f"{robot_name}_isaac5_fixed_collapsed.urdf",
+        )
+        tree.write(out_path, encoding="utf-8", xml_declaration=True)
+        Journal.log(
+            self.__class__.__name__,
+            "_collapse_fixed_joints",
+            f"Collapsed {len(collapsed_links)} fixed links before Isaac5 import: {collapsed_links}",
+            LogType.STAT,
+        )
+        return out_path
+
+    def _merge_link_inertia(self, parent_link: ET.Element, child_link: ET.Element, T_parent_child: np.ndarray):
+        parent_mass, parent_com, parent_inertia = self._link_inertia_about_origin(parent_link)
+        child_mass, child_com, child_inertia = self._link_inertia_about_origin(child_link, T_parent_child)
+
+        total_mass = parent_mass + child_mass
+        if total_mass <= 0.0:
+            return
+
+        total_com = (parent_mass * parent_com + child_mass * child_com) / total_mass
+        total_inertia = parent_inertia + child_inertia
+        self._write_link_inertia(parent_link, total_mass, total_com, total_inertia)
+
+    def _link_inertia_about_origin(self, link: ET.Element, prefix_T: Optional[np.ndarray] = None):
+        inertial = link.find("inertial")
+        if inertial is None:
+            return 0.0, np.zeros(3), np.zeros((3, 3))
+        if prefix_T is None:
+            prefix_T = np.eye(4)
+
+        mass_elem = inertial.find("mass")
+        inertia_elem = inertial.find("inertia")
+        if mass_elem is None or inertia_elem is None:
+            return 0.0, np.zeros(3), np.zeros((3, 3))
+
+        mass = float(mass_elem.get("value", "0"))
+        T = prefix_T @ self._urdf_origin_transform(inertial.find("origin"))
+        com = T[:3, 3]
+        R = T[:3, :3]
+        inertia_local = np.array(
+            [
+                [float(inertia_elem.get("ixx", "0")), float(inertia_elem.get("ixy", "0")), float(inertia_elem.get("ixz", "0"))],
+                [float(inertia_elem.get("ixy", "0")), float(inertia_elem.get("iyy", "0")), float(inertia_elem.get("iyz", "0"))],
+                [float(inertia_elem.get("ixz", "0")), float(inertia_elem.get("iyz", "0")), float(inertia_elem.get("izz", "0"))],
+            ],
+            dtype=float,
+        )
+        inertia_com = R @ inertia_local @ R.T
+        inertia_origin = inertia_com + mass * ((com @ com) * np.eye(3) - np.outer(com, com))
+        return mass, com, inertia_origin
+
+    def _write_link_inertia(self, link: ET.Element, mass: float, com: np.ndarray, inertia_origin: np.ndarray):
+        inertia_com = inertia_origin - mass * ((com @ com) * np.eye(3) - np.outer(com, com))
+        inertia_com = 0.5 * (inertia_com + inertia_com.T)
+
+        inertial = link.find("inertial")
+        if inertial is None:
+            inertial = ET.Element("inertial")
+            link.insert(0, inertial)
+
+        origin = inertial.find("origin")
+        if origin is None:
+            origin = ET.SubElement(inertial, "origin")
+        origin.set("xyz", self._fmt_urdf_vec(com))
+        origin.set("rpy", "0 0 0")
+
+        mass_elem = inertial.find("mass")
+        if mass_elem is None:
+            mass_elem = ET.SubElement(inertial, "mass")
+        mass_elem.set("value", f"{mass:.12g}")
+
+        inertia_elem = inertial.find("inertia")
+        if inertia_elem is None:
+            inertia_elem = ET.SubElement(inertial, "inertia")
+        inertia_elem.set("ixx", f"{inertia_com[0, 0]:.12g}")
+        inertia_elem.set("ixy", f"{inertia_com[0, 1]:.12g}")
+        inertia_elem.set("ixz", f"{inertia_com[0, 2]:.12g}")
+        inertia_elem.set("iyy", f"{inertia_com[1, 1]:.12g}")
+        inertia_elem.set("iyz", f"{inertia_com[1, 2]:.12g}")
+        inertia_elem.set("izz", f"{inertia_com[2, 2]:.12g}")
+
+    def _urdf_origin_transform(self, origin: Optional[ET.Element]) -> np.ndarray:
+        T = np.eye(4)
+        if origin is None:
+            return T
+        T[:3, 3] = self._parse_urdf_vec(origin.get("xyz"), 3)
+        T[:3, :3] = self._rpy_to_rotation(self._parse_urdf_vec(origin.get("rpy"), 3))
+        return T
+
+    def _set_urdf_origin_transform(self, elem: ET.Element, T: np.ndarray):
+        origin = elem.find("origin")
+        if origin is None:
+            origin = ET.Element("origin")
+            elem.insert(0, origin)
+        origin.set("xyz", self._fmt_urdf_vec(T[:3, 3]))
+        origin.set("rpy", self._fmt_urdf_vec(self._rotation_to_rpy(T[:3, :3])))
+
+    def _parse_urdf_vec(self, value: Optional[str], size: int) -> np.ndarray:
+        if value is None:
+            return np.zeros(size)
+        vals = [float(v) for v in value.split()]
+        if len(vals) != size:
+            return np.zeros(size)
+        return np.array(vals, dtype=float)
+
+    def _fmt_urdf_vec(self, value: np.ndarray) -> str:
+        return " ".join(f"{float(v):.12g}" for v in value)
+
+    def _rpy_to_rotation(self, rpy: np.ndarray) -> np.ndarray:
+        r, p, y = rpy
+        cr, sr = math.cos(r), math.sin(r)
+        cp, sp = math.cos(p), math.sin(p)
+        cy, sy = math.cos(y), math.sin(y)
+        Rx = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]], dtype=float)
+        Ry = np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]], dtype=float)
+        Rz = np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]], dtype=float)
+        return Rz @ Ry @ Rx
+
+    def _rotation_to_rpy(self, R: np.ndarray) -> np.ndarray:
+        sy = -R[2, 0]
+        cy = math.sqrt(max(0.0, 1.0 - sy * sy))
+        if cy > 1e-9:
+            roll = math.atan2(R[2, 1], R[2, 2])
+            pitch = math.atan2(sy, cy)
+            yaw = math.atan2(R[1, 0], R[0, 0])
+        else:
+            roll = math.atan2(-R[1, 2], R[1, 1])
+            pitch = math.atan2(sy, cy)
+            yaw = 0.0
+        return np.array([roll, pitch, yaw], dtype=float)
 
     def _remove_dashes(self, urdf_path: str) -> str:
         """
