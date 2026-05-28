@@ -34,7 +34,7 @@ from aug_mpc_envs.utils.math_utils import quat_to_omega
 
 from aug_mpc_envs.utils.height_sensor import HeightGridSensor
 from aug_mpc_envs.utils.xmj_jnt_imp_cntrl import XMjJntImpCntrl
-from adarl_ros.adapters.XbotMjAdapter import XbotMjAdapter
+from adarl.adapters.XbotMjAdapter import XbotMjAdapter
 from xbot2_mujoco.PyXbotMjSim import LoadingUtils
 from mpc_hive.utilities.math_utils_torch import world2base_frame,world2base_frame3D
 
@@ -106,11 +106,11 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         # BaseTask.__init__(self,name=self._name,offset=None)
 
     def is_running(self):
-        ros_control_running=self._xmj_adapter.is_ros_control_running()
-        if not ros_control_running:
+        xbot_control_running=self._xmj_adapter.is_xbot_control_running()
+        if not xbot_control_running:
             Journal.log(self.__class__.__name__,
             "_is_running",
-            "ros_control is not running",
+            "XBot2/ZMQ control plugin is not running",
             LogType.EXCEP,
             throw_when_excep = False)
 
@@ -122,7 +122,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             LogType.EXCEP,
             throw_when_excep = False)
 
-        return ros_control_running and sim_running and self._isrunning  
+        return xbot_control_running and sim_running and self._isrunning
     
     def _pre_setup(self):
         
@@ -147,7 +147,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
 
         xmj_opts["headless"] = False
         xmj_opts["xmj_files_dir"]=None
-        xmj_opts["xmj_timeout"]=1000
+        xmj_opts["xmj_timeout"]=30000
         xmj_opts["xbot2_filter_prof"]="medium"
 
         xmj_opts["base_linkname"]="base_link"
@@ -176,7 +176,6 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["stepup_seed"]=None
 
         xmj_opts["ramp_to_homing"]=True
-        xmj_opts["xbot_homing_on_close"]=False
         xmj_opts["ramp_impedances"]=True
         xmj_opts["jnt_imp_ramp_time"]=1.0
         xmj_opts["jnt_pos_ramp_time"]=4.0
@@ -269,6 +268,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             self._generate_rob_descriptions(robot_name=robot_name, 
                                     urdf_path=urdf_path,
                                     srdf_path=srdf_path)
+            self._patch_generated_urdf_for_mujoco(
+                urdf_path=self._urdf_dump_paths[robot_name])
             
             self._xmj_helper = LoadingUtils(self._name)
             xmj_files_dir=self._env_opts["xmj_files_dir"]
@@ -364,32 +365,62 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                 cmds[i] = "floating_joint:=true" 
         return cmds
 
+    def _patch_generated_urdf_for_mujoco(self, urdf_path: str):
+        tree = ET.parse(urdf_path)
+        root = tree.getroot()
+        patched = 0
+
+        for geometry in root.findall(".//visual/geometry"):
+            mesh = geometry.find("mesh")
+            if mesh is None:
+                continue
+
+            filename = mesh.attrib.get("filename", "")
+            if not filename.endswith("/realsense/d435.dae") and not filename.endswith("d435.dae"):
+                continue
+
+            geometry.remove(mesh)
+            ET.SubElement(geometry, "box", {"size": "0.09 0.025 0.02505"})
+            patched += 1
+
+        if patched:
+            tree.write(urdf_path, encoding="utf-8", xml_declaration=True)
+            Journal.log(self.__class__.__name__,
+                        "_patch_generated_urdf_for_mujoco",
+                        f"Patched {patched} Realsense D435 visual mesh(es) in generated URDF.",
+                        LogType.STAT,
+                        throw_when_excep=True)
+
     def _render_sim(self, mode="human"):
         pass
 
     def _close(self):
+        if not hasattr(self, "_xmj_adapter"):
+            return
+
         for i in range(len(self._robot_names)):
             robot_name = self._robot_names[i]
+            adapter_started = getattr(self._xmj_adapter, "_started", False)
 
             # set filters to safe
-            self._xmj_adapter.set_filters(set_enabled=True, 
-                profile_name="safe")
+            if adapter_started:
+                self._xmj_adapter.set_filters(set_enabled=True,
+                    profile_name="safe")
 
             # resets jnt imp gain to the startups with a ramp
             self._xmj_adapter.impedance_ramp_time=self._env_opts["jnt_imp_ramp_time_onclose"] # setting slower
             self._env_opts["ramp_to_homing"]=False # skip homing when closing
             
             # read last pos ref from jnt imp control before reset
-            
-            # ramp since impedances will generally be ramped up when cleaning up
-            self._reset_jnt_imp_control(robot_name=robot_name) # will set jnt imp gains to initial vals and 
-            # pos ref to homing and apply them with the adapter
 
-            if self._env_opts["xbot_homing_on_close"]:
-                self._xmj_adapter.trigger_xbot_homing() # perform a final
-            # homing to reset the robot to its default xbot state
+            # ramp since impedances will generally be ramped up when cleaning up
+            if adapter_started and robot_name in self._jnt_imp_controllers:
+                self._reset_jnt_imp_control(robot_name=robot_name) # will set jnt imp gains to initial vals and
+                # pos ref to homing and apply them with the adapter
 
             self._isrunning=False
+
+        self._xmj_adapter.close()
 
     @override
     def _apply_cmds_to_jnt_imp_control(self, robot_name:str):
@@ -820,7 +851,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         raise NotImplementedError()
     
     def _robot_jnt_names(self, robot_name: str):
-        return self._xmj_adapter.xmj_env().jnt_names()
+        return self._xmj_adapter.jnt_names()
 
     def _prepare_world_xml(self):
         """Optionally augment the base world.xml with procedural step-up tiles and return the path to use."""

@@ -22,7 +22,7 @@ from EigenIPC.PyEigenIPC import LogType
 from EigenIPC.PyEigenIPC import Journal
 
 from aug_mpc.utils.jnt_imp_control_base import JntImpCntrlBase
-from adarl_ros.adapters.XbotMjAdapter import XbotMjAdapter
+from adarl.adapters.XbotMjAdapter import XbotMjAdapter
 
 class XMjJntImpCntrl(JntImpCntrlBase):
 
@@ -106,4 +106,3 @@ class XMjJntImpCntrl(JntImpCntrlBase):
     def _set_joint_efforts(self, effort: torch.Tensor):
         effort_cpu=effort.cpu()
         self._pvesd_adapter[:, 2]=effort_cpu
-                    
