@@ -282,9 +282,6 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             throw_when_excep = True)
             walltime_to_sleep=0 # do not sleep
         
-        # while self.world_time(robot_name=robot_name)-self._last_control_time < walltime_to_sleep:
-        #     ns=1000
-        #     PerfSleep.thread_sleep(ns)
         rospy.sleep(self._env_opts["rt_safety_perf_coeff"]*walltime_to_sleep) # make sure cmds are applied to
         # jnt imp controller at a constant rate (rospy will use sim time if enabled, otherwise walltime)
         self._ros_xbot_adapter.apply_joint_impedances(jnt_imp_cmds) # write to robot (there could be
