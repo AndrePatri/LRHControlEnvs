@@ -28,7 +28,7 @@ from EigenIPC.PyEigenIPC import Journal
 
 from aug_mpc_envs.utils.math_utils import quat_to_omega
 from aug_mpc_envs.utils.xmj_jnt_imp_cntrl import XMjJntImpCntrl
-from adarl.adapters.ZmqXbotAdapter import ZmqXbotAdapter
+from adarl.adapters.ZmqXbotAdapter import ZmqXbotAdapter, XbotSafetyError
 from mpc_hive.utilities.timing import high_resolution_sleep_s
 from mpc_hive.utilities.math_utils_torch import world2base_frame3D
 
@@ -125,6 +125,10 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         rt_opts["xbot2_ipc_state_path"]="/tmp/xbot2_zmq_pub.ipc"
         rt_opts["xbot2_ipc_cmd_path"]="/tmp/xbot2_zmq_cmd.ipc"
         rt_opts["xbot2_ipc_service_path"]="/tmp/xbot2_zmq_rep.ipc"
+        rt_opts["xbot2_sense_timeout_s"]=2.0
+        rt_opts["xbot2_health_check_timeout_s"]=0.2
+        rt_opts["xbot2_health_check_period_s"]=1.0
+        rt_opts["xbot2_health_stale_after_s"]=5.0
 
         rt_opts["base_linkname"]="base_link"
 
@@ -207,7 +211,11 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
                 tcp_cmd_port=self._env_opts["xbot2_tcp_cmd_port"],
                 ipc_pub_path=self._env_opts["xbot2_ipc_state_path"],
                 ipc_cmd_path=self._env_opts["xbot2_ipc_cmd_path"],
-                ipc_service_path=self._env_opts["xbot2_ipc_service_path"])
+                ipc_service_path=self._env_opts["xbot2_ipc_service_path"],
+                sense_timeout_s=self._env_opts["xbot2_sense_timeout_s"],
+                health_check_timeout_s=self._env_opts["xbot2_health_check_timeout_s"],
+                health_check_period_s=self._env_opts["xbot2_health_check_period_s"],
+                health_stale_after_s=self._env_opts["xbot2_health_stale_after_s"])
             # self._xbot_adapter.build_scenario()
             self._xbot_adapter.startup()
             self._xbot_adapter.position_ramp_time=self._env_opts["jnt_pos_ramp_time"] # [s]
@@ -256,29 +264,54 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
     def _render_sim(self, mode="human"):
         pass
 
+    def _cleanup_warn(self, message: str):
+        try:
+            Journal.log(self.__class__.__name__,
+                "_close",
+                message,
+                LogType.WARN,
+                throw_when_excep=False)
+        except Exception:
+            pass
+
+    def _xbot_cleanup_available(self) -> bool:
+        if not hasattr(self, "_xbot_adapter"):
+            return False
+        if not getattr(self._xbot_adapter, "_started", False):
+            return False
+        try:
+            return not self._xbot_adapter.is_safety_triggered()
+        except Exception:
+            return False
+
     def _close(self):
         if not hasattr(self, "_xbot_adapter"):
             return
 
-        adapter_started = getattr(self._xbot_adapter, "_started", False)
+        adapter_can_command = self._xbot_cleanup_available()
         for i in range(len(self._robot_names)):
             robot_name = self._robot_names[i]
 
-            # set filters to safe
-            if adapter_started:
-                self._xbot_adapter.set_filters(set_enabled=True,
-                    profile_name="safe")
+            if adapter_can_command:
+                try:
+                    self._xbot_adapter.set_filters(set_enabled=True, profile_name="safe")
+                except Exception as exc:
+                    adapter_can_command = False
+                    self._cleanup_warn(f"Skipping XBot2 filter cleanup: {exc}")
 
-            # resets jnt imp gain to the startups with a ramp
             self._xbot_adapter.impedance_ramp_time=self._env_opts["jnt_imp_ramp_time_onclose"] # setting slower
             self._env_opts["ramp_to_homing"]=False # skip homing when closing
 
-            # read last pos ref from jnt imp control before reset
-
-            # ramp since impedances will generally be ramped up when cleaning up
-            if adapter_started and robot_name in self._jnt_imp_controllers:
-                self._reset_jnt_imp_control(robot_name=robot_name) # will set jnt imp gains to initial vals and
-                # pos ref to homing and apply them with the adapter
+            if adapter_can_command and robot_name in self._jnt_imp_controllers:
+                try:
+                    self._reset_jnt_imp_control(robot_name=robot_name) # will set jnt imp gains to initial vals and
+                    # pos ref to homing and apply them with the adapter
+                except XbotSafetyError as exc:
+                    adapter_can_command = False
+                    self._cleanup_warn(f"Skipping XBot2 impedance cleanup after safety trigger: {exc}")
+                except Exception as exc:
+                    adapter_can_command = False
+                    self._cleanup_warn(f"Skipping XBot2 impedance cleanup: {exc}")
 
             self._isrunning=False
 
@@ -346,6 +379,19 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             override_art_controller=self._override_low_lev_controller)
 
         return jnt_imp_controller
+
+    @override
+    def _pre_step(self):
+        try:
+            return super()._pre_step()
+        except XbotSafetyError as exc:
+            Journal.log(self.__class__.__name__,
+                "_pre_step",
+                str(exc),
+                LogType.WARN,
+                throw_when_excep=False)
+            self._isrunning = False
+            return False
 
     def _step_world(self): # real world steps by itself (hopefully)
         pass
@@ -627,9 +673,13 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
     def is_running(self):
         running=self._xbot_adapter.is_xbot_control_running()
         if not running:
+            if self._xbot_adapter.is_safety_triggered():
+                msg = "XBot2 safety is triggered; stopping RT deployment interface"
+            else:
+                msg = "XBot2/ZMQ control plugin is not running"
             Journal.log(self.__class__.__name__,
             "_is_running",
-            "XBot2/ZMQ control plugin is not running",
+            msg,
             LogType.EXCEP,
             throw_when_excep = False)
 
