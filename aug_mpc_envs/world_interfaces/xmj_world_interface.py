@@ -149,8 +149,10 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["xmj_files_dir"]=None
         xmj_opts["xmj_timeout"]=30000
         xmj_opts["xbot2_filter_prof"]="medium"
+        xmj_opts["xbot2_sense_timeout_s"]=2.0
 
         xmj_opts["base_linkname"]="base_link"
+        xmj_opts["root_spawn_height"]=None
 
         xmj_opts["use_mpc_pos_for_robot"]=False # default to using pos from sim
         xmj_opts["use_rel_q_from_startup"]=True
@@ -182,6 +184,9 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["jnt_imp_ramp_time_onclose"]=2.0
 
         xmj_opts.update(self._env_opts) # update defaults with provided opts
+        if xmj_opts["root_spawn_height"] is not None:
+            xmj_opts["root_spawn_height"] = float(xmj_opts["root_spawn_height"])
+        xmj_opts["xbot2_sense_timeout_s"] = float(xmj_opts["xbot2_sense_timeout_s"])
         xmj_opts["rendering_dt"]=1/xmj_opts["render_fps"]        
         xmj_opts["height_sensor_pixels"]=int(xmj_opts["height_sensor_pixels"])
         xmj_opts["height_sensor_resolution"]=float(xmj_opts["height_sensor_resolution"])
@@ -307,8 +312,10 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                 allow_fallback=True,
                 enable_filters=True,
                 base_link=self._env_opts["base_linkname"],
+                root_spawn_height=self._env_opts["root_spawn_height"],
                 render_to_file=self._env_opts["render_to_file"],
-                render_fps=self._env_opts["render_fps"])
+                render_fps=self._env_opts["render_fps"],
+                sense_timeout_s=self._env_opts["xbot2_sense_timeout_s"])
             # self._xmj_adapter.build_scenario()
             with open(self._urdf_dump_paths[self._robot_names[0]], "r", encoding="utf-8") as f:
                 urdf_str = f.read()
@@ -428,6 +435,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name) # write to interface jnt imp control
         self._xmj_adapter.setJointsImpedanceCommand(self._jnt_imp_controllers[self._robot_names[0]].get_pvesd()) # just set cmds, will be applied when stepping world
         self._p_ref_reset[robot_name][:, :]= self._jnt_imp_controllers[robot_name].pos_ref() # store last sent pos ref
+
 
     @override
     def _jnt_imp_reset_overrride(self, 
@@ -734,8 +742,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         self._jnts_eff[robot_name][env_indxs, :] = jnt_state_from_xbot[2,:]
 
     def _set_jnts_to_homing(self, robot_name: str):
-        pass
-        # self._xmj_adapter.xmj_env().move_to_homing_now()
+        del robot_name
+        self._xmj_adapter.move_to_homing_now()
                 
     def _set_root_to_defconfig(self, robot_name: str):
         self._xmj_adapter.xmj_env().set_pi(self._root_p_default[robot_name].numpy())
