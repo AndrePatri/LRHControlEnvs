@@ -152,7 +152,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["xbot2_sense_timeout_s"]=2.0
 
         xmj_opts["base_linkname"]="base_link"
-        xmj_opts["root_spawn_height"]=None
+        xmj_opts["spawning_height"]=1.0 # same default as the Isaac interface; set explicitly per robot.
+        # Set to None to fall back to the model/MJCF base height instead.
 
         xmj_opts["use_mpc_pos_for_robot"]=False # default to using pos from sim
         xmj_opts["use_rel_q_from_startup"]=True
@@ -184,8 +185,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
         xmj_opts["jnt_imp_ramp_time_onclose"]=2.0
 
         xmj_opts.update(self._env_opts) # update defaults with provided opts
-        if xmj_opts["root_spawn_height"] is not None:
-            xmj_opts["root_spawn_height"] = float(xmj_opts["root_spawn_height"])
+        if xmj_opts["spawning_height"] is not None:
+            xmj_opts["spawning_height"] = float(xmj_opts["spawning_height"])
         xmj_opts["xbot2_sense_timeout_s"] = float(xmj_opts["xbot2_sense_timeout_s"])
         xmj_opts["rendering_dt"]=1/xmj_opts["render_fps"]        
         xmj_opts["height_sensor_pixels"]=int(xmj_opts["height_sensor_pixels"])
@@ -312,7 +313,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                 allow_fallback=True,
                 enable_filters=True,
                 base_link=self._env_opts["base_linkname"],
-                root_spawn_height=self._env_opts["root_spawn_height"],
+                root_spawn_height=self._env_opts["spawning_height"],
                 render_to_file=self._env_opts["render_to_file"],
                 render_fps=self._env_opts["render_fps"],
                 sense_timeout_s=self._env_opts["xbot2_sense_timeout_s"])
