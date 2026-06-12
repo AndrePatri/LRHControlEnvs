@@ -1303,6 +1303,28 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
 
     def _reset_sim(self):
         self._world.reset(soft=False)
+        # Isaac Sim 5.1: isaacsim.core.prims.Articulation applies the default joint
+        # state only inside initialize() (the first world.reset()), capturing it from
+        # the current DOFs (zeros). It has no post_reset() that re-applies joint
+        # defaults, so a homing set later via set_joints_default_state() is stored but
+        # never written to the DOFs on subsequent resets -> the robot would spawn at the
+        # zero/URDF joint config. The root pose default is still applied via the
+        # inherited XForm post_reset (hence only the joints were wrong). Re-apply the
+        # stored default joint state with the live setter to restore Isaac 4.2 semantics.
+        for robot_name, view in self._robots_art_views.items():
+            try:
+                djs = view.get_joints_default_state()
+                if djs is None or djs.positions is None:
+                    continue
+                view.set_joint_positions(djs.positions)
+                if djs.velocities is not None:
+                    view.set_joint_velocities(djs.velocities)
+            except Exception as exc:
+                Journal.log(self.__class__.__name__,
+                    "_reset_sim",
+                    f"could not re-apply default joint state for {robot_name}: {exc}",
+                    LogType.WARN,
+                    throw_when_excep=False)
 
     def _reset_state(self,
         robot_name: str,
