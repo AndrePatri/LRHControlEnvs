@@ -322,19 +322,19 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["use_random_pertub"]=False
         isaac_opts["pert_planar_only"]=True # if True, linear pushes only in xy plane and no torques
 
-        isaac_opts["pert_wrenches_rate"]=10.0 # on average 1 pert every pert_wrenches_rate seconds
-        isaac_opts["pert_wrenches_min_duration"]=0.6
-        isaac_opts["pert_wrenches_max_duration"]=3.5 # [s]
+        isaac_opts["pert_wrenches_rate"]=3.0 # on average 1 pert every pert_wrenches_rate seconds
+        isaac_opts["pert_wrenches_min_duration"]=0.25
+        isaac_opts["pert_wrenches_max_duration"]=0.6 # [s]
         isaac_opts["pert_force_max_weight_scale"]=1.2 # clip force norm to scale*weight
-        isaac_opts["pert_force_min_weight_scale"]=0.2 # optional min force norm as scale*weight
+        isaac_opts["pert_force_min_weight_scale"]=0.0 # optional min force norm as scale*weight
         isaac_opts["pert_torque_max_weight_scale"]=1.0 # clip torque norm to scale*weight*max_ang_impulse_lever
 
-        isaac_opts["pert_target_delta_v"]=2.0 # [m/s] desired max impulse = m*delta_v
+        isaac_opts["pert_target_delta_v"]=1.0 # [m/s] desired max impulse = m*delta_v
         isaac_opts["det_pert_rate"]=True
 
         # max impulse (unitless scale multiplied by weight to get N*s): delta_v/g
         isaac_opts["max_lin_impulse_norm"]=isaac_opts["pert_target_delta_v"]/9.81
-        isaac_opts["lin_impulse_mag_min"]=1.0 # [0, 1] -> min fraction of max_lin_impulse_norm when sampling
+        isaac_opts["lin_impulse_mag_min"]=0.5 # [0, 1] -> min fraction of max_lin_impulse_norm when sampling
         isaac_opts["lin_impulse_mag_max"]=1.0 # [0, 1] -> max fraction of max_lin_impulse_norm when sampling
 
         isaac_opts["max_ang_impulse_lever"]=0.2 # [m]
@@ -1402,6 +1402,12 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
         self._read_jnts_state_from_robot(env_indxs=env_indxs,
             robot_name=robot_name)
 
+    def _rand_pert_phase(self, n: int):
+        """Random initial phase in [0, _pert_det_steps) so deterministic-rate perturbations
+        are staggered across vectorized envs instead of firing in lockstep."""
+        hi = max(1, int(self._pert_det_steps))
+        return torch.randint(0, hi, (n,), dtype=torch.int32, device=self._device)
+
     def _reset_perturbations(self, robot_name: str, env_indxs: torch.Tensor = None):
         """Clear perturbation state and wrenches for selected envs."""
         if robot_name not in self._pert_active:
@@ -1411,13 +1417,14 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
             self._pert_steps_remaining[robot_name].zero_()
             self._pert_forces_world[robot_name].zero_()
             self._pert_torques_world[robot_name].zero_()
-            self._pert_det_counter[robot_name].zero_()
+            # random phase (not zero) to decorrelate deterministic-rate pushes across envs
+            self._pert_det_counter[robot_name].copy_(self._rand_pert_phase(self._num_envs))
         else:
             self._pert_active[robot_name][env_indxs] = False
             self._pert_steps_remaining[robot_name][env_indxs] = 0
             self._pert_forces_world[robot_name][env_indxs, :] = 0
             self._pert_torques_world[robot_name][env_indxs, :] = 0
-            self._pert_det_counter[robot_name][env_indxs] = 0
+            self._pert_det_counter[robot_name][env_indxs] = self._rand_pert_phase(env_indxs.numel())
 
     def _process_perturbations(self):
 
@@ -2939,7 +2946,9 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
             self._pert_durations[robot_name] = torch.zeros((self._num_envs, 1), dtype=torch.int32, device=self._device)
 
             self._pert_scratch[robot_name] = torch.zeros((self._num_envs, 1), dtype=self._dtype, device=self._device)
-            self._pert_det_counter[robot_name] = torch.zeros((self._num_envs,), dtype=torch.int32, device=self._device)
+            # random initial phase (see _rand_pert_phase) so deterministic-rate pushes are
+            # staggered across vectorized envs rather than all firing on the same step
+            self._pert_det_counter[robot_name] = self._rand_pert_phase(self._num_envs)
 
             self._masses[robot_name] = torch.sum(self._robots_art_views[robot_name].get_body_masses(clone=True), dim=1).to(dtype=self._dtype, device=self._device)
 
