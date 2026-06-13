@@ -322,7 +322,7 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["use_random_pertub"]=False
         isaac_opts["pert_planar_only"]=True # if True, linear pushes only in xy plane and no torques
 
-        isaac_opts["pert_wrenches_rate"]=3.0 # on average 1 pert every pert_wrenches_rate seconds
+        isaac_opts["pert_wrenches_rate"]=15.0 # on average 1 pert every pert_wrenches_rate seconds
         isaac_opts["pert_wrenches_min_duration"]=0.25
         isaac_opts["pert_wrenches_max_duration"]=0.6 # [s]
         isaac_opts["pert_force_max_weight_scale"]=1.2 # clip force norm to scale*weight
