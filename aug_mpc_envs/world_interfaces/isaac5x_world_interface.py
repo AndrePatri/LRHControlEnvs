@@ -329,7 +329,7 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["pert_force_min_weight_scale"]=0.0 # optional min force norm as scale*weight
         isaac_opts["pert_torque_max_weight_scale"]=1.0 # clip torque norm to scale*weight*max_ang_impulse_lever
 
-        isaac_opts["pert_target_delta_v"]=1.0 # [m/s] desired max impulse = m*delta_v
+        isaac_opts["pert_target_delta_v"]=0.4 # [m/s] desired max impulse = m*delta_v
         isaac_opts["det_pert_rate"]=True
 
         # max impulse (unitless scale multiplied by weight to get N*s): delta_v/g

@@ -33,8 +33,9 @@ from mpc_hive.utilities.timing import high_resolution_sleep_s
 from mpc_hive.utilities.math_utils_torch import world2base_frame3D
 
 from aug_mpc.world_interfaces.world_interface_base import AugMPCWorldInterfaceBase
+from aug_mpc_envs.utils.xbot_runtime_config import XbotRuntimeConfigMixin
 
-class RtDeploymentEnv(AugMPCWorldInterfaceBase):
+class RtDeploymentEnv(XbotRuntimeConfigMixin, AugMPCWorldInterfaceBase):
     """Deployment interface for an already-running XBot2 stack exposed over ZMQ."""
 
     def __init__(self,
@@ -111,6 +112,8 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
         rt_opts["use_diff_vels"] = False
 
         rt_opts["xmj_files_dir"]=None
+        rt_opts["xbot_config_path"]=None
+        rt_opts["xbot_runtime_config_dir"]=None
 
         rt_opts["rt_safety_perf_coeff"]=1.0
         rt_opts["is_sim"]=False
@@ -191,6 +194,7 @@ class RtDeploymentEnv(AugMPCWorldInterfaceBase):
             self._generate_rob_descriptions(robot_name=robot_name,
                                     urdf_path=urdf_path,
                                     srdf_path=srdf_path)
+            self._prepare_xbot_runtime_config(robot_name=robot_name)
 
             self._xbot_adapter=ZmqXbotAdapter(model_name=robot_name,
                 stepLength_sec=self._cluster_dt[robot_name],

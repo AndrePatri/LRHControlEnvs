@@ -39,8 +39,9 @@ from xbot2_mujoco.PyXbotMjSim import LoadingUtils
 from mpc_hive.utilities.math_utils_torch import world2base_frame,world2base_frame3D
 
 from aug_mpc.world_interfaces.world_interface_base import AugMPCWorldInterfaceBase
+from aug_mpc_envs.utils.xbot_runtime_config import XbotRuntimeConfigMixin
 
-class XMjSimEnv(AugMPCWorldInterfaceBase):
+class XMjSimEnv(XbotRuntimeConfigMixin, AugMPCWorldInterfaceBase):
 
     def __init__(self,
         robot_names: List[str],
@@ -147,6 +148,8 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
 
         xmj_opts["headless"] = False
         xmj_opts["xmj_files_dir"]=None
+        xmj_opts["xbot_config_path"]=None
+        xmj_opts["xbot_runtime_config_dir"]=None
         xmj_opts["xmj_timeout"]=30000
         xmj_opts["xbot2_filter_prof"]="medium"
         xmj_opts["xbot2_sense_timeout_s"]=2.0
@@ -276,6 +279,7 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
                                     srdf_path=srdf_path)
             self._patch_generated_urdf_for_mujoco(
                 urdf_path=self._urdf_dump_paths[robot_name])
+            xbot_runtime_config_path = self._prepare_xbot_runtime_config(robot_name=robot_name)
             
             self._xmj_helper = LoadingUtils(self._name)
             xmj_files_dir=self._env_opts["xmj_files_dir"]
@@ -291,13 +295,13 @@ class XMjSimEnv(AugMPCWorldInterfaceBase):
             
             self._xmj_helper.set_urdf_path(self._urdf_dump_paths[self._robot_names[0]])
             self._xmj_helper.set_srdf_path(self._srdf_dump_paths[self._robot_names[0]])
-            self._xmj_helper.set_xbot_config_path(self._jnt_imp_config_paths[self._robot_names[0]])
+            self._xmj_helper.set_xbot_config_path(xbot_runtime_config_path)
             self._xmj_helper.generate()
             self._mj_xml_path = self._xmj_helper.xml_path()
 
             self._xmj_adapter=XbotMjAdapter(model_fpath=self._mj_xml_path,
                 model_name=self._robot_names[0],
-                xbot2_config_path=self._jnt_imp_config_paths[self._robot_names[0]],
+                xbot2_config_path=xbot_runtime_config_path,
                 stepLength_sec=self._env_opts["physics_dt"],
                 headless=self._env_opts["headless"],
                 init_steps=self._xmj_adapter_init_tsteps,
