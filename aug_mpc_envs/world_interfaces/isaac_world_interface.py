@@ -303,7 +303,7 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["use_flat_ground"]=True
         isaac_opts["static_friction"]=0.5
         isaac_opts["dynamic_friction"]=0.5
-        isaac_opts["restitution"]=0.1
+        isaac_opts["restitution"]=0.01
         isaac_opts["ground_type"]="random"
         isaac_opts["ground_size"]=800
         isaac_opts["terrain_border"]=isaac_opts["ground_size"]/2

@@ -182,7 +182,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
             # time-dependent)
             self._add_env_opt(env_opts, "add_periodic_clock_to_obs", default=False) 
 
-        self._add_env_opt(env_opts, "add_heightmap_obs", default=True)         
+        self._add_env_opt(env_opts, "add_heightmap_obs", default=False)         
 
         # temporarily creating robot state client to get some data
         robot_state_tmp = RobotState(namespace=namespace,
