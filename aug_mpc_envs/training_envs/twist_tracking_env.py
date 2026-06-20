@@ -257,8 +257,8 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
             obs_dim+=self._height_flat_dim
         # Agent task reference
         self._add_env_opt(env_opts, "use_pof0", default=True) # with some prob, references will be null
-        self._add_env_opt(env_opts, "pof0_linvel", default=0.3) # [0, 1] prob of both linvel and omega refs being null(from bernoulli distr)
-        self._add_env_opt(env_opts, "pof0_omega", default=0.3) # [0, 1] prob of both linvel and omega refs being null(from bernoulli distr)
+        self._add_env_opt(env_opts, "pof0_linvel", default=0.05) # [0, 1] probability of a null linear velocity reference
+        self._add_env_opt(env_opts, "pof0_omega", default=0.05) # [0, 1] probability of a null angular velocity reference
         self._add_env_opt(env_opts, "max_linvel_ref", default=0.3) # m/s
         self._add_env_opt(env_opts, "max_angvel_ref", default=0.0) # rad/s
         if env_opts["add_angvel_ref_rand"]:   

@@ -8,7 +8,10 @@ from EigenIPC.PyEigenIPC import VLevel
 
 from mpc_hive.utilities.math_utils_torch import world2base_frame
 
-from aug_mpc_envs.training_envs.task_reference_utils import position_target_to_velocity
+from aug_mpc_envs.training_envs.task_reference_utils import (
+    position_target_to_velocity,
+    resample_bernoulli_coefficients,
+)
 from aug_mpc_envs.training_envs.twist_tracking_env import TwistTrackingEnv
 
 class FakePosTrackingEnv(TwistTrackingEnv):
@@ -141,8 +144,8 @@ class FakePosTrackingEnv(TwistTrackingEnv):
 
             # sample for all envs pof0
             if self._env_opts["use_pof0"]: # sample from bernoulli distribution and update coefficients
-                torch.bernoulli(input=self._pof1_b_linvel,out=self._bernoulli_coeffs_linvel) # by default bernoulli_coeffs are 1 if not self._env_opts["use_pof0"]
-                torch.bernoulli(input=self._pof1_b_omega,out=self._bernoulli_coeffs_omega)
+                resample_bernoulli_coefficients(self._bernoulli_coeffs_linvel, self._pof1_b_linvel)
+                resample_bernoulli_coefficients(self._bernoulli_coeffs_omega, self._pof1_b_omega)
                            
         else:
 
@@ -167,12 +170,12 @@ class FakePosTrackingEnv(TwistTrackingEnv):
                 torch.nn.init.uniform_(random_uniform, a=-1, b=1)
                 self._agent_twist_ref_current_w[env_indxs, 3:6] = random_uniform*self._twist_ref_scale[:, 3:6] + self._twist_ref_offset[:, 3:6]
 
-                # sample for all envs pof0, then reset to 1 for envs which are not to be randomized
+                # Keep each environment's sample fixed until that environment is randomized again.
                 if self._env_opts["use_pof0"]: # sample from bernoulli distribution and update coefficients
-                    torch.bernoulli(input=self._pof1_b_linvel,out=self._bernoulli_coeffs_linvel) # by default bernoulli_coeffs are 1 if not self._env_opts["use_pof0"]
-                    torch.bernoulli(input=self._pof1_b_omega,out=self._bernoulli_coeffs_omega)
-                    self._bernoulli_coeffs_linvel[~env_indxs, :]=1
-                    self._bernoulli_coeffs_omega[~env_indxs, :]=1
+                    resample_bernoulli_coefficients(
+                        self._bernoulli_coeffs_linvel, self._pof1_b_linvel, integer_idxs)
+                    resample_bernoulli_coefficients(
+                        self._bernoulli_coeffs_omega, self._pof1_b_omega, integer_idxs)
 
         self._compute_twist_ref_w(env_indxs=env_indxs) # update linear vel twist refs based on pos error
 
