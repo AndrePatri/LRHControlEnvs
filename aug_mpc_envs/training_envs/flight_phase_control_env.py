@@ -7,8 +7,6 @@ import torch
 
 from EigenIPC.PyEigenIPC import VLevel
 
-from mpc_hive.utilities.shared_data.rhc_data import RobotState
-
 from aug_mpc_envs.training_envs.twist_tracking_env import TwistTrackingEnv
 
 class FlightPhaseControl(TwistTrackingEnv):
@@ -32,31 +30,8 @@ class FlightPhaseControl(TwistTrackingEnv):
 
         self._add_env_opt(env_opts, "flength_min", default=8) # substeps
 
-        # temporarily creating robot state client to get some data
-        robot_state_tmp = RobotState(namespace=namespace,
-                                is_server=False, 
-                                safe=False,
-                                verbose=verbose,
-                                vlevel=vlevel,
-                                with_gpu_mirror=False,
-                                with_torch_view=False)
-        robot_state_tmp.run()
-        n_contacts = len(robot_state_tmp.contact_names())
-        robot_state_tmp.close()
-        
-        actions_dim=10 # base size
-        if env_opts["control_flength"]:
-            actions_dim+=n_contacts
-        if env_opts["control_fapex"]:
-            actions_dim+=n_contacts
-        if env_opts["control_fend"]:
-            actions_dim+=n_contacts
-        if env_opts["control_flanding"]:
-            actions_dim+=2*n_contacts
-
         TwistTrackingEnv.__init__(self,
             namespace=namespace,
-            actions_dim=actions_dim,
             verbose=verbose,
             vlevel=vlevel,
             use_gpu=use_gpu,
@@ -65,6 +40,18 @@ class FlightPhaseControl(TwistTrackingEnv):
             override_agent_refs=override_agent_refs,
             timeout_ms=timeout_ms,
             env_opts=env_opts)
+
+    def _get_actions_dim(self, env_opts: Dict) -> int:
+        actions_dim = super()._get_actions_dim(env_opts)
+        if env_opts["control_flength"]:
+            actions_dim += self._n_contacts
+        if env_opts["control_fapex"]:
+            actions_dim += self._n_contacts
+        if env_opts["control_fend"]:
+            actions_dim += self._n_contacts
+        if env_opts["control_flanding"]:
+            actions_dim += 2 * self._n_contacts
+        return actions_dim
 
     def get_file_paths(self):
         paths=TwistTrackingEnv.get_file_paths(self)
@@ -216,4 +203,3 @@ class FlightPhaseControl(TwistTrackingEnv):
             next_idx+=len(self._contact_names)
 
         return action_names
-

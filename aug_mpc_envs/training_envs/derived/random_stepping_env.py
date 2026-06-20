@@ -24,7 +24,6 @@ class RandomSteppingEnv(TwistTrackingEnv):
             env_opts: Dict = {}):
 
         super().__init__(namespace=namespace,
-            actions_dim=4, # only contacts
             verbose=verbose,
             vlevel=vlevel,
             use_gpu=use_gpu,
@@ -33,6 +32,12 @@ class RandomSteppingEnv(TwistTrackingEnv):
             override_agent_refs=override_agent_refs,
             timeout_ms=timeout_ms,
             env_opts=env_opts)
+
+    def _get_actions_dim(self, env_opts: Dict) -> int:
+        return self._n_contacts
+
+    def _get_contact_actions_slice(self):
+        return slice(0, self._n_contacts)
         
     def get_file_paths(self):
         paths=super().get_file_paths()
@@ -65,7 +70,7 @@ class RandomSteppingEnv(TwistTrackingEnv):
                                             gpu=self._use_gpu) 
         
         # agent sets contact flags
-        rhc_latest_contact_ref[:, :] = agent_action[:, 0:4] > 0 # keep contact if agent action > 0
+        rhc_latest_contact_ref[:, :] = agent_action[:, :self._n_contacts] > 0 # keep contact if agent action > 0
 
         # actually apply actions to controller
         if self._use_gpu:
@@ -78,9 +83,7 @@ class RandomSteppingEnv(TwistTrackingEnv):
     def _get_action_names(self):
 
         action_names = [""] * self.actions_dim()
-        action_names[0] = "contact_0"
-        action_names[1] = "contact_1"
-        action_names[2] = "contact_2"
-        action_names[3] = "contact_3"
+        for contact_idx, contact_name in enumerate(self._contact_names):
+            action_names[contact_idx] = f"contact_{contact_name}"
 
         return action_names

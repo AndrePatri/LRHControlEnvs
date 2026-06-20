@@ -27,7 +27,6 @@ class GaitSchedulingEnvOld(TwistTrackingEnv):
             env_opts: Dict = {}):
 
         super().__init__(namespace=namespace,
-            actions_dim=10, # only contacts
             verbose=verbose,
             vlevel=vlevel,
             use_gpu=use_gpu,

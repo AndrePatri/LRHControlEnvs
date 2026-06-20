@@ -6,7 +6,6 @@ import torch
 
 from EigenIPC.PyEigenIPC import VLevel
 
-from mpc_hive.utilities.shared_data.rhc_data import RobotState
 from mpc_hive.utilities.math_utils_torch import base2world_frame, w2hor_frame
 
 from aug_mpc_envs.training_envs.twist_tracking_env import TwistTrackingEnv
@@ -34,31 +33,8 @@ class PhaseParametrizationEnv(TwistTrackingEnv):
         self._add_env_opt(env_opts, "add_periodic_clock_to_obs", default=True) # task becomes
         # clearly time dependent -> we need a clock
 
-        # temporarily creating robot state client to get some data
-        robot_state_tmp = RobotState(namespace=namespace,
-                                is_server=False, 
-                                safe=False,
-                                verbose=verbose,
-                                vlevel=vlevel,
-                                with_gpu_mirror=False,
-                                with_torch_view=False)
-        robot_state_tmp.run()
-        n_contacts = len(robot_state_tmp.contact_names())
-        robot_state_tmp.close()
-        
-        actions_dim=6 # base size
-        actions_dim+=n_contacts # frequency
-        actions_dim+=n_contacts # offsets
-        if env_opts["control_flength"]:
-            actions_dim+=n_contacts
-        if env_opts["control_fapex"]:
-            actions_dim+=n_contacts
-        if env_opts["control_fend"]:
-            actions_dim+=n_contacts
-
         TwistTrackingEnv.__init__(self,
             namespace=namespace,
-            actions_dim=actions_dim,
             verbose=verbose,
             vlevel=vlevel,
             use_gpu=use_gpu,
@@ -67,6 +43,19 @@ class PhaseParametrizationEnv(TwistTrackingEnv):
             override_agent_refs=override_agent_refs,
             timeout_ms=timeout_ms,
             env_opts=env_opts)
+
+    def _get_actions_dim(self, env_opts: Dict) -> int:
+        actions_dim = 6 + 2 * self._n_contacts
+        if env_opts["control_flength"]:
+            actions_dim += self._n_contacts
+        if env_opts["control_fapex"]:
+            actions_dim += self._n_contacts
+        if env_opts["control_fend"]:
+            actions_dim += self._n_contacts
+        return actions_dim
+
+    def _get_contact_actions_slice(self):
+        return None
 
     def get_file_paths(self):
         paths=TwistTrackingEnv.get_file_paths(self)
@@ -232,4 +221,3 @@ class PhaseParametrizationEnv(TwistTrackingEnv):
             next_idx+=len(self._contact_names)
 
         return action_names
-

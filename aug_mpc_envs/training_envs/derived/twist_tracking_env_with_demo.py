@@ -29,7 +29,6 @@ class TwistTrackingEnvWithDemo(TwistTrackingEnv):
         self._smoothing_horizon_twist=0.08
 
         super().__init__(namespace=namespace,
-            actions_dim=10, # only contacts
             verbose=verbose,
             vlevel=vlevel,
             use_gpu=use_gpu,

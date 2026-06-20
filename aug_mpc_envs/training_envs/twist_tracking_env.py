@@ -21,7 +21,6 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
 
     def __init__(self,
             namespace: str,
-            actions_dim: int = 10,
             verbose: bool = False,
             vlevel: VLevel = VLevel.V1,
             use_gpu: bool = True,
@@ -212,6 +211,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         n_jnts = robot_state_tmp.n_jnts()
         self._contact_names = robot_state_tmp.contact_names()
         self._n_contacts = len(self._contact_names)
+        actions_dim = self._get_actions_dim(env_opts)
         self._flight_info_size=rhc_refs_tmp.flight_info.n_cols
         self._flight_setting_size=rhc_refs_tmp.flight_settings_req.n_cols
         # height sensor metadata (if present)
@@ -279,6 +279,12 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
                     override_agent_refs=override_agent_refs,
                     timeout_ms=timeout_ms,
                     env_opts=env_opts)
+
+    def _get_actions_dim(self, env_opts: Dict) -> int:
+        return 6 + self._n_contacts
+
+    def _get_contact_actions_slice(self):
+        return slice(6, 6 + self._n_contacts)
 
     def _custom_post_init(self):
 
@@ -417,8 +423,9 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         self._obs_threshold_ub = 1e3
 
         # actions
-        if not self._env_opts["use_prob_based_stepping"]:
-            self._is_continuous_actions[6:10]=False
+        contact_actions_slice = self._get_contact_actions_slice()
+        if not self._env_opts["use_prob_based_stepping"] and contact_actions_slice is not None:
+            self._is_continuous_actions[contact_actions_slice] = False
 
         v_cmd_max = self._env_opts["max_cmd_v"]
         omega_cmd_max = self._env_opts["max_cmd_omega"]
