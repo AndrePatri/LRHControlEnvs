@@ -309,6 +309,12 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["step_height_ub"]=0.15
         isaac_opts["step_width_lb"]=0.6
         isaac_opts["step_width_ub"]= 1.5
+        # stepup_prim terrain args (used when ground_type=="stepup_prim")
+        isaac_opts["step_n"]=25
+        isaac_opts["step_stairs_ratio"]=0.9
+        isaac_opts["step_platform_size"]=50.0
+        isaac_opts["step_area_factor"]=0.7
+        isaac_opts["step_random_n_steps"]=False
         isaac_opts["contact_prims"] = []
         isaac_opts["sensor_radii"] = 0.1
         isaac_opts["contact_offsets"] = {}
@@ -677,8 +683,8 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
                 self.terrain_generator = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
                 self._ground_plane=self.terrain_generator.create_stepup_prim_terrain(
                     terrain_size=self._env_opts["ground_size"],
-                    stairs_ratio=0.9,
-                    platform_size=50.0,
+                    stairs_ratio=self._env_opts["step_stairs_ratio"],
+                    platform_size=self._env_opts["step_platform_size"],
                     step_height_lb=self._env_opts["step_height_lb"],
                     step_height_ub=self._env_opts["step_height_ub"],
                     min_step_width=self._env_opts.get("step_width_lb", None),
@@ -687,9 +693,9 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
                     static_friction=self._env_opts["static_friction"],
                     dynamic_friction=self._env_opts["dynamic_friction"],
                     restitution=self._env_opts["restitution"],
-                    n_steps=25,
-                    area_factor=0.7,
-                    random_n_steps=False
+                    n_steps=int(self._env_opts["step_n"]),
+                    area_factor=self._env_opts["step_area_factor"],
+                    random_n_steps=self._env_opts["step_random_n_steps"]
                     )
                 # apply a custom  checker material to the terrain primitives
                 mat_path = self._ensure_lightblue_checker_material()
