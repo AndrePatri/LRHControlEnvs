@@ -314,7 +314,7 @@ class XMjSimEnv(XbotRuntimeConfigMixin, AugMPCWorldInterfaceBase):
                 torch_device=torch.device(self._device),
                 fallback_cmd_stiffness=200.0,
                 fallback_cmd_damping=100.0,
-                allow_fallback=True,
+                allow_fallback=False,  # XbotMjAdapter -> ZmqXbotAdapter raises if True (fallback not implemented upstream)
                 enable_filters=True,
                 base_link=self._env_opts["base_linkname"],
                 root_spawn_height=self._env_opts["spawning_height"],

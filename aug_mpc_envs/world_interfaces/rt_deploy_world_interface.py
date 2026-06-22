@@ -203,7 +203,7 @@ class RtDeploymentEnv(XbotRuntimeConfigMixin, AugMPCWorldInterfaceBase):
                 torch_device=torch.device(self._device),
                 fallback_cmd_stiffness=200.0,
                 fallback_cmd_damping=60.0,
-                allow_fallback=True,
+                allow_fallback=False,  # ZmqXbotAdapter raises if True (fallback not implemented upstream)
                 enable_filters=True,
                 base_link=self._env_opts["base_linkname"],
                 is_simulated=self._env_opts["is_sim"],
