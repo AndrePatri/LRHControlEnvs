@@ -33,6 +33,7 @@ from aug_mpc.world_interfaces.world_interface_base import AugMPCWorldInterfaceBa
 
 from adarl.adapters.GenesisJointImpedanceAdapter import GenesisJointImpedanceAdapter
 from adarl.adapters.BaseSimulationAdapter import ModelSpawnDef
+from adarl.adapters.BaseVecAdapter import JointType
 from adarl.utils.utils import build_pose
 
 from aug_mpc_envs.utils.genesis_jnt_imp_cntrl import GenesisJntImpCntrl
@@ -162,7 +163,13 @@ class GenesisSim(AugMPCWorldInterfaceBase):
 
         # detected joints come back as (model_name, joint_name); keep only this robot's
         detected = self._genesis_adapter.get_detected_joints()
-        self._robot_joints = [tuple(j) for j in detected if j[0] == robot_name]
+        properties = self._genesis_adapter.get_detected_joints_properties()
+        supported_types = {JointType.REVOLUTE, JointType.PRISMATIC}
+        self._robot_joints = [
+            tuple(j) for j in detected
+            if j[0] == robot_name
+            and properties[tuple(j)].joint_type in supported_types
+        ]
         self._robot_jnames = [j[1] for j in self._robot_joints]
         self._base_link_id = (robot_name, base_link)
 
@@ -322,6 +329,7 @@ class GenesisSim(AugMPCWorldInterfaceBase):
             override_art_controller=self._override_low_lev_controller)
 
     def _apply_cmds_to_jnt_imp_control(self, robot_name: str):
+        super()._apply_cmds_to_jnt_imp_control(robot_name=robot_name)
         self._genesis_adapter.setJointsImpedanceCommand(
             self._jnt_imp_controllers[robot_name].get_pvesd())
 
