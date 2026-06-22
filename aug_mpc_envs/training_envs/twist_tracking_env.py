@@ -1220,6 +1220,12 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
             for i in range(len(self._contact_names)):
                 obs_names[next_idx+i] = "flight_end_nominal_"+ self._contact_names[i]
             next_idx+=len(self._contact_names)
+            for i in range(len(self._contact_names)):
+                obs_names[next_idx+i] = "flight_land_dx_nominal_"+ self._contact_names[i]
+            next_idx+=len(self._contact_names)
+            for i in range(len(self._contact_names)):
+                obs_names[next_idx+i] = "flight_land_dy_nominal_"+ self._contact_names[i]
+            next_idx+=len(self._contact_names)
         
         if self._env_opts["add_flight_settings"]:
             self._obs_map["flight_settings_req"]=next_idx
@@ -1231,6 +1237,12 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
             next_idx+=len(self._contact_names)
             for i in range(len(self._contact_names)):
                 obs_names[next_idx+i] = "flight_end_req_"+ self._contact_names[i]
+            next_idx+=len(self._contact_names)
+            for i in range(len(self._contact_names)):
+                obs_names[next_idx+i] = "flight_land_dx_req_"+ self._contact_names[i]
+            next_idx+=len(self._contact_names)
+            for i in range(len(self._contact_names)):
+                obs_names[next_idx+i] = "flight_land_dy_req_"+ self._contact_names[i]
             next_idx+=len(self._contact_names)
 
         if self._env_opts["add_rhc_cmds_to_obs"]:
