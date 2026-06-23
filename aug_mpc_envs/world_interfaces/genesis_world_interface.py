@@ -21,6 +21,9 @@
 # flat ground, proprioceptive joint state + base-link state, no terrain/perturbation/
 # camera/heightmap. Enough to run e.g. Talos and verify the sim is healthy over shared mem.
 from typing import Dict, List
+from typing_extensions import override
+
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import torch
@@ -36,6 +39,9 @@ from adarl.adapters.BaseSimulationAdapter import ModelSpawnDef
 from adarl.adapters.BaseVecAdapter import JointType
 from adarl.utils.utils import build_pose
 
+from mpc_hive.utilities.math_utils_torch import world2base_frame, world2base_frame3D
+
+from aug_mpc_envs.utils.math_utils import quat_to_omega
 from aug_mpc_envs.utils.genesis_jnt_imp_cntrl import GenesisJntImpCntrl
 
 
@@ -138,6 +144,9 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         with open(self._urdf_dump_paths[robot_name], "r", encoding="utf-8") as f:
             urdf_str = f.read()
 
+        # Use the URDF effort limits as the clamp, like the other interfaces do.
+        max_torques = self._parse_urdf_effort_limits(urdf_str, robot_name)
+
         # create the adapter (sim + impedance). sim_step_dt == step_length_sec so a single
         # adapter.step() advances exactly one physics step (physics_dt), like XMJ.
         self._genesis_adapter = GenesisJointImpedanceAdapter(
@@ -148,6 +157,7 @@ class GenesisSim(AugMPCWorldInterfaceBase):
             enable_rendering=False,
             add_ground=self._env_opts["add_ground"],
             show_gui=(not self._env_opts["headless"]),
+            max_joint_impedance_ctrl_torques=max_torques,
             genesis_logging_level=self._env_opts["genesis_logging_level"])
 
         spawn_pose = build_pose(0.0, 0.0, float(self._env_opts["spawning_height"]), 0.0, 0.0, 0.0, 1.0)
@@ -177,9 +187,27 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         self._genesis_adapter.set_monitored_links([self._base_link_id])
         self._genesis_adapter.set_impedance_controlled_joints(self._robot_joints)
 
-        self._fill_robot_info_from_world()
         self._init_robots_state()
+
+        self._reset_sim()
+        
+        self._fill_robot_info_from_world()
+
         self._isrunning = True
+
+    def _parse_urdf_effort_limits(self, urdf_str: str, robot_name: str) -> Dict:
+        """Map each actuated joint to its URDF effort limit, keyed by (robot_name, joint_name).
+        Used as the adapter's per-joint torque clamp so heavy joints can hold the stance."""
+        limits = {}
+        root = ET.fromstring(urdf_str)
+        for joint in root.findall("joint"):
+            if joint.get("type") not in ("revolute", "prismatic"):
+                continue
+            limit = joint.find("limit")
+            if limit is None or limit.get("effort") is None:
+                continue
+            limits[(robot_name, joint.get("name"))] = float(limit.get("effort"))
+        return limits
 
     def _fill_robot_info_from_world(self):
         pass
@@ -246,18 +274,45 @@ class GenesisSim(AugMPCWorldInterfaceBase):
 
     def _read_root_state_from_robot(self, robot_name: str, env_indxs: torch.Tensor = None):
         p, q, v, omega = self._base_state(robot_name)
+        dt = self._cluster_dt[robot_name]
+
         self._root_p[robot_name][:, :] = p
         self._root_q[robot_name][:, :] = q
+
         if not self._env_opts["use_diff_vels"]:
             self._root_v[robot_name][:, :] = v
             self._root_omega[robot_name][:, :] = omega
         else:
-            dt = self._cluster_dt[robot_name]
             self._root_v[robot_name][:, :] = (p - self._root_p_prev[robot_name]) / dt
-            # NOTE: angular numdiff from quaternions omitted for the minimal interface
-            self._root_omega[robot_name][:, :] = omega
+            self._root_omega[robot_name][:, :] = quat_to_omega(self._root_q_prev[robot_name], q, dt)
+
+        # world-frame accelerations (numerical, at cluster rate), like the XMJ interface
+        self._root_a[robot_name][:, :] = (self._root_v[robot_name] - self._root_v_prev[robot_name]) / dt
+        self._root_alpha[robot_name][:, :] = (self._root_omega[robot_name] - self._root_omega_prev[robot_name]) / dt
+
+        # The MPC consumes the root twist/accel/gravity in the BASE frame (base_loc=True). Without
+        # these the cluster sees a still, gravity-aligned robot and cannot perceive/correct tilt,
+        # so Talos falls. Rotate world quantities into the base frame, mirroring the XMJ interface.
+        twist_w = torch.cat((self._root_v[robot_name], self._root_omega[robot_name]), dim=1)
+        twist_bl = torch.cat((self._root_v_base_loc[robot_name], self._root_omega_base_loc[robot_name]), dim=1)
+        world2base_frame(t_w=twist_w, q_b=self._root_q[robot_name], t_out=twist_bl)
+        self._root_v_base_loc[robot_name] = twist_bl[:, 0:3]
+        self._root_omega_base_loc[robot_name] = twist_bl[:, 3:6]
+
+        a_w = torch.cat((self._root_a[robot_name], self._root_alpha[robot_name]), dim=1)
+        a_bl = torch.cat((self._root_a_base_loc[robot_name], self._root_alpha_base_loc[robot_name]), dim=1)
+        world2base_frame(t_w=a_w, q_b=self._root_q[robot_name], t_out=a_bl)
+        self._root_a_base_loc[robot_name] = a_bl[:, 0:3]
+        self._root_alpha_base_loc[robot_name] = a_bl[:, 3:6]
+
+        world2base_frame3D(v_w=self._gravity_normalized[robot_name], q_b=self._root_q[robot_name],
+            v_out=self._gravity_normalized_base_loc[robot_name])
+
+        # update "previous" values for numerical differentiation
         self._root_p_prev[robot_name][:, :] = p
         self._root_q_prev[robot_name][:, :] = q
+        self._root_v_prev[robot_name][:, :] = self._root_v[robot_name]
+        self._root_omega_prev[robot_name][:, :] = self._root_omega[robot_name]
 
     def _read_jnts_state_from_robot(self, robot_name: str, env_indxs: torch.Tensor = None):
         jq, jv, jeff = self._joints_state(robot_name)
@@ -272,13 +327,14 @@ class GenesisSim(AugMPCWorldInterfaceBase):
 
     # --------------------------------------------------------- reset / homing
 
-    def _apply_state_to_sim(self, robot_name: str):
-        """Push the current default joint + base state into the genesis sim."""
+    def _set_jnts_to_homing(self, robot_name: str):
         # joints: (E, n, 3) -> [pos, vel, eff]
         jq = self._jnts_q_default[robot_name]
         pve = torch.zeros((self._num_envs, len(self._robot_joints), 3), device=jq.device, dtype=jq.dtype)
         pve[:, :, 0] = jq
         self._genesis_adapter.setJointsStateDirect(self._robot_joints, pve)
+
+    def _set_root_to_defconfig(self, robot_name: str):
         # base link: pose (p[3] + quat_xyzw[4]) + vel (lin[3] + ang[3]) -> (E, 1, 13)
         p = self._root_p_default[robot_name]
         q_wxyz = self._root_q_default[robot_name]
@@ -288,22 +344,29 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         link_state[:, 0, 3:7] = q_xyzw
         self._genesis_adapter.setLinksStateDirect([self._base_link_id], link_state)
 
-    def _set_jnts_to_homing(self, robot_name: str):
-        self._apply_state_to_sim(robot_name)
-
-    def _set_root_to_defconfig(self, robot_name: str):
-        self._apply_state_to_sim(robot_name)
-
     def _reset_sim(self):
         self._genesis_adapter.resetWorld()
-        # resetWorld restores the build-time state, so re-apply the homing/default config
+        # resetWorld() restores the build-time spawn (URDF-default / zero joints), which would
+        # undo the homing the base sets right before calling _reset_sim. Re-apply the default
+        # joint + base config so the robot actually starts at the homing pose.
         for robot_name in self._robot_names:
-            self._apply_state_to_sim(robot_name)
+            self._set_jnts_to_homing(robot_name)
+            self._set_root_to_defconfig(robot_name)
 
     def _reset_state(self, robot_name: str, env_indxs: torch.Tensor = None, randomize: bool = False):
         self._reset_sim()
 
     # ------------------------------------------------------- control / step
+
+    @override
+    def _set_startup_jnt_imp_gains(self,
+            robot_name:str, 
+            env_indxs: torch.Tensor = None):
+        super()._set_startup_jnt_imp_gains(robot_name=robot_name,env_indxs=env_indxs)
+        # apply the impedance command immediately so the robot is held from startup
+        self._genesis_adapter.set_current_joint_impedance_command(
+            self._jnt_imp_controllers[robot_name].get_pvesd())
+
 
     def _step_world(self):
         time_elapsed = self._genesis_adapter.step()

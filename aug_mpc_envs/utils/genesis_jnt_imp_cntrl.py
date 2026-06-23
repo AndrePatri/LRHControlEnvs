@@ -65,6 +65,12 @@ class GenesisJntImpCntrl(JntImpCntrlBase):
             jnts_names.append(joint[1])
         n_jnts = len(controlled_joints)
 
+        # (num_envs, n_jnts, 5) -> [pos_ref, vel_ref, eff_ref, stiffness, damping]
+        # kept on the controller device so it can be forwarded straight to the adapter
+        self._pvesd_adapter = torch.zeros((num_envs, n_jnts, 5),
+            device=device,
+            dtype=dtype)
+                
         super().__init__(num_envs=num_envs,
             n_jnts=n_jnts,
             jnt_names=jnts_names,
@@ -80,12 +86,6 @@ class GenesisJntImpCntrl(JntImpCntrlBase):
             enable_profiling=enable_profiling,
             debug_checks=debug_checks,
             override_low_lev_controller=override_art_controller)
-
-        # (num_envs, n_jnts, 5) -> [pos_ref, vel_ref, eff_ref, stiffness, damping]
-        # kept on the controller device so it can be forwarded straight to the adapter
-        self._pvesd_adapter = torch.zeros((num_envs, n_jnts, 5),
-            device=device,
-            dtype=self._torch_dtype)
 
     def get_pvesd(self):
         return self._pvesd_adapter
