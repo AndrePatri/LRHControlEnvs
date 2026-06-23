@@ -365,8 +365,6 @@ class XMjSimEnv(XbotRuntimeConfigMixin, AugMPCWorldInterfaceBase):
             # update solver options 
             self._print_envs_info() # debug print
 
-            self.scene_setup_completed = True
-
         # self._rospy_startime=rospy.get_time()
 
     @override

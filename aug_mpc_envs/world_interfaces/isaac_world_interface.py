@@ -2003,6 +2003,9 @@ class IsaacSimEnv(AugMPCWorldInterfaceBase):
     def _set_root_to_defconfig(self, robot_name: str):
         self._robots_art_views[robot_name].set_default_state(positions=self._root_p_default[robot_name], 
             orientations=self._root_q_default[robot_name])
+    
+    def _pre_warmup_step(self, robot_name: str, env_indxs: torch.Tensor = None):
+        self._alter_twist_warmup(robot_name=robot_name, env_indxs=env_indxs)
         
     def _alter_twist_warmup(self, robot_name: str, env_indxs: torch.Tensor = None):
         """Zero angular velocities and joint velocities for the given robot/envs."""
