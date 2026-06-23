@@ -61,6 +61,10 @@ class XMjJntImpCntrl(JntImpCntrlBase):
             i+=1
         n_jnts=len(controlled_joints)
         
+        self._pvesd_adapter=torch.full((n_jnts, 5), fill_value=0.0,
+            device=torch.device("cpu"), 
+            dtype=dtype)
+
         super().__init__(num_envs=n_envs,
             n_jnts=n_jnts,
             jnt_names=jnts_names,
@@ -76,11 +80,7 @@ class XMjJntImpCntrl(JntImpCntrlBase):
             enable_profiling=enable_profiling,
             debug_checks=debug_checks,
             override_low_lev_controller=override_art_controller)
-        
-        self._pvesd_adapter=torch.full((n_jnts, 5), fill_value=0.0,
-            device=torch.device("cpu"), 
-            dtype=self._torch_dtype)
-
+    
     def get_pvesd(self):
         return self._pvesd_adapter
     
