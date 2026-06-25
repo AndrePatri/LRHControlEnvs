@@ -23,6 +23,9 @@
 from typing import Dict, List
 from typing_extensions import override
 
+import queue
+import sys
+import threading
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -77,6 +80,9 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         self._genesis_adapter: GenesisJointImpedanceAdapter = None
         self._isrunning = False
         self._step_counter = 0
+        self._render_env_idx = 0
+        self._render_env_cmd_queue = None
+        self._render_env_thread = None
 
         super().__init__(name=name,
             robot_names=robot_names,
@@ -163,6 +169,11 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         g_opts["genesis_vis_mode"] = "collision"
         g_opts["genesis_visualize_contact"] = True
         g_opts["genesis_contact_force_scale"] = 0.001
+        g_opts["genesis_render_env_idx"] = 0
+        g_opts["genesis_render_envs_idx"] = None
+        g_opts["genesis_enable_camera_rendering"] = False
+        g_opts["genesis_use_batch_renderer"] = False
+        g_opts["genesis_render_env_keyboard"] = False
         # Global contact constraint params (MuJoCo solref+solimp), applied to all geoms after build.
         # 7-vec [timeconst, dampratio, dmin, dmax, width, mid, power]. RigidOptions only exposes the
         # global timeconst (constraint_timeconst), NOT dmin/dmax, so the near-rigid MuJoCo foot
@@ -199,6 +210,13 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         # Use the URDF effort limits as the clamp, like the other interfaces do.
         max_torques = self._parse_urdf_effort_limits(urdf_str, robot_name)
 
+        render_envs_idx = self._env_opts["genesis_render_envs_idx"]
+        if render_envs_idx is None:
+            render_envs_idx = [int(self._env_opts["genesis_render_env_idx"])]
+        elif isinstance(render_envs_idx, (int, float)):
+            render_envs_idx = [int(render_envs_idx)]
+        self._render_env_idx = int(render_envs_idx[0]) if len(render_envs_idx) > 0 else 0
+
         # create the adapter (sim + impedance). sim_step_dt == step_length_sec so a single
         # adapter.step() advances exactly one physics step (physics_dt), like XMJ.
         self._genesis_adapter = GenesisJointImpedanceAdapter(
@@ -206,14 +224,16 @@ class GenesisSim(AugMPCWorldInterfaceBase):
             output_th_device=torch.device(self._device),
             sim_step_dt=self._env_opts["physics_dt"],
             step_length_sec=self._env_opts["physics_dt"],
-            enable_rendering=False,
+            enable_rendering=bool(self._env_opts["genesis_enable_camera_rendering"]),
+            render_envs_idx=render_envs_idx,
             add_ground=self._env_opts["add_ground"],
             show_gui=(not self._env_opts["headless"]),
             max_joint_impedance_ctrl_torques=max_torques,
             rigid_options_override=self._env_opts["genesis_rigid_options"],
             vis_options_override={"contact_force_scale": float(self._env_opts["genesis_contact_force_scale"])},
             reference_filter_mode="none",  # run the impedance refs unfiltered by default
-            genesis_logging_level=self._env_opts["genesis_logging_level"])
+            genesis_logging_level=self._env_opts["genesis_logging_level"],
+            use_batch_renderer=bool(self._env_opts["genesis_use_batch_renderer"]))
 
         spawn_pose = build_pose(0.0, 0.0, float(self._env_opts["spawning_height"]), 0.0, 0.0, 0.0, 1.0)
         model = ModelSpawnDef(
@@ -255,6 +275,8 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         self._reset_sim()
         
         self._fill_robot_info_from_world()
+
+        self._start_render_env_keyboard_control()
 
         self._isrunning = True
 
@@ -419,6 +441,50 @@ class GenesisSim(AugMPCWorldInterfaceBase):
     def _reset_state(self, robot_name: str, env_indxs: torch.Tensor = None, randomize: bool = False):
         self._reset_sim()
 
+    def _start_render_env_keyboard_control(self):
+        if self._env_opts["headless"] or not bool(self._env_opts["genesis_render_env_keyboard"]):
+            return
+        self._render_env_cmd_queue = queue.SimpleQueue()
+
+        def read_commands():
+            print("[GenesisSim] render env control: type n/], p/[, or an env index + Enter", flush=True)
+            for line in sys.stdin:
+                token = line.strip()
+                if token:
+                    self._render_env_cmd_queue.put(token)
+
+        self._render_env_thread = threading.Thread(target=read_commands, daemon=True)
+        self._render_env_thread.start()
+
+    def _apply_render_env_commands(self):
+        if self._render_env_cmd_queue is None:
+            return
+        token = None
+        while True:
+            try:
+                token = self._render_env_cmd_queue.get_nowait()
+            except queue.Empty:
+                break
+        if token is None:
+            return
+        try:
+            if token in ("n", "]", "+", "next"):
+                idx = self._render_env_idx + 1
+            elif token in ("p", "[", "-", "prev"):
+                idx = self._render_env_idx - 1
+            else:
+                idx = int(token)
+            idx = max(0, min(self._num_envs - 1, idx))
+            if idx == self._render_env_idx:
+                return
+            self._genesis_adapter.set_rendered_envs_idx([idx])
+            self._render_env_idx = idx
+            Journal.log(self.__class__.__name__, "_apply_render_env_commands",
+                f"Genesis viewer now rendering env {idx}", LogType.STAT, throw_when_excep=False)
+        except Exception as e:
+            Journal.log(self.__class__.__name__, "_apply_render_env_commands",
+                f"Could not switch Genesis render env from token '{token}': {e}", LogType.WARN, throw_when_excep=False)
+
     # ------------------------------------------------------- control / step
 
     @override
@@ -432,6 +498,7 @@ class GenesisSim(AugMPCWorldInterfaceBase):
 
 
     def _step_world(self):
+        self._apply_render_env_commands()
         time_elapsed = self._genesis_adapter.step()
         self._step_counter += 1
         if not (abs(time_elapsed - self.physics_dt()) < 1e-6):
