@@ -16,6 +16,7 @@
 # along with AugMPCEnvs.  If not, see <http://www.gnu.org/licenses/>.
 # 
 import numpy as np
+import torch
 from numpy.random import choice
 from scipy import interpolate
 
@@ -51,11 +52,16 @@ def random_uniform_terrain(terrain, min_height, max_height, step=1, downsampled_
     x = np.linspace(0, terrain.width * terrain.horizontal_scale, height_field_downsampled.shape[0])
     y = np.linspace(0, terrain.length * terrain.horizontal_scale, height_field_downsampled.shape[1])
 
-    f = interpolate.interp2d(y, x, height_field_downsampled, kind='linear')
+    # scipy>=1.14 removed interp2d; use RegularGridInterpolator over the (x, y) grid.
+    # Evaluate on the upsampled grid with indexing="ij" so the result keeps the (width, length)
+    # layout of height_field_raw (same as the old interp2d call).
+    f = interpolate.RegularGridInterpolator((x, y), height_field_downsampled.astype(np.float64),
+                                            method="linear", bounds_error=False, fill_value=None)
 
     x_upsampled = np.linspace(0, terrain.width * terrain.horizontal_scale, terrain.width)
     y_upsampled = np.linspace(0, terrain.length * terrain.horizontal_scale, terrain.length)
-    z_upsampled = np.rint(f(y_upsampled, x_upsampled))
+    xx, yy = np.meshgrid(x_upsampled, y_upsampled, indexing="ij")
+    z_upsampled = np.rint(f((xx, yy)))
 
     terrain.height_field_raw += z_upsampled.astype(np.int16)
     return terrain
@@ -393,10 +399,15 @@ def add_terrain_to_stage(stage, vertices, triangles, position=None, orientation=
     #     terrain.AddTranslateOp().Set(value=position)
     # if orientation is not None:
     #     terrain.AddRotateXYZOp().Set(value=orientation)
+    # Isaac 5's XFormPrim uses a torch backend (set_world_poses -> .detach()), so poses must be
+    # torch tensors, not numpy arrays.
+    _pose_device = "cuda" if torch.cuda.is_available() else "cpu"
     terrain = XFormPrim(prim_paths_expr=prim_path,
                         name="terrain",
-                        positions=np.asarray([position]) if position is not None else None,
-                        orientations=np.asarray([orientation]) if orientation is not None else None)
+                        positions=torch.as_tensor(np.asarray([position]), dtype=torch.float32, device=_pose_device)
+                            if position is not None else None,
+                        orientations=torch.as_tensor(np.asarray([orientation]), dtype=torch.float32, device=_pose_device)
+                            if orientation is not None else None)
     terrain_prim = terrain.prims[0]
     # Apply Collision API for the terrain
     collision_api = UsdPhysics.CollisionAPI.Apply(terrain_prim)
