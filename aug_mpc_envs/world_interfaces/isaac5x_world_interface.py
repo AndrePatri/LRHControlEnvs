@@ -315,6 +315,15 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
         isaac_opts["step_platform_size"]=50.0
         isaac_opts["step_area_factor"]=0.7
         isaac_opts["step_random_n_steps"]=False
+        # random_tiles terrain args (used when ground_type=="random_tiles"): a dense grid of small
+        # flat-topped boxes at random heights, with optional flat patches. tile_cell_size sets both
+        # box size and sensing resolution (collider count = (ground_size/tile_cell_size)^2).
+        isaac_opts["tile_cell_size"]=0.5
+        isaac_opts["tile_height_lb"]=0.0
+        isaac_opts["tile_height_ub"]=0.06
+        isaac_opts["tile_patch_ratio"]=0.0
+        isaac_opts["tile_patch_size"]=3.0
+        isaac_opts["tile_min_height"]=0.01
         isaac_opts["contact_prims"] = []
         isaac_opts["sensor_radii"] = 0.1
         isaac_opts["contact_offsets"] = {}
@@ -702,6 +711,25 @@ class Isaac5xSimEnv(AugMPCWorldInterfaceBase):
                 self._apply_checker_material_to_terrain(terrain_root_path=terrain_prim_path, material_path=mat_path)
                 self._add_checker_overlay_plane(terrain_root_path=terrain_prim_path, material_path=mat_path)
                 self._add_checker_overlays_on_tiles(terrain_root_path=terrain_prim_path, material_path=mat_path)
+            elif self._env_opts["ground_type"]=="random_tiles":
+                terrain_prim_path=self._env_opts["ground_plane_prim_path"]+"_random_tiles"
+                self._ground_plane_prim_paths.append(terrain_prim_path)
+                self.terrain_generator = RlTerrains(get_current_stage(), prim_path=terrain_prim_path)
+                self._ground_plane=self.terrain_generator.create_random_tiles_prim_terrain(
+                    terrain_size=self._env_opts["ground_size"],
+                    cell_size=self._env_opts["tile_cell_size"],
+                    height_lb=self._env_opts["tile_height_lb"],
+                    height_ub=self._env_opts["tile_height_ub"],
+                    patch_ratio=self._env_opts["tile_patch_ratio"],
+                    patch_size=self._env_opts["tile_patch_size"],
+                    min_tile_height=self._env_opts["tile_min_height"],
+                    position=np.array([0.0, 0.0, 0.0]),
+                    static_friction=self._env_opts["static_friction"],
+                    dynamic_friction=self._env_opts["dynamic_friction"],
+                    restitution=self._env_opts["restitution"])
+                # apply the checker material to the terrain primitives (visual only)
+                mat_path = self._ensure_lightblue_checker_material()
+                self._apply_checker_material_to_terrain(terrain_root_path=terrain_prim_path, material_path=mat_path)
             else:
                 ground_type=self._env_opts["ground_type"]
                 Journal.log(self.__class__.__name__,

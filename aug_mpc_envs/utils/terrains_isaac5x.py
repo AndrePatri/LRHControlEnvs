@@ -361,7 +361,146 @@ class RlTerrains():
         ground_wrapper.prim_path = str(ground_prim.GetPath())
         return ground_wrapper
 
+    def create_random_tiles_prim_terrain(self,
+                    terrain_size=30,
+                    cell_size: float = 0.5,
+                    height_lb: float = 0.0,
+                    height_ub: float = 0.1,
+                    patch_ratio: float = 0.0,
+                    patch_size: float = 3.0,
+                    min_tile_height: float = 0.01,
+                    with_walls: bool = True,
+                    wall_height: float = 2.0,
+                    position=np.array([0.0, 0.0, 0.0]),
+                    dynamic_friction=0.5,
+                    static_friction=0.5,
+                    restitution=0.1):
+        """Rough terrain made purely of primitives: a flat base slab plus a dense grid of small
+        flat-topped boxes (one ``cell_size`` x ``cell_size`` box per cell) each raised by a random
+        height in ``[height_lb, height_ub]``. Cells below ``min_tile_height`` get no box (the slab
+        shows through), so set ``height_lb=0`` for a mix of flat and bumpy cells.
 
+        ``patch_ratio`` (>0) stamps flat square plateaus of side ``patch_size`` (meters), each at a
+        single random height, mimicking the flat patches of the heightfield ``random_patches``.
+
+        A matching synthetic heightfield (one sample per cell) is cached via ``_store_heightfield``
+        so the height-grid sensor and spawn-height queries keep working.
+
+        NOTE: collider count is (terrain_size / cell_size)^2 -> keep ``cell_size`` reasonable
+        (e.g. 0.3-1.0 m). Box narrowphase is cheap/robust, but tens of thousands of static boxes
+        are slow to author and stress the broadphase.
+        """
+        vertical_scale = 0.005
+        cell_size = max(float(cell_size), 1e-3)
+        terrain_width = float(terrain_size)
+        terrain_length = float(terrain_size)
+
+        n_cells_x = max(1, int(round(terrain_width / cell_size)))
+        n_cells_y = max(1, int(round(terrain_length / cell_size)))
+        # use the actual tiled extent so boxes and heightfield share one grid
+        tiled_width = n_cells_x * cell_size
+        tiled_length = n_cells_y * cell_size
+
+        height_lb = max(0.0, float(height_lb))
+        height_ub = max(height_lb, float(height_ub))
+        min_tile_height = max(0.0, float(min_tile_height))
+
+        # per-cell random heights [m]
+        cell_h = np.random.uniform(height_lb, height_ub, size=(n_cells_x, n_cells_y))
+
+        # flat patches: square plateaus at a single random height (like heightfield random_patches)
+        if patch_ratio > 0.0:
+            patch_cells = max(1, int(round(float(patch_size) / cell_size)))
+            n_slots = max(1, (n_cells_x // patch_cells)) * max(1, (n_cells_y // patch_cells))
+            n_patches = int(round(n_slots * float(patch_ratio)))
+            for _ in range(n_patches):
+                sx = np.random.randint(0, n_cells_x)
+                sy = np.random.randint(0, n_cells_y)
+                ex = min(n_cells_x, sx + patch_cells)
+                ey = min(n_cells_y, sy + patch_cells)
+                cell_h[sx:ex, sy:ey] = np.random.uniform(height_lb, height_ub)
+
+        terrain_center = position
+        ground_thickness = 0.1
+        ground_top = terrain_center[2] + 0.5 * ground_thickness
+        # low corner of the tiled region (terrain is centered on `position`)
+        low_x = terrain_center[0] - 0.5 * tiled_width
+        low_y = terrain_center[1] - 0.5 * tiled_length
+        orientation = np.array([1.0, 0.0, 0.0, 0.0])
+
+        # base slab
+        ground_prim_path = self._prim_path + "_slab"
+        ground_prim = UsdGeom.Cube.Define(self._stage, ground_prim_path)
+        ground_prim.CreateSizeAttr(1.0)
+        ground_prim.AddTranslateOp().Set(Gf.Vec3f(terrain_center[0], terrain_center[1], terrain_center[2]))
+        ground_prim.AddScaleOp().Set(Gf.Vec3f(tiled_width, tiled_length, ground_thickness))
+        UsdPhysics.CollisionAPI.Apply(ground_prim.GetPrim())
+        PhysxSchema.PhysxCollisionAPI.Apply(ground_prim.GetPrim())
+        mat_api = UsdPhysics.MaterialAPI.Apply(ground_prim.GetPrim())
+        mat_api.CreateDynamicFrictionAttr(dynamic_friction)
+        mat_api.CreateStaticFrictionAttr(static_friction)
+        mat_api.CreateRestitutionAttr(restitution)
+
+        # per-cell raised boxes + synthetic heightfield (units of vertical_scale)
+        heightfield = np.rint(cell_h / vertical_scale).astype(np.int32)
+        for ix in range(n_cells_x):
+            for iy in range(n_cells_y):
+                h = float(cell_h[ix, iy])
+                if h < min_tile_height:
+                    continue
+                cx = low_x + (ix + 0.5) * cell_size
+                cy = low_y + (iy + 0.5) * cell_size
+                cz = ground_top + 0.5 * h
+                tile_prim_path = f"{self._prim_path}/tile_{ix}_{iy}"
+                tile_prim = UsdGeom.Cube.Define(self._stage, tile_prim_path)
+                tile_prim.CreateSizeAttr(1.0)
+                tile_prim.AddTranslateOp().Set(Gf.Vec3f(cx, cy, cz))
+                tile_prim.AddScaleOp().Set(Gf.Vec3f(cell_size, cell_size, h))
+                UsdPhysics.CollisionAPI.Apply(tile_prim.GetPrim())
+                PhysxSchema.PhysxCollisionAPI.Apply(tile_prim.GetPrim())
+                tile_mat = UsdPhysics.MaterialAPI.Apply(tile_prim.GetPrim())
+                tile_mat.CreateDynamicFrictionAttr(dynamic_friction)
+                tile_mat.CreateStaticFrictionAttr(static_friction)
+                tile_mat.CreateRestitutionAttr(restitution)
+
+        if with_walls:
+            wall_h_units = max(1, int(round(wall_height / vertical_scale)))
+            heightfield[0, :] = wall_h_units
+            heightfield[-1, :] = wall_h_units
+            heightfield[:, 0] = wall_h_units
+            heightfield[:, -1] = wall_h_units
+
+        # cache heightfield for sensors/spawn queries. The grid sample for cell (ix, iy) is placed at
+        # the cell center: position is the first cell center and horizontal_scale is the cell size.
+        self._store_heightfield(heightfield=heightfield,
+                                horizontal_scale=cell_size,
+                                vertical_scale=vertical_scale,
+                                position=np.array([low_x + 0.5 * cell_size,
+                                                   low_y + 0.5 * cell_size,
+                                                   ground_top]),
+                                orientation=orientation)
+
+        if with_walls:
+            # perimeter walls (thin boxes) so robots can't walk off the tiled region
+            wall_thickness = 0.1
+            wall_z = ground_top + 0.5 * wall_height
+            for name, tx, ty, sx, sy in (
+                ("wall_xp", terrain_center[0] + 0.5 * tiled_width + 0.5 * wall_thickness, terrain_center[1], wall_thickness, tiled_length),
+                ("wall_xm", terrain_center[0] - 0.5 * tiled_width - 0.5 * wall_thickness, terrain_center[1], wall_thickness, tiled_length),
+                ("wall_yp", terrain_center[0], terrain_center[1] + 0.5 * tiled_length + 0.5 * wall_thickness, tiled_width, wall_thickness),
+                ("wall_ym", terrain_center[0], terrain_center[1] - 0.5 * tiled_length - 0.5 * wall_thickness, tiled_width, wall_thickness),
+            ):
+                wall = UsdGeom.Cube.Define(self._stage, f"{self._prim_path}/{name}")
+                wall.CreateSizeAttr(1.0)
+                wall.AddTranslateOp().Set(Gf.Vec3f(tx, ty, wall_z))
+                wall.AddScaleOp().Set(Gf.Vec3f(sx, sy, wall_height))
+                UsdPhysics.CollisionAPI.Apply(wall.GetPrim())
+                PhysxSchema.PhysxCollisionAPI.Apply(wall.GetPrim())
+
+        ground_wrapper = type("GroundWrapper", (), {})()
+        ground_wrapper.prim = ground_prim.GetPrim()
+        ground_wrapper.prim_path = str(ground_prim.GetPath())
+        return ground_wrapper
 
     def create_stairs_terrain(self,
                 terrain_size = 40,
