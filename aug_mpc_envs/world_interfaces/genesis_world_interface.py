@@ -118,6 +118,58 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         g_opts["genesis_fixed_base"] = False
         g_opts["genesis_merge_fixed_links"] = True
         g_opts["genesis_logging_level"] = "warning"
+        # genesis contact/solver knobs (forwarded as RigidOptions to the adapter). These are the
+        # genesis defaults spelled out explicitly so they are easy to tweak. The contact model is a
+        # MuJoCo-style soft constraint (solref/solimp): pyramidal friction (4 constraints/contact),
+        # iterative Newton/CG solve, compliance set by constraint_timeconst. constraint_solver and
+        # integrator are passed as strings and converted to genesis enums by the adapter.
+        # NOTE: dt/gravity come from SimOptions (physics_dt); substeps (SimOptions, default 1) and
+        #       per-geom friction are NOT here (friction is a material/geom property, not RigidOptions).
+        g_opts["genesis_rigid_options"] = {
+            # --- constraint solver ---
+            "constraint_solver": "Newton",              # "Newton" or "CG"
+            "iterations": 100,                            # main solver iterations
+            "tolerance": None,                           # None -> auto from float precision
+            "ls_iterations": 50,                         # line-search iterations
+            "ls_tolerance": 1e-2,
+            "integrator": "Euler",    # "Euler" | "implicitfast" | "approximate_implicitfast"
+            # --- contact compliance (MuJoCo solref) ---
+            "constraint_timeconst": 0.005,                # lower -> stiffer contact (>= 2*physics_dt)
+            # --- friction drift cleanup (post-pass, off by default) ---
+            "noslip_iterations": 0,                      # >0 suppresses tangential slip/drift
+            "noslip_tolerance": 1e-6,
+            # --- collision / contact generation ---
+            "enable_collision": True,
+            "enable_self_collision": True,
+            "enable_joint_limit": True,
+            "enable_neutral_collision": False,
+            "enable_adjacent_collision": False,
+            "enable_multi_contact": True,                # multi-point manifolds (support polygon)
+            "box_box_detection": False,
+            "max_collision_pairs": 150,
+            "max_contacts": None,                        # None -> auto-sized
+            "contact_pruning_tolerance": 0.02,
+            "multiplier_collision_broad_phase": 8,
+            # --- misc ---
+            "disable_constraint": False,
+            "use_contact_island": False,
+            "sparse_solve": None,                        # None -> auto (CPU only)
+            "use_gjk_collision": None,                   # None -> auto
+            "enable_mujoco_compatibility": False,
+        }
+        # rendering: vis_mode is "visual" or "collision"; visualize_contact draws per-link contact
+        # force arrows in the viewer (needs headless=False). contact_force_scale is m/N: the genesis
+        # default (0.02) makes hundreds-of-N foot forces meters long, so use a much smaller scale.
+        g_opts["genesis_vis_mode"] = "collision"
+        g_opts["genesis_visualize_contact"] = True
+        g_opts["genesis_contact_force_scale"] = 0.001
+        # Global contact constraint params (MuJoCo solref+solimp), applied to all geoms after build.
+        # 7-vec [timeconst, dampratio, dmin, dmax, width, mid, power]. RigidOptions only exposes the
+        # global timeconst (constraint_timeconst), NOT dmin/dmax, so the near-rigid MuJoCo foot
+        # impedance (solimp dmin=dmax=0.995) can only be reproduced here. This matches the XMJ Talos
+        # robot-geom contact (solref="0.005 1.2", solimp="0.995 0.995 0.001 0.5 2"). Set to None to
+        # leave the genesis defaults ([0,1,0.9,0.95,1e-3,0.5,2]).
+        g_opts["genesis_global_sol_params"] = [0.005, 1.2, 0.995, 0.995, 1e-3, 0.5, 2.0]
 
         g_opts.update(self._env_opts)  # override defaults with provided opts
 
@@ -158,6 +210,9 @@ class GenesisSim(AugMPCWorldInterfaceBase):
             add_ground=self._env_opts["add_ground"],
             show_gui=(not self._env_opts["headless"]),
             max_joint_impedance_ctrl_torques=max_torques,
+            rigid_options_override=self._env_opts["genesis_rigid_options"],
+            vis_options_override={"contact_force_scale": float(self._env_opts["genesis_contact_force_scale"])},
+            reference_filter_mode="none",  # run the impedance refs unfiltered by default
             genesis_logging_level=self._env_opts["genesis_logging_level"])
 
         spawn_pose = build_pose(0.0, 0.0, float(self._env_opts["spawning_height"]), 0.0, 0.0, 0.0, 1.0)
@@ -167,9 +222,17 @@ class GenesisSim(AugMPCWorldInterfaceBase):
             format="urdf",
             pose=spawn_pose,
             kwargs={"genesis_fixed": bool(self._env_opts["genesis_fixed_base"]),
-                    "genesis_merge_fixed_links": bool(self._env_opts["genesis_merge_fixed_links"])})
+                    "genesis_merge_fixed_links": bool(self._env_opts["genesis_merge_fixed_links"]),
+                    "genesis_vis_mode": self._env_opts["genesis_vis_mode"],
+                    "genesis_visualize_contact": bool(self._env_opts["genesis_visualize_contact"])})
         # genesis scenes are static after build: all models must be passed to build_scenario
         self._genesis_adapter.build_scenario(models=[model])
+
+        # apply MuJoCo-style global contact constraint params (solref+solimp) to all geoms; this is
+        # the only way to reach the near-rigid foot impedance the XMJ/MuJoCo Talos uses (RigidOptions
+        # only exposes the global timeconst). Must run after build_scenario.
+        if self._env_opts["genesis_global_sol_params"] is not None:
+            self._genesis_adapter.set_global_sol_params(self._env_opts["genesis_global_sol_params"])
 
         # detected joints come back as (model_name, joint_name); keep only this robot's
         detected = self._genesis_adapter.get_detected_joints()
