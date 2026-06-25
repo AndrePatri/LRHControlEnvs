@@ -166,7 +166,7 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         # rendering: vis_mode is "visual" or "collision"; visualize_contact draws per-link contact
         # force arrows in the viewer (needs headless=False). contact_force_scale is m/N: the genesis
         # default (0.02) makes hundreds-of-N foot forces meters long, so use a much smaller scale.
-        g_opts["genesis_vis_mode"] = "collision"
+        g_opts["genesis_vis_mode"] = "visual"
         g_opts["genesis_visualize_contact"] = True
         g_opts["genesis_contact_force_scale"] = 0.001
         g_opts["genesis_render_env_idx"] = 0
