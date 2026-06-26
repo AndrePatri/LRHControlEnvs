@@ -83,6 +83,15 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         self._render_env_idx = 0
         self._render_env_cmd_queue = None
         self._render_env_thread = None
+        # random perturbations (set up in _configure_scene when use_random_pertub)
+        self._pert_steps_remaining = None
+        self._pert_force_world = None
+        self._pert_torque_world = None
+        self._pert_det_counter = None
+        self._pert_det_steps = 1
+        self._robot_weight = 0.0
+        # contact sensing: name -> index in the robot entity's link list (lazily built)
+        self._contact_link_idx_cache = None
 
         super().__init__(name=name,
             robot_names=robot_names,
@@ -181,6 +190,17 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         # robot-geom contact (solref="0.005 1.2", solimp="0.995 0.995 0.001 0.5 2"). Set to None to
         # leave the genesis defaults ([0,1,0.9,0.95,1e-3,0.5,2]).
         g_opts["genesis_global_sol_params"] = [0.005, 1.2, 0.995, 0.995, 1e-3, 0.5, 2.0]
+        # random base perturbations (external pushes), mirroring the isaac5x interface. Forces are
+        # sampled relative to the robot weight; applied to the base link via the adapter impulse API.
+        g_opts["use_random_pertub"] = False
+        g_opts["pert_planar_only"] = True          # linear xy pushes only, no torque
+        g_opts["pert_wrenches_rate"] = 15.0        # ~1 push every N seconds (per env)
+        g_opts["pert_wrenches_min_duration"] = 0.25
+        g_opts["pert_wrenches_max_duration"] = 0.6
+        g_opts["pert_force_min_weight_scale"] = 0.0  # force norm in [min,max]*weight
+        g_opts["pert_force_max_weight_scale"] = 1.2
+        g_opts["pert_torque_max_weight_scale"] = 1.0 # only used when not planar_only
+        g_opts["det_pert_rate"] = True             # deterministic spacing vs poisson
 
         g_opts.update(self._env_opts)  # override defaults with provided opts
 
@@ -272,8 +292,11 @@ class GenesisSim(AugMPCWorldInterfaceBase):
 
         self._init_robots_state()
 
+        if self._env_opts["use_random_pertub"]:
+            self._setup_perturbations(robot_name)
+
         self._reset_sim()
-        
+
         self._fill_robot_info_from_world()
 
         self._start_render_env_keyboard_control()
@@ -412,14 +435,22 @@ class GenesisSim(AugMPCWorldInterfaceBase):
 
     # --------------------------------------------------------- reset / homing
 
-    def _set_jnts_to_homing(self, robot_name: str):
-        # joints: (E, n, 3) -> [pos, vel, eff]
+    def _env_indxs_to_mask(self, env_indxs: torch.Tensor):
+        """Convert an env index tensor (or None=all) to a (num_envs,) bool mask for vec_mask args."""
+        if env_indxs is None:
+            return None
+        mask = torch.zeros((self._num_envs,), dtype=torch.bool, device=self._device)
+        mask[env_indxs] = True
+        return mask
+
+    def _set_jnts_to_homing(self, robot_name: str, vec_mask: torch.Tensor = None):
+        # joints: (E, n, 3) -> [pos, vel, eff]. vec_mask (bool, num_envs) selects which envs to set.
         jq = self._jnts_q_default[robot_name]
         pve = torch.zeros((self._num_envs, len(self._robot_joints), 3), device=jq.device, dtype=jq.dtype)
         pve[:, :, 0] = jq
-        self._genesis_adapter.setJointsStateDirect(self._robot_joints, pve)
+        self._genesis_adapter.setJointsStateDirect(self._robot_joints, pve, vec_mask=vec_mask)
 
-    def _set_root_to_defconfig(self, robot_name: str):
+    def _set_root_to_defconfig(self, robot_name: str, vec_mask: torch.Tensor = None):
         # base link: pose (p[3] + quat_xyzw[4]) + vel (lin[3] + ang[3]) -> (E, 1, 13)
         p = self._root_p_default[robot_name]
         q_wxyz = self._root_q_default[robot_name]
@@ -427,19 +458,32 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         link_state = torch.zeros((self._num_envs, 1, 13), device=p.device, dtype=p.dtype)
         link_state[:, 0, 0:3] = p
         link_state[:, 0, 3:7] = q_xyzw
-        self._genesis_adapter.setLinksStateDirect([self._base_link_id], link_state)
+        self._genesis_adapter.setLinksStateDirect([self._base_link_id], link_state, vec_mask=vec_mask)
 
-    def _reset_sim(self):
-        self._genesis_adapter.resetWorld()
-        # resetWorld() restores the build-time spawn (URDF-default / zero joints), which would
-        # undo the homing the base sets right before calling _reset_sim. Re-apply the default
-        # joint + base config so the robot actually starts at the homing pose.
-        for robot_name in self._robot_names:
-            self._set_jnts_to_homing(robot_name)
-            self._set_root_to_defconfig(robot_name)
+    def _reset_sim(self, env_indxs: torch.Tensor = None):
+        # Full reset (env_indxs is None): resetWorld() for a clean solver state, then re-apply the
+        # default joint + base config (resetWorld restores the build-time/zero spawn).
+        # Subset reset (env_indxs given): write the default joint + base state ONLY to those envs via
+        # vec_mask (the *StateDirect setters set pos + zero vel), WITHOUT resetWorld() -- which would
+        # reset every env. This lets the base class reset individual terminated envs in isolation.
+        if env_indxs is None:
+            self._genesis_adapter.resetWorld()
+            for robot_name in self._robot_names:
+                self._set_jnts_to_homing(robot_name)
+                self._set_root_to_defconfig(robot_name)
+        else:
+            mask = self._env_indxs_to_mask(env_indxs)
+            for robot_name in self._robot_names:
+                self._set_jnts_to_homing(robot_name, vec_mask=mask)
+                self._set_root_to_defconfig(robot_name, vec_mask=mask)
 
     def _reset_state(self, robot_name: str, env_indxs: torch.Tensor = None, randomize: bool = False):
-        self._reset_sim()
+        if randomize:
+            # randomize spawn yaw (writes _root_q_default, applied by _reset_sim -> _set_root_to_defconfig)
+            self._randomize_yaw(robot_name=robot_name, env_indxs=env_indxs)
+        self._reset_sim(env_indxs=env_indxs)
+        if self._env_opts["use_random_pertub"]:
+            self._reset_perturbations(env_indxs=env_indxs)
 
     def _start_render_env_keyboard_control(self):
         if self._env_opts["headless"] or not bool(self._env_opts["genesis_render_env_keyboard"]):
@@ -485,6 +529,115 @@ class GenesisSim(AugMPCWorldInterfaceBase):
             Journal.log(self.__class__.__name__, "_apply_render_env_commands",
                 f"Could not switch Genesis render env from token '{token}': {e}", LogType.WARN, throw_when_excep=False)
 
+    # ----------------------------------------------------- random perturbations
+
+    def _compute_robot_weight(self, robot_name: str) -> float:
+        """Total robot weight [N] = sum of link masses * g, used to scale perturbation forces."""
+        g = float(abs(self._env_opts["gravity"][2]))
+        try:
+            rs = self._genesis_adapter._rigid_solver()
+            entity = self._genesis_adapter._entities[robot_name]
+            masses = rs.get_links_inertial_mass()
+            masses = masses[0] if masses.dim() > 1 else masses
+            total_mass = float(masses[entity.link_start:entity.link_end].sum())
+        except Exception as e:
+            Journal.log(self.__class__.__name__, "_compute_robot_weight",
+                f"Could not read robot mass ({e}); perturbation forces will be 0.", LogType.WARN,
+                throw_when_excep=False)
+            total_mass = 0.0
+        return total_mass * g
+
+    def _setup_perturbations(self, robot_name: str):
+        n = self._num_envs
+        dev = self._device
+        self._pert_steps_remaining = torch.zeros((n,), dtype=torch.int32, device=dev)
+        self._pert_force_world = torch.zeros((n, 3), dtype=self._dtype, device=dev)
+        self._pert_torque_world = torch.zeros((n, 3), dtype=self._dtype, device=dev)
+        rate = float(self._env_opts["pert_wrenches_rate"])
+        self._pert_det_steps = max(1, int(round(rate / self.physics_dt())))
+        # random initial phase so deterministic-rate pushes are staggered across envs
+        self._pert_det_counter = torch.randint(0, self._pert_det_steps, (n,), dtype=torch.int32, device=dev)
+        self._robot_weight = self._compute_robot_weight(robot_name)
+
+    def _reset_perturbations(self, env_indxs: torch.Tensor = None):
+        if self._pert_steps_remaining is None:
+            return
+        n = self._num_envs
+        dev = self._device
+        if env_indxs is None:
+            self._pert_steps_remaining.zero_()
+            self._pert_force_world.zero_()
+            self._pert_torque_world.zero_()
+            self._pert_det_counter.copy_(torch.randint(0, self._pert_det_steps, (n,), dtype=torch.int32, device=dev))
+        else:
+            self._pert_steps_remaining[env_indxs] = 0
+            self._pert_force_world[env_indxs, :] = 0
+            self._pert_torque_world[env_indxs, :] = 0
+            self._pert_det_counter[env_indxs] = torch.randint(0, self._pert_det_steps,
+                (env_indxs.numel(),), dtype=torch.int32, device=dev)
+
+    def _sample_perturbations(self, mask: torch.Tensor):
+        k = int(mask.sum())
+        if k == 0:
+            return
+        dev = self._device
+        w = self._robot_weight
+        fmin = float(self._env_opts["pert_force_min_weight_scale"]) * w
+        fmax = float(self._env_opts["pert_force_max_weight_scale"]) * w
+        mag = torch.rand((k,), device=dev) * (fmax - fmin) + fmin
+        if self._env_opts["pert_planar_only"]:
+            ang = torch.rand((k,), device=dev) * 2 * torch.pi
+            dirv = torch.stack([torch.cos(ang), torch.sin(ang), torch.zeros_like(ang)], dim=1)
+            self._pert_torque_world[mask] = 0
+        else:
+            dirv = torch.randn((k, 3), device=dev)
+            dirv = dirv / dirv.norm(dim=1, keepdim=True).clamp(min=1e-6)
+            tmax = float(self._env_opts["pert_torque_max_weight_scale"]) * w * 0.5  # ~0.5 m lever
+            tmag = torch.rand((k,), device=dev) * tmax
+            tdir = torch.randn((k, 3), device=dev)
+            tdir = tdir / tdir.norm(dim=1, keepdim=True).clamp(min=1e-6)
+            self._pert_torque_world[mask] = (tdir * tmag.unsqueeze(1)).to(self._dtype)
+        self._pert_force_world[mask] = (dirv * mag.unsqueeze(1)).to(self._dtype)
+        dmin = float(self._env_opts["pert_wrenches_min_duration"])
+        dmax = float(self._env_opts["pert_wrenches_max_duration"])
+        dur = torch.rand((k,), device=dev) * (dmax - dmin) + dmin
+        steps = (dur / self.physics_dt()).round().clamp(min=1).to(torch.int32)
+        self._pert_steps_remaining[mask] = steps
+
+    def _process_perturbations(self):
+        """Advance perturbation state and (re)apply the current push to the base link for one step."""
+        if self._pert_steps_remaining is None:
+            return
+        n = self._num_envs
+        dev = self._device
+        rem = self._pert_steps_remaining
+        active = rem > 0
+        if bool(active.any()):
+            rem[active] -= 1
+        ended = active & (rem <= 0)
+        if bool(ended.any()):
+            self._pert_force_world[ended, :] = 0
+            self._pert_torque_world[ended, :] = 0
+        # trigger new pushes for envs whose current push has ended
+        self._pert_det_counter += 1
+        can_trigger = rem <= 0
+        if self._env_opts["det_pert_rate"]:
+            trig = (self._pert_det_counter >= self._pert_det_steps) & can_trigger
+        else:
+            prob = self.physics_dt() / max(1e-6, float(self._env_opts["pert_wrenches_rate"]))
+            trig = (torch.rand((n,), device=dev) < prob) & can_trigger
+        if bool(trig.any()):
+            self._sample_perturbations(trig)
+            self._pert_det_counter[trig] = 0
+        # apply the current push as a one-step impulse (adapter applies it during step())
+        active = self._pert_steps_remaining > 0
+        ft = torch.zeros((n, 1, 6), dtype=self._dtype, device=dev)
+        ft[:, 0, 0:3] = self._pert_force_world
+        ft[:, 0, 3:6] = self._pert_torque_world
+        durations = torch.full((n, 1), self.physics_dt(), dtype=self._dtype, device=dev)
+        delays = torch.zeros((n, 1), dtype=self._dtype, device=dev)
+        self._genesis_adapter.set_link_impulses([self._base_link_id], ft, durations, delays, vec_mask=active)
+
     # ------------------------------------------------------- control / step
 
     @override
@@ -499,6 +652,8 @@ class GenesisSim(AugMPCWorldInterfaceBase):
 
     def _step_world(self):
         self._apply_render_env_commands()
+        if self._env_opts["use_random_pertub"]:
+            self._process_perturbations()
         time_elapsed = self._genesis_adapter.step()
         self._step_counter += 1
         if not (abs(time_elapsed - self.physics_dt()) < 1e-6):
@@ -527,8 +682,24 @@ class GenesisSim(AugMPCWorldInterfaceBase):
             self._jnt_imp_controllers[robot_name].get_pvesd())
 
     def _get_contact_f(self, robot_name: str, contact_link: str, env_indxs: torch.Tensor) -> torch.Tensor:
-        # minimal interface: no contact forces exposed yet (matches the XMJ interface)
-        return None
+        # net contact force (world frame, N) on the given link, read from the genesis entity.
+        # Returns (n_envs, 3); None if the contact frame is not a rigid link of the robot (then the
+        # base class leaves the contact wrench unset, like the XMJ interface).
+        idx = self._contact_link_entity_index(robot_name, contact_link)
+        if idx is None:
+            return None
+        entity = self._genesis_adapter._entities[robot_name]
+        forces = entity.get_links_net_contact_force()  # (n_envs, n_links, 3)
+        f = forces[:, idx, :].to(self._dtype)
+        if env_indxs is not None:
+            f = f[env_indxs, :]
+        return f
+
+    def _contact_link_entity_index(self, robot_name: str, contact_link: str):
+        if self._contact_link_idx_cache is None:
+            entity = self._genesis_adapter._entities[robot_name]
+            self._contact_link_idx_cache = {l.name: i for i, l in enumerate(entity.links)}
+        return self._contact_link_idx_cache.get(contact_link, None)
 
     # ------------------------------------------------------------- misc info
 
