@@ -299,6 +299,12 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         # spawn-height adjustment: lift the robot by the max terrain height under it (+ cushion)
         g_opts["spawn_height_check_half_extent"] = 0.45
         g_opts["spawn_height_cushion"] = 0.06
+        # spawn-XY randomization: genesis overlays all vectorized envs on ONE shared terrain, so without
+        # this every robot stands at the center and sees the same terrain patch. Terrain-training configs
+        # can enable this to respawn each env at a random XY inside the terrain bounds (inset by
+        # spawn_xy_margin), with spawn height taken from the local terrain.
+        g_opts["randomize_spawn_xy"] = False
+        g_opts["spawn_xy_margin"] = 1.0            # [m] keep spawns this far inside the terrain edge/walls
 
         # ------------------------------------------------------------- height sensor
         # Square height-grid sensor around the base, in the base frame, sampled from the terrain
@@ -401,8 +407,9 @@ class GenesisSim(AugMPCWorldInterfaceBase):
                         f"horizontal_scale={self._terrain_data._horizontal_scale:.3f} m) to keep the genesis "
                         f"SDF build fast. Prefer box colliders (terrain_primitive_colliders) or a smaller "
                         f"ground_size/coarser resolution for sharp terrain.", LogType.WARN, throw_when_excep=False)
-        # spawn-height offset: lift the robot by the max terrain height under the spawn xy (+ cushion).
-        # genesis envs share world coords, so all envs spawn at the same (0,0).
+        # Build-time spawn-height offset: lift the robot above the center patch. If reset-time spawn-XY
+        # randomization is enabled, _randomize_spawn_xy() will overwrite per-env default XY/Z before
+        # each randomized reset.
         terrain_spawn_h = 0.0
         if self._terrain_data is not None:
             terrain_spawn_h = self._terrain_data.get_max_height_in_rect(
@@ -721,6 +728,74 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         link_state[:, 0, 3:7] = q_xyzw
         self._genesis_adapter.setLinksStateDirect([self._base_link_id], link_state, vec_mask=vec_mask)
 
+    def _spawn_xy_bounds(self):
+        margin = max(0.0, float(self._env_opts["spawn_xy_margin"]))
+        if self._terrain_data is not None:
+            h, w = self._terrain_data.heightfield_raw.shape
+            scale = float(self._terrain_data.horizontal_scale)
+            x_min = float(self._terrain_data.position[0]) + margin
+            y_min = float(self._terrain_data.position[1]) + margin
+            x_max = float(self._terrain_data.position[0]) + max(0, h - 1) * scale - margin
+            y_max = float(self._terrain_data.position[1]) + max(0, w - 1) * scale - margin
+        else:
+            half_size = 0.5 * float(self._env_opts["ground_size"])
+            x_min = -half_size + margin
+            y_min = -half_size + margin
+            x_max = half_size - margin
+            y_max = half_size - margin
+        if x_max < x_min:
+            mid = 0.5 * (x_min + x_max)
+            x_min = mid
+            x_max = mid
+        if y_max < y_min:
+            mid = 0.5 * (y_min + y_max)
+            y_min = mid
+            y_max = mid
+        return x_min, x_max, y_min, y_max
+
+    def _randomize_spawn_xy(self, robot_name: str, env_indxs: torch.Tensor = None):
+        if not bool(self._env_opts["randomize_spawn_xy"]):
+            return
+        root_p_default = self._root_p_default[robot_name]
+        if env_indxs is None:
+            env_indxs = torch.arange(root_p_default.shape[0], device=root_p_default.device)
+        else:
+            env_indxs = env_indxs.to(device=root_p_default.device, dtype=torch.long)
+
+        num_indices = int(env_indxs.numel())
+        if num_indices == 0:
+            return
+
+        x_min, x_max, y_min, y_max = self._spawn_xy_bounds()
+        xy = torch.empty((num_indices, 2), device=root_p_default.device, dtype=root_p_default.dtype)
+        xy[:, 0] = (
+            torch.rand((num_indices,), device=root_p_default.device, dtype=root_p_default.dtype) *
+            (x_max - x_min) + x_min
+        )
+        xy[:, 1] = (
+            torch.rand((num_indices,), device=root_p_default.device, dtype=root_p_default.dtype) *
+            (y_max - y_min) + y_min
+        )
+        root_p_default[env_indxs, 0:2] = xy
+
+        if self._terrain_data is None:
+            terrain_h = torch.zeros((num_indices,), device=root_p_default.device, dtype=root_p_default.dtype)
+            spawn_cushion = 0.0
+        else:
+            xy_cpu = xy.detach().cpu().numpy()
+            half_extent = float(self._env_opts["spawn_height_check_half_extent"])
+            heights = [
+                self._terrain_data.get_max_height_in_rect(float(x), float(y), half_extent=half_extent)
+                for x, y in xy_cpu
+            ]
+            terrain_h = torch.as_tensor(heights, device=root_p_default.device, dtype=root_p_default.dtype)
+            spawn_cushion = float(self._env_opts["spawn_height_cushion"])
+        root_p_default[env_indxs, 2] = (
+            float(self._env_opts["spawning_height"]) +
+            terrain_h +
+            spawn_cushion
+        )
+
     def _reset_sim(self, env_indxs: torch.Tensor = None):
         # Full reset (env_indxs is None): resetWorld() for a clean solver state, then re-apply the
         # default joint + base config (resetWorld restores the build-time/zero spawn).
@@ -761,6 +836,7 @@ class GenesisSim(AugMPCWorldInterfaceBase):
 
     def _reset_state(self, robot_name: str, env_indxs: torch.Tensor = None, randomize: bool = False):
         if randomize:
+            self._randomize_spawn_xy(robot_name=robot_name, env_indxs=env_indxs)
             # randomize spawn yaw (writes _root_q_default, applied by _reset_sim -> _set_root_to_defconfig)
             self._randomize_yaw(robot_name=robot_name, env_indxs=env_indxs)
         self._reset_sim(env_indxs=env_indxs)
