@@ -15,11 +15,11 @@
 # You should have received a copy of the GNU General Public License
 # along with AugMPCEnvs.  If not, see <http://www.gnu.org/licenses/>.
 #
-# Minimal world interface for the Genesis simulator (https://github.com/Genesis-Embodied-AI/genesis-world).
-# It wraps adarl's vectorized GenesisJointImpedanceAdapter, mirroring the XMJ interface
-# (which also wraps an adarl adapter). Scope is intentionally minimal: a single robot on
-# flat ground, proprioceptive joint state + base-link state, no terrain/perturbation/
-# camera/heightmap. Enough to run e.g. Talos and verify the sim is healthy over shared mem.
+# Genesis world interface (https://github.com/Genesis-Embodied-AI/genesis-world).
+# It wraps adarl's vectorized GenesisJointImpedanceAdapter, mirroring the XMJ adapter path.
+# Current scope: vectorized environments, joint/base state, optional render-env switching,
+# optional root perturbations, partial environment reset, and optional contact-force readout.
+# Terrain and heightmap sensing are not implemented here yet.
 from typing import Dict, List
 from typing_extensions import override
 
@@ -216,6 +216,13 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         g_opts["contact_prims"] = []
 
         g_opts.update(self._env_opts)  # override defaults with provided opts
+
+        if g_opts["use_diff_vels"]:
+            Journal.log(self.__class__.__name__,
+                "_parse_env_opts",
+                "Genesis interface does not support use_diff_vels yet. Use simulator joint velocities until finite-difference timing is implemented.",
+                LogType.EXCEP,
+                throw_when_excep=True)
 
         if not g_opts["use_gpu"]:
             g_opts["device"] = "cpu"
