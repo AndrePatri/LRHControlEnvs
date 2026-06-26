@@ -118,6 +118,19 @@ class HeightGridSensor:
         self._buffer[:num_envs].copy_(heights)
         return self._buffer[:num_envs]
 
+    def sample_world_points(self, basepositions: torch.Tensor, base_quats: torch.Tensor) -> torch.Tensor:
+        """Return (N, grid*grid, 3) world positions of the height-grid samples: planar xy from the base
+        pose + grid offsets, z = the sampled terrain height. Intended for debug visualization (e.g.
+        genesis debug spheres). Uses the same base-frame offsets and planar rotation as read()."""
+        num_envs = basepositions.shape[0]
+        rot_mats = self._quat_to_rotmat(base_quats)
+        rot_xy = rot_mats[:, :2, :2]
+        offsets = self._grid_offsets.unsqueeze(0).expand(num_envs, -1, -1)
+        world_xy = torch.bmm(offsets, rot_xy.transpose(1, 2))
+        world_xy = world_xy + basepositions[:, :2].unsqueeze(1)
+        z = self.read(basepositions, base_quats).reshape(num_envs, -1)  # (N, P), P = grid*grid
+        return torch.cat([world_xy, z.unsqueeze(-1)], dim=-1)
+
     def _quat_to_rotmat(self, quat: torch.Tensor) -> torch.Tensor:
         # quat: (N,4) -> rot: (N,3,3); assumes [w,x,y,z]
         w, x, y, z = quat.unbind(-1)

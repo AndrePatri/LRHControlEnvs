@@ -47,6 +47,8 @@ from mpc_hive.utilities.math_utils_torch import world2base_frame, world2base_fra
 
 from aug_mpc_envs.utils.math_utils import quat_to_omega
 from aug_mpc_envs.utils.genesis_jnt_imp_cntrl import GenesisJntImpCntrl
+from aug_mpc_envs.utils.height_sensor import HeightGridSensor
+from aug_mpc_envs.utils import terrain_generation
 
 
 class GenesisSim(AugMPCWorldInterfaceBase):
@@ -93,6 +95,14 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         self._robot_weight = 0.0
         # contact sensing: name -> index in the robot entity's link list (lazily built)
         self._contact_link_idx_cache = None
+        # terrain + heightmap sensing (set up in _configure_scene when not flat ground)
+        self._terrain_data = None
+        self._terrain_use_boxes = False
+        self._height_sensors = {}
+        self._height_imgs = {}
+        # heightmap debug viz (genesis debug spheres for the rendered env)
+        self._height_vis_node = None
+        self._height_vis_step = 0
 
         super().__init__(name=name,
             robot_names=robot_names,
@@ -215,6 +225,84 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         # own contact estimate, matching isaac with an empty contact_prims).
         g_opts["contact_prims"] = []
 
+        # ------------------------------------------------------------------ terrain
+        # Heightfield terrain, mirroring the isaac5x ground opts. Genesis builds the terrain (visual
+        # mesh + SDF collision) directly from a heightfield (gs.morphs.Terrain), so every type reduces
+        # to "generate heightfield -> hand to genesis"; no per-box authoring. Because genesis envs are
+        # vectorized in place (not spatially tiled like isaac), the terrain is shared by all envs and
+        # can stay SMALL (a few metres), unlike isaac's hundreds-of-metres ground.
+        g_opts["use_flat_ground"] = True
+        # ground_type: flat | random | random_patches | slopes | stairs | stepup | stepup_prim | random_tiles
+        g_opts["ground_type"] = "flat"
+        g_opts["ground_size"] = 8.0                 # [m] square terrain side (keep small for genesis)
+        g_opts["static_friction"] = 0.5             # genesis uses a single friction coeff (no dyn/restitution split)
+        g_opts["dynamic_friction"] = 0.5            # kept for config parity with isaac (unused by genesis)
+        g_opts["restitution"] = 0.1                 # kept for config parity with isaac (unused by genesis)
+        g_opts["dh_ground"] = 0.05                  # +/- height range for "random"/"random_patches" [m]
+        g_opts["terrain_walls"] = True              # add perimeter walls so the robot can't walk off
+        g_opts["wall_height"] = 2.0                 # [m]
+        g_opts["slope"] = -0.5                      # "slopes"
+        g_opts["stairs_step_width"] = 0.3           # "stairs"
+        g_opts["stairs_step_height"] = -0.1
+        # stepup / stepup_prim args (mirror isaac names)
+        g_opts["step_stairs_ratio"] = 0.9
+        g_opts["step_platform_size"] = 3.0
+        g_opts["step_height_lb"] = 0.08
+        g_opts["step_height_ub"] = 0.15
+        g_opts["step_n"] = 1
+        g_opts["step_min"] = 1
+        g_opts["step_max"] = 1
+        g_opts["step_area_factor"] = 0.7
+        g_opts["step_random_n_steps"] = False
+        g_opts["step_width_lb"] = None
+        g_opts["step_width_ub"] = None
+        # random_tiles args (dense grid of small flat-topped cells at random heights)
+        g_opts["tile_cell_size"] = 0.5
+        g_opts["tile_height_lb"] = 0.0
+        g_opts["tile_height_ub"] = 0.06
+        g_opts["tile_patch_ratio"] = 0.0
+        g_opts["tile_patch_size"] = 3.0
+        g_opts["tile_min_height"] = 0.01
+        # terrain rendering: vis mode for the terrain entity ("visual" | "collision" | None=default)
+        g_opts["terrain_vis_mode"] = None
+        # ------------------------------------------------------- terrain collider representation
+        # The "prim" terrains (random_tiles, stepup_prim) can be built as PRIMITIVE BOX colliders
+        # (one fixed gs.morphs.Box per tile/step + a base slab + walls), mirroring isaac's *_prim
+        # terrains. Boxes give exact, crisp contact (no SDF quantization) and are cheap for SPARSE
+        # terrain (few large steps). They are NOT free, though: each box is a separate genesis entity,
+        # so a DENSE terrain (e.g. random_tiles with small cells over a big area) becomes thousands of
+        # entities -> slow build, broadphase/GPU-memory pressure. So box terrains are capped: if the
+        # generated box count exceeds terrain_max_boxes, the interface falls back to the heightfield
+        # (SDF) path. Box terrains never get downsampled (no resolution loss). The height sensor always
+        # samples the heightfield, regardless of the collision representation.
+        g_opts["terrain_primitive_colliders"] = True   # use box colliders for random_tiles/stepup_prim
+        g_opts["terrain_max_boxes"] = 1500             # over this -> fall back to the heightfield path
+        # terrain SDF cost cap (heightfield path only). genesis builds the heightfield terrain collision
+        # as ONE mesh + an auto-SDF; the SDF pre-processing gets very slow past ~50k faces (face count =
+        # 2*(grid_side-1)^2). When a generated heightfield exceeds this it is auto-coarsened (max-pool,
+        # preserving raised steps) -- which costs resolution, so prefer box colliders or a smaller
+        # ground_size for terrains with sharp features. Set <= 0 to disable the cap.
+        g_opts["terrain_max_faces"] = 120000
+        # spawn-height adjustment: lift the robot by the max terrain height under it (+ cushion)
+        g_opts["spawn_height_check_half_extent"] = 0.45
+        g_opts["spawn_height_cushion"] = 0.06
+
+        # ------------------------------------------------------------- height sensor
+        # Square height-grid sensor around the base, in the base frame, sampled from the terrain
+        # heightfield (see HeightGridSensor). Output is cached in self._height_imgs[robot_name] and
+        # exposed via get_height_images(); on flat ground it reads all-zeros.
+        g_opts["enable_height_sensor"] = False
+        g_opts["height_sensor_pixels"] = 16         # grid side (pixels)
+        g_opts["height_sensor_resolution"] = 0.1    # [m] per pixel
+        g_opts["height_sensor_forward_offset"] = 0.0
+        g_opts["height_sensor_lateral_offset"] = 0.0
+        # heightmap visualization: draw the sampled height-grid points as debug spheres in the genesis
+        # viewer (rendered env only). Needs a live visualizer (not headless, or camera rendering on).
+        g_opts["enable_height_vis"] = False
+        g_opts["height_vis_radius"] = 0.03          # [m] sphere radius
+        g_opts["height_vis_update_period"] = 1      # redraw every N sim steps
+        g_opts["height_vis_color"] = [0.1, 0.9, 0.2, 0.8]  # RGBA
+
         g_opts.update(self._env_opts)  # override defaults with provided opts
 
         if g_opts["use_diff_vels"]:
@@ -257,6 +345,59 @@ class GenesisSim(AugMPCWorldInterfaceBase):
             render_envs_idx = [int(render_envs_idx)]
         self._render_env_idx = int(render_envs_idx[0]) if len(render_envs_idx) > 0 else 0
 
+        # build the (shared) terrain heightfield before the adapter, so the spawn height can be lifted
+        # above it and the heightfield can be handed to the adapter at build time (scene is static
+        # after build). None when flat -> the adapter keeps the default flat ground plane.
+        self._terrain_data = None
+        self._terrain_use_boxes = False
+        if not bool(self._env_opts["use_flat_ground"]):
+            self._terrain_data = terrain_generation.build_terrain_data(
+                ground_type=self._env_opts["ground_type"],
+                ground_size=float(self._env_opts["ground_size"]),
+                opts=self._env_opts,
+                center=(0.0, 0.0, 0.0))
+        if self._terrain_data is not None:
+            # Prefer primitive BOX colliders for the "prim" terrains (exact, crisp contact, no SDF
+            # quantization) when the box count is reasonable; otherwise use the heightfield (+ SDF).
+            n_boxes = self._terrain_data.num_boxes()
+            max_boxes = int(self._env_opts["terrain_max_boxes"])
+            if bool(self._env_opts["terrain_primitive_colliders"]) and n_boxes > 0 and n_boxes <= max_boxes:
+                self._terrain_use_boxes = True
+                Journal.log(self.__class__.__name__, "_configure_scene",
+                    f"Terrain '{self._env_opts['ground_type']}' uses {n_boxes} primitive box colliders "
+                    f"(exact contact, no SDF/downsampling).", LogType.INFO, throw_when_excep=False)
+            else:
+                if n_boxes > max_boxes:
+                    Journal.log(self.__class__.__name__, "_configure_scene",
+                        f"Terrain '{self._env_opts['ground_type']}' would need {n_boxes} box colliders "
+                        f"(> terrain_max_boxes={max_boxes}); using the heightfield (SDF) path instead. "
+                        f"Use a smaller ground_size / coarser tiles, or raise terrain_max_boxes.",
+                        LogType.WARN, throw_when_excep=False)
+                # heightfield path: cap the SDF cost. genesis builds one mesh + SDF, very slow past
+                # ~50k faces. Auto-coarsen (max-pool, preserving raised steps) when over the budget.
+                max_faces = int(self._env_opts["terrain_max_faces"])
+                if max_faces > 0 and self._terrain_data.num_faces() > max_faces:
+                    max_side = max(2, int(math.sqrt(max_faces / 2.0)) + 1)
+                    before = self._terrain_data.heightfield_raw.shape
+                    before_faces = self._terrain_data.num_faces()
+                    self._terrain_data = self._terrain_data.coarsened(max_side)
+                    Journal.log(self.__class__.__name__, "_configure_scene",
+                        f"Terrain '{self._env_opts['ground_type']}' heightfield {before} ({before_faces} faces) "
+                        f"exceeds terrain_max_faces={max_faces}; coarsened to "
+                        f"{self._terrain_data.heightfield_raw.shape} ({self._terrain_data.num_faces()} faces, "
+                        f"horizontal_scale={self._terrain_data._horizontal_scale:.3f} m) to keep the genesis "
+                        f"SDF build fast. Prefer box colliders (terrain_primitive_colliders) or a smaller "
+                        f"ground_size/coarser resolution for sharp terrain.", LogType.WARN, throw_when_excep=False)
+        # spawn-height offset: lift the robot by the max terrain height under the spawn xy (+ cushion).
+        # genesis envs share world coords, so all envs spawn at the same (0,0).
+        terrain_spawn_h = 0.0
+        if self._terrain_data is not None:
+            terrain_spawn_h = self._terrain_data.get_max_height_in_rect(
+                0.0, 0.0, half_extent=float(self._env_opts["spawn_height_check_half_extent"])) \
+                + float(self._env_opts["spawn_height_cushion"])
+        # keep the flat ground plane only when no terrain is used
+        add_ground_flag = bool(self._env_opts["add_ground"]) and (self._terrain_data is None)
+
         # create the adapter (sim + impedance). sim_step_dt == step_length_sec so a single
         # adapter.step() advances exactly one physics step (physics_dt), like XMJ.
         self._genesis_adapter = GenesisJointImpedanceAdapter(
@@ -266,7 +407,7 @@ class GenesisSim(AugMPCWorldInterfaceBase):
             step_length_sec=self._env_opts["physics_dt"],
             enable_rendering=bool(self._env_opts["genesis_enable_camera_rendering"]),
             render_envs_idx=render_envs_idx,
-            add_ground=self._env_opts["add_ground"],
+            add_ground=add_ground_flag,
             show_gui=(not self._env_opts["headless"]),
             max_joint_impedance_ctrl_torques=max_torques,
             rigid_options_override=self._env_opts["genesis_rigid_options"],
@@ -275,7 +416,8 @@ class GenesisSim(AugMPCWorldInterfaceBase):
             genesis_logging_level=self._env_opts["genesis_logging_level"],
             use_batch_renderer=bool(self._env_opts["genesis_use_batch_renderer"]))
 
-        spawn_pose = build_pose(0.0, 0.0, float(self._env_opts["spawning_height"]), 0.0, 0.0, 0.0, 1.0)
+        spawn_pose = build_pose(0.0, 0.0,
+            float(self._env_opts["spawning_height"]) + float(terrain_spawn_h), 0.0, 0.0, 0.0, 1.0)
         model = ModelSpawnDef(
             name=robot_name,
             definition_string=urdf_str,
@@ -285,8 +427,31 @@ class GenesisSim(AugMPCWorldInterfaceBase):
                     "genesis_merge_fixed_links": bool(self._env_opts["genesis_merge_fixed_links"]),
                     "genesis_vis_mode": self._env_opts["genesis_vis_mode"],
                     "genesis_visualize_contact": bool(self._env_opts["genesis_visualize_contact"])})
-        # genesis scenes are static after build: all models must be passed to build_scenario
-        self._genesis_adapter.build_scenario(models=[model])
+        # genesis scenes are static after build: all models (and the terrain) must be passed to
+        # build_scenario. The terrain dict is backend-neutral (the adapter turns it into a
+        # gs.morphs.Terrain); cell (0,0) lands at terrain position so it lines up with the sensor.
+        build_kwargs = {}
+        if self._terrain_data is not None:
+            if self._terrain_use_boxes:
+                build_kwargs["terrain"] = {
+                    "boxes": self._terrain_data.boxes,
+                    "friction": float(self._env_opts["static_friction"]),
+                    "vis_mode": self._env_opts["terrain_vis_mode"],
+                    "visualize_contact": False,
+                    "name": "terrain",
+                }
+            else:
+                build_kwargs["terrain"] = {
+                    "height_field": self._terrain_data.heightfield_raw,
+                    "horizontal_scale": self._terrain_data._horizontal_scale,
+                    "vertical_scale": self._terrain_data.vertical_scale,
+                    "pos": tuple(float(v) for v in self._terrain_data.position),
+                    "friction": float(self._env_opts["static_friction"]),
+                    "vis_mode": self._env_opts["terrain_vis_mode"],
+                    "visualize_contact": False,
+                    "name": "terrain",
+                }
+        self._genesis_adapter.build_scenario(models=[model], **build_kwargs)
 
         # apply MuJoCo-style global contact constraint params (solref+solimp) to all geoms; this is
         # the only way to reach the near-rigid foot impedance the XMJ/MuJoCo Talos uses (RigidOptions
@@ -311,6 +476,22 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         self._genesis_adapter.set_impedance_controlled_joints(self._robot_joints)
 
         self._init_robots_state()
+
+        # height-grid sensor: samples the terrain heightfield around the base (base frame). On flat
+        # ground the sensor reads all-zeros. Shares the exact heightfield/transform genesis built from.
+        if bool(self._env_opts["enable_height_sensor"]):
+            pixels = int(self._env_opts["height_sensor_pixels"])
+            self._height_sensors[robot_name] = HeightGridSensor(
+                terrain_utils=self._terrain_data if not bool(self._env_opts["use_flat_ground"]) else None,
+                grid_size=pixels,
+                resolution=float(self._env_opts["height_sensor_resolution"]),
+                n_envs=self._num_envs,
+                forward_offset=float(self._env_opts["height_sensor_forward_offset"]),
+                lateral_offset=float(self._env_opts["height_sensor_lateral_offset"]),
+                device=self._device,
+                dtype=self._dtype)
+            self._height_imgs[robot_name] = torch.zeros((self._num_envs, pixels, pixels),
+                device=self._device, dtype=self._dtype)
 
         if self._env_opts["use_random_pertub"]:
             self._setup_perturbations(robot_name)
@@ -451,6 +632,27 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         self._root_v_prev[robot_name][:, :] = self._root_v[robot_name]
         self._root_omega_prev[robot_name][:, :] = self._root_omega[robot_name]
 
+        # heightmap readout (base frame), mirroring the isaac5x interface. On flat ground -> zeros.
+        if robot_name in self._height_sensors:
+            if env_indxs is None:
+                heights = self._height_sensors[robot_name].read(self._root_p[robot_name], self._root_q[robot_name])
+                if bool(self._env_opts["use_flat_ground"]):
+                    heights = heights * 0.0
+                self._height_imgs[robot_name][:, :, :] = heights
+            else:
+                heights = self._height_sensors[robot_name].read(
+                    self._root_p[robot_name][env_indxs], self._root_q[robot_name][env_indxs])
+                if bool(self._env_opts["use_flat_ground"]):
+                    heights = heights * 0.0
+                self._height_imgs[robot_name][env_indxs] = heights.clone()
+
+    def get_height_images(self, robot_name: str = None):
+        """Return the latest height-grid images (N, pixels, pixels), or None if the sensor is off.
+        With no robot_name, returns the per-robot dict."""
+        if robot_name is None:
+            return self._height_imgs
+        return self._height_imgs.get(robot_name, None)
+
     def _read_jnts_state_from_robot(self, robot_name: str, env_indxs: torch.Tensor = None):
         jq, jv, jeff = self._joints_state(robot_name)
         if self._env_opts["use_diff_vels"]:
@@ -505,6 +707,27 @@ class GenesisSim(AugMPCWorldInterfaceBase):
             for robot_name in self._robot_names:
                 self._set_jnts_to_homing(robot_name, vec_mask=mask)
                 self._set_root_to_defconfig(robot_name, vec_mask=mask)
+
+    def _pre_warmup_step(self, robot_name: str, env_indxs: torch.Tensor = None):
+        # During warmup (before the MPC produces solutions) the impedance controller only holds the
+        # joints at homing; the free base has no balancing control and can tip/drift and fall,
+        # especially on uneven terrain. Mirror the isaac5x interface: each warmup step zero the base
+        # linear xy and the full angular velocity, keeping only the vertical (falling) velocity, so the
+        # robot settles straight down in a healthy upright pose before the MPC takes over.
+        self._alter_twist_warmup(robot_name=robot_name, env_indxs=env_indxs)
+
+    def _alter_twist_warmup(self, robot_name: str, env_indxs: torch.Tensor = None):
+        """Zero the base linear-xy and angular velocity (keep vertical) for the given robot/envs."""
+        p, q_wxyz, v, omega = self._base_state(robot_name)
+        q_xyzw = q_wxyz[:, [1, 2, 3, 0]]
+        # link state is (E, 1, 13): pos[3] + quat_xyzw[4] + linvel[3] + angvel[3]. Re-write the
+        # current pose (so it is left untouched) and a twist that keeps only linear z.
+        link_state = torch.zeros((self._num_envs, 1, 13), device=p.device, dtype=p.dtype)
+        link_state[:, 0, 0:3] = p
+        link_state[:, 0, 3:7] = q_xyzw
+        link_state[:, 0, 9] = v[:, 2]   # keep vertical linear vel; vx, vy and all angular stay zero
+        vec_mask = self._env_indxs_to_mask(env_indxs)
+        self._genesis_adapter.setLinksStateDirect([self._base_link_id], link_state, vec_mask=vec_mask)
 
     def _reset_state(self, robot_name: str, env_indxs: torch.Tensor = None, randomize: bool = False):
         if randomize:
@@ -722,6 +945,30 @@ class GenesisSim(AugMPCWorldInterfaceBase):
                 f"simulation stepped of {time_elapsed} [s], expected {self.physics_dt()} [s]",
                 LogType.WARN,
                 throw_when_excep=False)
+        if self._env_opts["enable_height_vis"]:
+            self._update_height_vis()
+
+    def _update_height_vis(self):
+        """Draw the sampled height-grid points (rendered env) as genesis debug spheres. No-op when
+        the sensor is off or there is no live visualizer (headless without cameras)."""
+        robot_name = self._robot_names[0]
+        if robot_name not in self._height_sensors:
+            return
+        period = max(1, int(self._env_opts["height_vis_update_period"]))
+        self._height_vis_step += 1
+        if (self._height_vis_step - 1) % period != 0:
+            return
+        env = int(self._render_env_idx)
+        p = self._root_p[robot_name][env:env + 1]
+        q = self._root_q[robot_name][env:env + 1]
+        pts = self._height_sensors[robot_name].sample_world_points(p, q)[0]  # (P, 3) world
+        node = self._genesis_adapter.draw_debug_spheres(
+            poss=pts, radius=float(self._env_opts["height_vis_radius"]),
+            color=tuple(self._env_opts["height_vis_color"]))
+        if node is not None:
+            # clear the previous frame's spheres only once the new ones are up (avoids flicker)
+            self._genesis_adapter.clear_debug_object(self._height_vis_node)
+            self._height_vis_node = node
 
     def _generate_jnt_imp_control(self, robot_name: str):
         return GenesisJntImpCntrl(

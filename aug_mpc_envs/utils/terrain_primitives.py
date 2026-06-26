@@ -1,0 +1,316 @@
+# Copyright (C) 2023  Andrea Patrizi (AndrePatri, andreapatrizi1b6e6@gmail.com)
+#
+# This file is part of AugMPCEnvs and distributed under the General Public License version 2 license.
+#
+# AugMPCEnvs is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# AugMPCEnvs is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with AugMPCEnvs.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Backend-neutral terrain primitives (pure numpy/scipy). These were extracted from
+# ``terrain_utils_isaac5x.py`` so they can be shared by every world interface (Isaac, Genesis, ...)
+# without dragging in the Isaac/USD (``isaacsim``/``pxr``) dependencies. The Isaac-specific
+# ``add_terrain_to_stage`` stays in ``terrain_utils_isaac5x.py`` (which re-exports everything here).
+
+import numpy as np
+from numpy.random import choice
+from scipy import interpolate
+
+from math import sqrt
+
+
+def random_uniform_terrain(terrain, min_height, max_height, step=1, downsampled_scale=None,):
+    """
+    Generate a uniform noise terrain
+
+    Parameters
+        terrain (SubTerrain): the terrain
+        min_height (float): the minimum height of the terrain [meters]
+        max_height (float): the maximum height of the terrain [meters]
+        step (float): minimum height change between two points [meters]
+        downsampled_scale (float): distance between two randomly sampled points ( musty be larger or equal to terrain.horizontal_scale)
+
+    """
+    if downsampled_scale is None:
+        downsampled_scale = terrain.horizontal_scale
+
+    # switch parameters to discrete units
+    min_height = int(min_height / terrain.vertical_scale)
+    max_height = int(max_height / terrain.vertical_scale)
+    step = int(step / terrain.vertical_scale)
+
+    heights_range = np.arange(min_height, max_height + step, step)
+    height_field_downsampled = np.random.choice(heights_range, (int(terrain.width * terrain.horizontal_scale / downsampled_scale), int(
+        terrain.length * terrain.horizontal_scale / downsampled_scale)))
+
+    x = np.linspace(0, terrain.width * terrain.horizontal_scale, height_field_downsampled.shape[0])
+    y = np.linspace(0, terrain.length * terrain.horizontal_scale, height_field_downsampled.shape[1])
+
+    # scipy>=1.14 removed interp2d; use RegularGridInterpolator over the (x, y) grid.
+    # Evaluate on the upsampled grid with indexing="ij" so the result keeps the (width, length)
+    # layout of height_field_raw (same as the old interp2d call).
+    f = interpolate.RegularGridInterpolator((x, y), height_field_downsampled.astype(np.float64),
+                                            method="linear", bounds_error=False, fill_value=None)
+
+    x_upsampled = np.linspace(0, terrain.width * terrain.horizontal_scale, terrain.width)
+    y_upsampled = np.linspace(0, terrain.length * terrain.horizontal_scale, terrain.length)
+    xx, yy = np.meshgrid(x_upsampled, y_upsampled, indexing="ij")
+    z_upsampled = np.rint(f((xx, yy)))
+
+    terrain.height_field_raw += z_upsampled.astype(np.int16)
+    return terrain
+
+def sloped_terrain(terrain, slope=1):
+    """
+    Generate a sloped terrain
+
+    Parameters:
+        terrain (SubTerrain): the terrain
+        slope (int): positive or negative slope
+    Returns:
+        terrain (SubTerrain): update terrain
+    """
+
+    x = np.arange(0, terrain.width)
+    y = np.arange(0, terrain.length)
+    xx, yy = np.meshgrid(x, y, sparse=True)
+    xx = xx.reshape(terrain.width, 1)
+    max_height = int(slope * (terrain.horizontal_scale / terrain.vertical_scale) * terrain.width)
+    terrain.height_field_raw[:, np.arange(terrain.length)] += (max_height * xx / terrain.width).astype(terrain.height_field_raw.dtype)
+    return terrain
+
+def discrete_obstacles_terrain(terrain, max_height, min_size, max_size, num_rects, platform_size=1.):
+    """
+    Generate a terrain with gaps
+
+    Parameters:
+        terrain (terrain): the terrain
+        max_height (float): maximum height of the obstacles (range=[-max, -max/2, max/2, max]) [meters]
+        min_size (float): minimum size of a rectangle obstacle [meters]
+        max_size (float): maximum size of a rectangle obstacle [meters]
+        num_rects (int): number of randomly generated obstacles
+        platform_size (float): size of the flat platform at the center of the terrain [meters]
+    Returns:
+        terrain (SubTerrain): update terrain
+    """
+    # switch parameters to discrete units
+    max_height = int(max_height / terrain.vertical_scale)
+    min_size = int(min_size / terrain.horizontal_scale)
+    max_size = int(max_size / terrain.horizontal_scale)
+    platform_size = int(platform_size / terrain.horizontal_scale)
+
+    (i, j) = terrain.height_field_raw.shape
+    height_range = [-max_height, -max_height // 2, max_height // 2, max_height]
+    width_range = range(min_size, max_size, 4)
+    length_range = range(min_size, max_size, 4)
+
+    for _ in range(num_rects):
+        width = np.random.choice(width_range)
+        length = np.random.choice(length_range)
+        start_i = np.random.choice(range(0, i-width, 4))
+        start_j = np.random.choice(range(0, j-length, 4))
+        terrain.height_field_raw[start_i:start_i+width, start_j:start_j+length] = np.random.choice(height_range)
+
+    x1 = (terrain.width - platform_size) // 2
+    x2 = (terrain.width + platform_size) // 2
+    y1 = (terrain.length - platform_size) // 2
+    y2 = (terrain.length + platform_size) // 2
+    terrain.height_field_raw[x1:x2, y1:y2] = 0
+    return terrain
+
+def wave_terrain(terrain, num_waves=1, amplitude=1.):
+    """
+    Generate a wavy terrain
+
+    Parameters:
+        terrain (terrain): the terrain
+        num_waves (int): number of sine waves across the terrain length
+    Returns:
+        terrain (SubTerrain): update terrain
+    """
+    amplitude = int(0.5*amplitude / terrain.vertical_scale)
+    if num_waves > 0:
+        div = terrain.length / (num_waves * np.pi * 2)
+        x = np.arange(0, terrain.width)
+        y = np.arange(0, terrain.length)
+        xx, yy = np.meshgrid(x, y, sparse=True)
+        xx = xx.reshape(terrain.width, 1)
+        yy = yy.reshape(1, terrain.length)
+        terrain.height_field_raw += (amplitude*np.cos(yy / div) + amplitude*np.sin(xx / div)).astype(
+            terrain.height_field_raw.dtype)
+    return terrain
+
+def stairs_terrain(terrain, step_width, step_height):
+    """
+    Generate a stairs
+
+    Parameters:
+        terrain (terrain): the terrain
+        step_width (float):  the width of the step [meters]
+        step_height (float):  the height of the step [meters]
+    Returns:
+        terrain (SubTerrain): update terrain
+    """
+    # switch parameters to discrete units
+    step_width = int(step_width / terrain.horizontal_scale)
+    step_height = int(step_height / terrain.vertical_scale)
+
+    num_steps = terrain.width // step_width
+    height = step_height
+    for i in range(num_steps):
+        terrain.height_field_raw[i * step_width: (i + 1) * step_width, :] += height
+        height += step_height
+    return terrain
+
+def pyramid_stairs_terrain(terrain, step_width, step_height, platform_size=1.):
+    """
+    Generate stairs
+
+    Parameters:
+        terrain (terrain): the terrain
+        step_width (float):  the width of the step [meters]
+        step_height (float): the step_height [meters]
+        platform_size (float): size of the flat platform at the center of the terrain [meters]
+    Returns:
+        terrain (SubTerrain): update terrain
+    """
+    # switch parameters to discrete units
+    step_width = int(step_width / terrain.horizontal_scale)
+    step_height = int(step_height / terrain.vertical_scale)
+    platform_size = int(platform_size / terrain.horizontal_scale)
+
+    height = 0
+    start_x = 0
+    stop_x = terrain.width
+    start_y = 0
+    stop_y = terrain.length
+    while (stop_x - start_x) > platform_size and (stop_y - start_y) > platform_size:
+        start_x += step_width
+        stop_x -= step_width
+        start_y += step_width
+        stop_y -= step_width
+        height += step_height
+        terrain.height_field_raw[start_x: stop_x, start_y: stop_y] = height
+    return terrain
+
+def stepping_stones_terrain(terrain, stone_size, stone_distance, max_height, platform_size=1., depth=-10):
+    """
+    Generate a stepping stones terrain
+
+    Parameters:
+        terrain (terrain): the terrain
+        stone_size (float): horizontal size of the stepping stones [meters]
+        stone_distance (float): distance between stones (i.e size of the holes) [meters]
+        max_height (float): maximum height of the stones (positive and negative) [meters]
+        platform_size (float): size of the flat platform at the center of the terrain [meters]
+        depth (float): depth of the holes (default=-10.) [meters]
+    Returns:
+        terrain (SubTerrain): update terrain
+    """
+    # switch parameters to discrete units
+    stone_size = int(stone_size / terrain.horizontal_scale)
+    stone_distance = int(stone_distance / terrain.horizontal_scale)
+    max_height = int(max_height / terrain.vertical_scale)
+    platform_size = int(platform_size / terrain.horizontal_scale)
+    height_range = np.arange(-max_height-1, max_height, step=1)
+
+    start_x = 0
+    start_y = 0
+    terrain.height_field_raw[:, :] = int(depth / terrain.vertical_scale)
+    if terrain.length >= terrain.width:
+        while start_y < terrain.length:
+            stop_y = min(terrain.length, start_y + stone_size)
+            start_x = np.random.randint(0, stone_size)
+            # fill first hole
+            stop_x = max(0, start_x - stone_distance)
+            terrain.height_field_raw[0: stop_x, start_y: stop_y] = np.random.choice(height_range)
+            # fill row
+            while start_x < terrain.width:
+                stop_x = min(terrain.width, start_x + stone_size)
+                terrain.height_field_raw[start_x: stop_x, start_y: stop_y] = np.random.choice(height_range)
+                start_x += stone_size + stone_distance
+            start_y += stone_size + stone_distance
+    elif terrain.width > terrain.length:
+        while start_x < terrain.width:
+            stop_x = min(terrain.width, start_x + stone_size)
+            start_y = np.random.randint(0, stone_size)
+            # fill first hole
+            stop_y = max(0, start_y - stone_distance)
+            terrain.height_field_raw[start_x: stop_x, 0: stop_y] = np.random.choice(height_range)
+            # fill column
+            while start_y < terrain.length:
+                stop_y = min(terrain.length, start_y + stone_size)
+                terrain.height_field_raw[start_x: stop_x, start_y: stop_y] = np.random.choice(height_range)
+                start_y += stone_size + stone_distance
+            start_x += stone_size + stone_distance
+
+    x1 = (terrain.width - platform_size) // 2
+    x2 = (terrain.width + platform_size) // 2
+    y1 = (terrain.length - platform_size) // 2
+    y2 = (terrain.length + platform_size) // 2
+    terrain.height_field_raw[x1:x2, y1:y2] = 0
+    return terrain
+
+def convert_heightfield_to_trimesh(height_field_raw, horizontal_scale, vertical_scale, slope_threshold=None):
+    hf = height_field_raw
+    num_rows = hf.shape[0]
+    num_cols = hf.shape[1]
+
+    y = np.linspace(0, (num_cols-1)*horizontal_scale, num_cols)
+    x = np.linspace(0, (num_rows-1)*horizontal_scale, num_rows)
+    yy, xx = np.meshgrid(y, x)
+
+    if slope_threshold is not None:
+
+        slope_threshold *= horizontal_scale / vertical_scale
+        move_x = np.zeros((num_rows, num_cols))
+        move_y = np.zeros((num_rows, num_cols))
+        move_corners = np.zeros((num_rows, num_cols))
+        move_x[:num_rows-1, :] += (hf[1:num_rows, :] - hf[:num_rows-1, :] > slope_threshold)
+        move_x[1:num_rows, :] -= (hf[:num_rows-1, :] - hf[1:num_rows, :] > slope_threshold)
+        move_y[:, :num_cols-1] += (hf[:, 1:num_cols] - hf[:, :num_cols-1] > slope_threshold)
+        move_y[:, 1:num_cols] -= (hf[:, :num_cols-1] - hf[:, 1:num_cols] > slope_threshold)
+        move_corners[:num_rows-1, :num_cols-1] += (hf[1:num_rows, 1:num_cols] - hf[:num_rows-1, :num_cols-1] > slope_threshold)
+        move_corners[1:num_rows, 1:num_cols] -= (hf[:num_rows-1, :num_cols-1] - hf[1:num_rows, 1:num_cols] > slope_threshold)
+        xx += (move_x + move_corners*(move_x == 0)) * horizontal_scale
+        yy += (move_y + move_corners*(move_y == 0)) * horizontal_scale
+
+    # create triangle mesh vertices and triangles from the heightfield grid
+    vertices = np.zeros((num_rows*num_cols, 3), dtype=np.float32)
+    vertices[:, 0] = xx.flatten()
+    vertices[:, 1] = yy.flatten()
+    vertices[:, 2] = hf.flatten() * vertical_scale
+    triangles = -np.ones((2*(num_rows-1)*(num_cols-1), 3), dtype=np.uint32)
+    for i in range(num_rows - 1):
+        ind0 = np.arange(0, num_cols-1) + i*num_cols
+        ind1 = ind0 + 1
+        ind2 = ind0 + num_cols
+        ind3 = ind2 + 1
+        start = 2*i*(num_cols-1)
+        stop = start + 2*(num_cols-1)
+        triangles[start:stop:2, 0] = ind0
+        triangles[start:stop:2, 1] = ind3
+        triangles[start:stop:2, 2] = ind1
+        triangles[start+1:stop:2, 0] = ind0
+        triangles[start+1:stop:2, 1] = ind2
+        triangles[start+1:stop:2, 2] = ind3
+
+    return vertices, triangles
+
+
+class SubTerrain:
+    def __init__(self, terrain_name="terrain", width=256, length=256, vertical_scale=1.0, horizontal_scale=1.0):
+        self.terrain_name = terrain_name
+        self.vertical_scale = vertical_scale
+        self.horizontal_scale = horizontal_scale
+        self.width = width
+        self.length = length
+        self.height_field_raw = np.zeros((self.width, self.length), dtype=np.int16)
