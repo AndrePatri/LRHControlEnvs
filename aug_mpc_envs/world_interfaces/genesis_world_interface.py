@@ -23,6 +23,7 @@
 from typing import Dict, List
 from typing_extensions import override
 
+import math
 import queue
 import sys
 import threading
@@ -192,15 +193,27 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         g_opts["genesis_global_sol_params"] = [0.005, 1.2, 0.995, 0.995, 1e-3, 0.5, 2.0]
         # random base perturbations (external pushes), mirroring the isaac5x interface. Forces are
         # sampled relative to the robot weight; applied to the base link via the adapter impulse API.
+        # Impulse-based (matches isaac5x): a push is sampled as a target IMPULSE (= m*delta_v), then
+        # converted to a per-step force = impulse/duration, so the resulting velocity change is ~delta_v
+        # regardless of physics_dt and duration. The *weight_scale clips only cap the peak force.
         g_opts["use_random_pertub"] = False
         g_opts["pert_planar_only"] = True          # linear xy pushes only, no torque
         g_opts["pert_wrenches_rate"] = 15.0        # ~1 push every N seconds (per env)
         g_opts["pert_wrenches_min_duration"] = 0.25
         g_opts["pert_wrenches_max_duration"] = 0.6
-        g_opts["pert_force_min_weight_scale"] = 0.0  # force norm in [min,max]*weight
+        g_opts["pert_target_delta_v"] = 0.4        # [m/s] max base velocity change a push imparts
+        g_opts["lin_impulse_mag_min"] = 0.5        # sampled impulse = [min,max] * (m*delta_v)
+        g_opts["lin_impulse_mag_max"] = 1.0
+        g_opts["max_ang_impulse_lever"] = 0.2      # [m] lever turning delta_v into an angular impulse
+        g_opts["pert_force_min_weight_scale"] = 0.0  # clip the derived force norm to [min,max]*weight
         g_opts["pert_force_max_weight_scale"] = 1.2
-        g_opts["pert_torque_max_weight_scale"] = 1.0 # only used when not planar_only
+        g_opts["pert_torque_max_weight_scale"] = 1.0 # clip torque to scale*weight*lever (non-planar only)
         g_opts["det_pert_rate"] = True             # deterministic spacing vs poisson
+        # measured contact wrenches: list of ROBOT ENTITY LINK names (not virtual/merged frames) whose
+        # net contact force (world frame) is read and written to the cluster contact_wrenches, in the
+        # MPC's contact order. Empty -> no measured contacts (generic cluster names; the MPC uses its
+        # own contact estimate, matching isaac with an empty contact_prims).
+        g_opts["contact_prims"] = []
 
         g_opts.update(self._env_opts)  # override defaults with provided opts
 
@@ -298,6 +311,15 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         self._reset_sim()
 
         self._fill_robot_info_from_world()
+
+        # contact wrenches: set the cluster's contact link names from contact_prims (entity link names)
+        # so _get_contact_f reads their net contact force. Runs in _init_world (before the base creates
+        # the cluster server with contact_linknames=_contact_names). Empty -> None (generic, no measured
+        # contacts). The names must be real entity links in the MPC's contact order.
+        cp = self._env_opts["contact_prims"]
+        if isinstance(cp, str):  # config passes it as a comma-separated string (custom args are scalar)
+            cp = [s.strip() for s in cp.split(",") if s.strip()]
+        self._contact_names[robot_name] = list(cp) if cp else None
 
         self._start_render_env_keyboard_control()
 
@@ -550,14 +572,23 @@ class GenesisSim(AugMPCWorldInterfaceBase):
     def _setup_perturbations(self, robot_name: str):
         n = self._num_envs
         dev = self._device
+        dt = self.physics_dt()
         self._pert_steps_remaining = torch.zeros((n,), dtype=torch.int32, device=dev)
         self._pert_force_world = torch.zeros((n, 3), dtype=self._dtype, device=dev)
         self._pert_torque_world = torch.zeros((n, 3), dtype=self._dtype, device=dev)
         rate = float(self._env_opts["pert_wrenches_rate"])
-        self._pert_det_steps = max(1, int(round(rate / self.physics_dt())))
+        self._pert_det_steps = max(1, int(round(rate / dt)))
         # random initial phase so deterministic-rate pushes are staggered across envs
         self._pert_det_counter = torch.randint(0, self._pert_det_steps, (n,), dtype=torch.int32, device=dev)
+        # duration sampled in physics steps (accounts for dt)
+        self._pert_min_steps = max(1, int(math.ceil(float(self._env_opts["pert_wrenches_min_duration"]) / dt)))
+        self._pert_max_steps = max(self._pert_min_steps, int(math.ceil(float(self._env_opts["pert_wrenches_max_duration"]) / dt)))
         self._robot_weight = self._compute_robot_weight(robot_name)
+        g = float(abs(self._env_opts["gravity"][2]))
+        mass = self._robot_weight / g if g > 0 else 0.0
+        # max linear impulse = m*delta_v ; max angular impulse = m*delta_v*lever
+        self._max_lin_impulse = mass * float(self._env_opts["pert_target_delta_v"])
+        self._max_ang_impulse = self._max_lin_impulse * float(self._env_opts["max_ang_impulse_lever"])
 
     def _reset_perturbations(self, env_indxs: torch.Tensor = None):
         if self._pert_steps_remaining is None:
@@ -577,31 +608,53 @@ class GenesisSim(AugMPCWorldInterfaceBase):
                 (env_indxs.numel(),), dtype=torch.int32, device=dev)
 
     def _sample_perturbations(self, mask: torch.Tensor):
+        # Impulse-based: sample target impulse (= m*delta_v), pick a duration, then force = impulse/duration
+        # (so delta_v is duration/dt-independent), and clip the force/torque norm to [min,max]*weight.
         k = int(mask.sum())
         if k == 0:
             return
         dev = self._device
         w = self._robot_weight
-        fmin = float(self._env_opts["pert_force_min_weight_scale"]) * w
-        fmax = float(self._env_opts["pert_force_max_weight_scale"]) * w
-        mag = torch.rand((k,), device=dev) * (fmax - fmin) + fmin
+        dt = self.physics_dt()
+        # duration in steps, then seconds (>=1 step), accounts for physics_dt
+        steps = torch.randint(self._pert_min_steps, self._pert_max_steps + 1, (k,), dtype=torch.int32, device=dev)
+        dur_s = (steps.to(self._dtype) * dt).clamp(min=1e-6)
+        # linear impulse -> force
+        imp_mag = (torch.rand((k,), device=dev)
+                   * (float(self._env_opts["lin_impulse_mag_max"]) - float(self._env_opts["lin_impulse_mag_min"]))
+                   + float(self._env_opts["lin_impulse_mag_min"])) * self._max_lin_impulse
         if self._env_opts["pert_planar_only"]:
             ang = torch.rand((k,), device=dev) * 2 * torch.pi
             dirv = torch.stack([torch.cos(ang), torch.sin(ang), torch.zeros_like(ang)], dim=1)
-            self._pert_torque_world[mask] = 0
         else:
             dirv = torch.randn((k, 3), device=dev)
             dirv = dirv / dirv.norm(dim=1, keepdim=True).clamp(min=1e-6)
-            tmax = float(self._env_opts["pert_torque_max_weight_scale"]) * w * 0.5  # ~0.5 m lever
-            tmag = torch.rand((k,), device=dev) * tmax
+        force = (dirv * imp_mag.unsqueeze(1)) / dur_s.unsqueeze(1)
+        # clip force norm to [min,max]*weight
+        fnorm = force.norm(dim=1, keepdim=True).clamp(min=1e-9)
+        target = fnorm.clone()
+        fmax = float(self._env_opts["pert_force_max_weight_scale"])
+        if fmax > 0.0:
+            target = torch.minimum(target, torch.full_like(target, fmax * w))
+        fmin = float(self._env_opts["pert_force_min_weight_scale"])
+        if fmin > 0.0:
+            target = torch.maximum(target, torch.full_like(target, fmin * w))
+        force = force * (target / fnorm)
+        self._pert_force_world[mask] = force.to(self._dtype)
+        # torque (only when not planar-only)
+        if self._env_opts["pert_planar_only"]:
+            self._pert_torque_world[mask] = 0
+        else:
             tdir = torch.randn((k, 3), device=dev)
             tdir = tdir / tdir.norm(dim=1, keepdim=True).clamp(min=1e-6)
-            self._pert_torque_world[mask] = (tdir * tmag.unsqueeze(1)).to(self._dtype)
-        self._pert_force_world[mask] = (dirv * mag.unsqueeze(1)).to(self._dtype)
-        dmin = float(self._env_opts["pert_wrenches_min_duration"])
-        dmax = float(self._env_opts["pert_wrenches_max_duration"])
-        dur = torch.rand((k,), device=dev) * (dmax - dmin) + dmin
-        steps = (dur / self.physics_dt()).round().clamp(min=1).to(torch.int32)
+            t_imp = torch.rand((k,), device=dev) * self._max_ang_impulse
+            torque = (tdir * t_imp.unsqueeze(1)) / dur_s.unsqueeze(1)
+            tscale = float(self._env_opts["pert_torque_max_weight_scale"])
+            if tscale > 0.0:
+                tmax = w * float(self._env_opts["max_ang_impulse_lever"]) * tscale
+                tnorm = torque.norm(dim=1, keepdim=True).clamp(min=1e-9)
+                torque = torque * torch.minimum(torch.ones_like(tnorm), tmax / tnorm)
+            self._pert_torque_world[mask] = torque.to(self._dtype)
         self._pert_steps_remaining[mask] = steps
 
     def _process_perturbations(self):
@@ -700,6 +753,22 @@ class GenesisSim(AugMPCWorldInterfaceBase):
             entity = self._genesis_adapter._entities[robot_name]
             self._contact_link_idx_cache = {l.name: i for i, l in enumerate(entity.links)}
         return self._contact_link_idx_cache.get(contact_link, None)
+
+    @override
+    def _update_contact_state(self, robot_name: str, env_indxs: torch.Tensor = None):
+        # base: writes the measured per-contact forces (via _get_contact_f). Then also report the
+        # applied root perturbation wrench (world frame) on the RobotState root-wrench buffer, so the
+        # external disturbance is visible on shared memory (e.g. for pert-recovery obs).
+        super()._update_contact_state(robot_name=robot_name, env_indxs=env_indxs)
+        if not self._env_opts["use_random_pertub"] or self._pert_force_world is None:
+            return
+        root_w = getattr(self.cluster_servers[robot_name].get_state(), "contact_wrenches_root", None)
+        if root_w is None:
+            return
+        f = self._pert_force_world if env_indxs is None else self._pert_force_world[env_indxs]
+        t = self._pert_torque_world if env_indxs is None else self._pert_torque_world[env_indxs]
+        root_w.set(data=f, data_type="f", contact_name="root", robot_idxs=env_indxs, gpu=self._use_gpu)
+        root_w.set(data=t, data_type="t", contact_name="root", robot_idxs=env_indxs, gpu=self._use_gpu)
 
     # ------------------------------------------------------------- misc info
 
