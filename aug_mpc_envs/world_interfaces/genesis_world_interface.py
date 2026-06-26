@@ -194,6 +194,15 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         g_opts["genesis_enable_camera_rendering"] = False
         g_opts["genesis_use_batch_renderer"] = False
         g_opts["genesis_render_env_keyboard"] = False
+        # render lighting: the genesis default is a single directional light, which leaves some step
+        # faces unlit/invisible from certain angles. None -> auto-build 4 DIRECTIONAL lights, one from
+        # each diagonal (top-corner) direction, so steps are lit from all sides. NOTE: point lights
+        # break genesis' interactive viewer (their shadow maps fail GL init when GENESIS_HEADLESS=0),
+        # so directional is the safe default; pass an explicit list of light dicts to override
+        # ({"type":"point"/"directional","pos"/"dir":[..],"color":[..],"intensity":f}).
+        g_opts["render_lights"] = None
+        g_opts["render_light_intensity"] = 3.0     # per-light (4 lights total)
+        g_opts["render_light_height"] = None       # [m] only used if you switch to point lights
         # Global contact constraint params (MuJoCo solref+solimp), applied to all geoms after build.
         # 7-vec [timeconst, dampratio, dmin, dmax, width, mid, power]. RigidOptions only exposes the
         # global timeconst (constraint_timeconst), NOT dmin/dmax, so the near-rigid MuJoCo foot
@@ -265,6 +274,10 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         g_opts["tile_min_height"] = 0.01
         # terrain rendering: vis mode for the terrain entity ("visual" | "collision" | None=default)
         g_opts["terrain_vis_mode"] = None
+        # terrain color (RGB, 0..1) for any non-flat ground. Matches the dark blue the isaac5x terrain
+        # actually renders (avg of its checker texture ibrido_terrain_texture.png ~ 0.25/0.25/0.92; the
+        # 0.69/0.85/1.0 light blue is only that texture's fallback). Set None for the genesis default.
+        g_opts["terrain_color"] = [0.25, 0.25, 0.92]
         # ------------------------------------------------------- terrain collider representation
         # The "prim" terrains (random_tiles, stepup_prim) can be built as PRIMITIVE BOX colliders
         # (one fixed gs.morphs.Box per tile/step + a base slab + walls), mirroring isaac's *_prim
@@ -398,6 +411,19 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         # keep the flat ground plane only when no terrain is used
         add_ground_flag = bool(self._env_opts["add_ground"]) and (self._terrain_data is None)
 
+        # render lighting: 4 directional lights, one from each diagonal (top-corner) direction, so the
+        # terrain/steps are lit from all sides like 4 corner lights -- but without point lights, which
+        # break genesis' interactive viewer (shadow-map GL init fails when GENESIS_HEADLESS=0).
+        render_lights = self._env_opts["render_lights"]
+        if render_lights is None:
+            it = float(self._env_opts["render_light_intensity"])
+            render_lights = [
+                {"type": "directional", "dir": [ 1.0,  1.0, -1.0], "color": [1.0, 1.0, 1.0], "intensity": it},
+                {"type": "directional", "dir": [-1.0,  1.0, -1.0], "color": [1.0, 1.0, 1.0], "intensity": it},
+                {"type": "directional", "dir": [ 1.0, -1.0, -1.0], "color": [1.0, 1.0, 1.0], "intensity": it},
+                {"type": "directional", "dir": [-1.0, -1.0, -1.0], "color": [1.0, 1.0, 1.0], "intensity": it},
+            ]
+
         # create the adapter (sim + impedance). sim_step_dt == step_length_sec so a single
         # adapter.step() advances exactly one physics step (physics_dt), like XMJ.
         self._genesis_adapter = GenesisJointImpedanceAdapter(
@@ -414,7 +440,8 @@ class GenesisSim(AugMPCWorldInterfaceBase):
             vis_options_override={"contact_force_scale": float(self._env_opts["genesis_contact_force_scale"])},
             reference_filter_mode="none",  # run the impedance refs unfiltered by default
             genesis_logging_level=self._env_opts["genesis_logging_level"],
-            use_batch_renderer=bool(self._env_opts["genesis_use_batch_renderer"]))
+            use_batch_renderer=bool(self._env_opts["genesis_use_batch_renderer"]),
+            render_lights=render_lights)
 
         spawn_pose = build_pose(0.0, 0.0,
             float(self._env_opts["spawning_height"]) + float(terrain_spawn_h), 0.0, 0.0, 0.0, 1.0)
@@ -432,11 +459,13 @@ class GenesisSim(AugMPCWorldInterfaceBase):
         # gs.morphs.Terrain); cell (0,0) lands at terrain position so it lines up with the sensor.
         build_kwargs = {}
         if self._terrain_data is not None:
+            terrain_color = self._env_opts["terrain_color"]
             if self._terrain_use_boxes:
                 build_kwargs["terrain"] = {
                     "boxes": self._terrain_data.boxes,
                     "friction": float(self._env_opts["static_friction"]),
                     "vis_mode": self._env_opts["terrain_vis_mode"],
+                    "color": terrain_color,
                     "visualize_contact": False,
                     "name": "terrain",
                 }
@@ -448,6 +477,7 @@ class GenesisSim(AugMPCWorldInterfaceBase):
                     "pos": tuple(float(v) for v in self._terrain_data.position),
                     "friction": float(self._env_opts["static_friction"]),
                     "vis_mode": self._env_opts["terrain_vis_mode"],
+                    "color": terrain_color,
                     "visualize_contact": False,
                     "name": "terrain",
                 }
