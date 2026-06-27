@@ -29,6 +29,17 @@ class FlightPhaseControl(TwistTrackingEnv):
         self._add_env_opt(env_opts, "control_flanding", default=False) 
 
         self._add_env_opt(env_opts, "flength_min", default=8) # substeps
+        # swing-phase action bounds (per contact). flength_max is set in _custom_post_init (depends on
+        # the RHC horizon). apex/end are [m] deltas; landing dx/dy are [m] foothold offsets (only used
+        # when control_flanding=True).
+        self._add_env_opt(env_opts, "fapex_min", default=0.05)   # [m] swing apex height delta
+        self._add_env_opt(env_opts, "fapex_max", default=0.35)
+        self._add_env_opt(env_opts, "fend_min", default=0.0)     # [m] swing end (landing height) delta
+        self._add_env_opt(env_opts, "fend_max", default=0.2)
+        self._add_env_opt(env_opts, "fland_dx_min", default=-0.5)  # [m] landing foothold x offset
+        self._add_env_opt(env_opts, "fland_dx_max", default=0.5)
+        self._add_env_opt(env_opts, "fland_dy_min", default=-0.5)  # [m] landing foothold y offset
+        self._add_env_opt(env_opts, "fland_dy_max", default=0.5)
 
         TwistTrackingEnv.__init__(self,
             namespace=namespace,
@@ -64,6 +75,14 @@ class FlightPhaseControl(TwistTrackingEnv):
 
         self._add_env_opt(self._env_opts, "flength_max", default=self._n_nodes_rhc.mean().item()) # MPC steps (substeps)
 
+        # custom_args values arrive as numpy scalars; cast the swing-phase bounds to python float so
+        # they can be assigned into the torch action-bound tensors (torch rejects numpy.float32 -> cuda
+        # tensor slice assignment).
+        for _k in ("flength_min", "flength_max", "fapex_min", "fapex_max", "fend_min", "fend_max",
+                   "fland_dx_min", "fland_dx_max", "fland_dy_min", "fland_dy_max"):
+            if self._env_opts.get(_k, None) is not None:
+                self._env_opts[_k] = float(self._env_opts[_k])
+
         # additional actions bounds
         
         # flight params (length)
@@ -75,24 +94,24 @@ class FlightPhaseControl(TwistTrackingEnv):
         # flight params (apex)
         if self._env_opts["control_fapex"]:
             idx=self._actions_map["flight_apex_start"]
-            self._actions_lb[:, idx:(idx+self._n_contacts)]=0.05
-            self._actions_ub[:, idx:(idx+self._n_contacts)]=0.35
+            self._actions_lb[:, idx:(idx+self._n_contacts)]=self._env_opts["fapex_min"]
+            self._actions_ub[:, idx:(idx+self._n_contacts)]=self._env_opts["fapex_max"]
             self._is_continuous_actions[idx:(idx+self._n_contacts)]=True
         # flight params (end)
         if self._env_opts["control_fend"]:
             idx=self._actions_map["flight_end_start"]
-            self._actions_lb[:, idx:(idx+self._n_contacts)]=0.0
-            self._actions_ub[:, idx:(idx+self._n_contacts)]=0.2
+            self._actions_lb[:, idx:(idx+self._n_contacts)]=self._env_opts["fend_min"]
+            self._actions_ub[:, idx:(idx+self._n_contacts)]=self._env_opts["fend_max"]
             self._is_continuous_actions[idx:(idx+self._n_contacts)]=True
         # flight params (landing dx, dy)
         if self._env_opts["control_flanding"]:
             idx=self._actions_map["flight_land_dx_start"]
-            self._actions_lb[:, idx:(idx+self._n_contacts)]=-0.5
-            self._actions_ub[:, idx:(idx+self._n_contacts)]=0.5
+            self._actions_lb[:, idx:(idx+self._n_contacts)]=self._env_opts["fland_dx_min"]
+            self._actions_ub[:, idx:(idx+self._n_contacts)]=self._env_opts["fland_dx_max"]
             self._is_continuous_actions[idx:(idx+self._n_contacts)]=True
             idx=self._actions_map["flight_land_dy_start"]
-            self._actions_lb[:, idx:(idx+self._n_contacts)]=-0.5
-            self._actions_ub[:, idx:(idx+self._n_contacts)]=0.5
+            self._actions_lb[:, idx:(idx+self._n_contacts)]=self._env_opts["fland_dy_min"]
+            self._actions_ub[:, idx:(idx+self._n_contacts)]=self._env_opts["fland_dy_max"]
             self._is_continuous_actions[idx:(idx+self._n_contacts)]=True
 
         # redefine default actions
