@@ -165,6 +165,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         self._add_env_opt(env_opts, "actions_history_size", default=3)
         
         self._add_env_opt(env_opts, "add_mpc_contact_f_to_obs", default=True) # add estimate vertical contact f to obs
+        self._add_env_opt(env_opts, "add_contact_pos_to_obs", default=False) # add MPC contact positions (base frame) to obs; requires write_contact_pos on the controller
         self._add_env_opt(env_opts, "add_fail_idx_to_obs", default=True) # we need to obserse mpc failure idx to correlate it with terminations
         
         self._add_env_opt(env_opts, "use_linvel_from_rhc", default=True) # no lin vel meas available, we use est. from mpc
@@ -231,6 +232,8 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         obs_dim+=2*n_jnts # joint pos + vel
         if env_opts["add_mpc_contact_f_to_obs"]:
             obs_dim+=3*self._n_contacts
+        if env_opts["add_contact_pos_to_obs"]:
+            obs_dim+=3*self._n_contacts # MPC contact positions (base frame)
         obs_dim+=6 # twist reference in base frame frame
         if env_opts["add_fail_idx_to_obs"]:
             obs_dim+=1 # rhc controller failure index
@@ -807,6 +810,9 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         if self._env_opts["add_mpc_contact_f_to_obs"]:
             n_forces=3*len(self._contact_names)
             obs[:, self._obs_map["contact_f_mpc"]:(self._obs_map["contact_f_mpc"]+n_forces)] = self._rhc_cmds.contact_wrenches.get(data_type="f",gpu=self._use_gpu)
+        if self._env_opts["add_contact_pos_to_obs"]:
+            n_cpos=3*len(self._contact_names)
+            obs[:, self._obs_map["contact_pos_mpc"]:(self._obs_map["contact_pos_mpc"]+n_cpos)] = self._rhc_cmds.contact_pos.get(data_type="p",gpu=self._use_gpu)
         if self._env_opts["add_fail_idx_to_obs"]:
             obs[:, self._obs_map["rhc_fail_idx"]:(self._obs_map["rhc_fail_idx"]+1)] = self._rhc_fail_idx(gpu=self._use_gpu)
         if self._env_opts["add_term_mpc_capsize"]:
@@ -1082,7 +1088,7 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
             if self._env_opts["add_CoT_reward"]:
                 if self._env_opts["use_CoT_wrt_ref"]: # uses v ref norm for computing cot
                     agent_task_ref_base_loc = self._agent_refs.rob_refs.root_state.get(data_type="twist",gpu=self._use_gpu)
-                    v_norm=torch.norm(agent_task_ref_base_loc, dim=1, keepdim=True)
+                    v_norm=torch.norm(agent_task_ref_base_loc[:, 0:3], dim=1, keepdim=True) # linear speed only (exclude omega)
                 else: # uses measured velocity
                     robot_twist_meas_base_loc = self._robot_state.root_state.get(data_type="twist",gpu=self._use_gpu)
                     v_norm=torch.norm(robot_twist_meas_base_loc[:,0:3], dim=1, keepdim=True)
@@ -1181,7 +1187,17 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
                 obs_names[next_idx+i+2] = f"fc_{contact}_z_base_loc"
                 i+=3        
             next_idx+=3*len(self._contact_names)
-            
+
+        if self._env_opts["add_contact_pos_to_obs"]:
+            i = 0
+            self._obs_map["contact_pos_mpc"]=next_idx
+            for contact in self._contact_names:
+                obs_names[next_idx+i] = f"cpos_{contact}_x_base_loc"
+                obs_names[next_idx+i+1] = f"cpos_{contact}_y_base_loc"
+                obs_names[next_idx+i+2] = f"cpos_{contact}_z_base_loc"
+                i+=3
+            next_idx+=3*len(self._contact_names)
+
         # data directly from MPC
         if self._env_opts["add_fail_idx_to_obs"]:
             self._obs_map["rhc_fail_idx"]=next_idx
