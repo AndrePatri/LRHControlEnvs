@@ -130,10 +130,6 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
         self._add_env_opt(env_opts, "task_track_omega_z_weight", default=0.2)
         self._add_env_opt(env_opts, "task_track_omega_x_weight", default=0.05)
         self._add_env_opt(env_opts, "task_track_omega_y_weight", default=0.05)
-        # if env_opts["add_angvel_ref_rand"]:
-        #     env_opts["task_track_omega_x_weight"]=0.0
-        #     env_opts["task_track_omega_y_weight"]=0.0
-        #     env_opts["task_track_omega_z_weight"]=1.0
 
         # task pred tracking
         self._add_env_opt(env_opts, "task_pred_track_offset", default=1.0)
@@ -307,20 +303,24 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
                             fill_value=1.5)
         
         # task reference parameters (world frame)
+        # config-provided scalars arrive as numpy.float32; cast to python float, since torch rejects
+        # assigning a numpy scalar into a CUDA tensor element ("can't assign numpy.float32 to ...").
+        max_linvel_ref = float(self._env_opts["max_linvel_ref"])
+        max_angvel_ref = float(self._env_opts["max_angvel_ref"])
         # lin vel
-        self._twist_ref_lb[0, 0] = -self._env_opts["max_linvel_ref"]
-        self._twist_ref_lb[0, 1] = -self._env_opts["max_linvel_ref"]
+        self._twist_ref_lb[0, 0] = -max_linvel_ref
+        self._twist_ref_lb[0, 1] = -max_linvel_ref
         self._twist_ref_lb[0, 2] = 0.0
-        self._twist_ref_ub[0, 0] = self._env_opts["max_linvel_ref"]
-        self._twist_ref_ub[0, 1] = self._env_opts["max_linvel_ref"]
+        self._twist_ref_ub[0, 0] = max_linvel_ref
+        self._twist_ref_ub[0, 1] = max_linvel_ref
         self._twist_ref_ub[0, 2] = 0.0
         # angular vel
         self._twist_ref_lb[0, 3] = 0.0
         self._twist_ref_lb[0, 4] = 0.0
-        self._twist_ref_lb[0, 5] = -self._env_opts["max_angvel_ref"]
+        self._twist_ref_lb[0, 5] = -max_angvel_ref
         self._twist_ref_ub[0, 3] = 0.0
         self._twist_ref_ub[0, 4] = 0.0
-        self._twist_ref_ub[0, 5] = self._env_opts["max_angvel_ref"]
+        self._twist_ref_ub[0, 5] = max_angvel_ref
 
         self._twist_ref_offset = (self._twist_ref_ub + self._twist_ref_lb)/2.0
         self._twist_ref_scale = (self._twist_ref_ub - self._twist_ref_lb)/2.0
@@ -375,38 +375,46 @@ class TwistTrackingEnv(AugMPCTrainingEnvBase):
 
         # rewards
         self._task_err_weights = torch.full((1, 6), dtype=self._dtype, device=device,
-                            fill_value=0.0) 
+                            fill_value=0.0)
+        # config-provided scalars arrive as numpy.float32; cast to python float before writing them
+        # into the CUDA weight tensors (torch rejects numpy-scalar assignment into a CUDA element).
+        w_front = float(self._env_opts["task_track_front_weight"])
+        w_lat   = float(self._env_opts["task_track_lat_weight"])
+        w_vert  = float(self._env_opts["task_track_vert_weight"])
+        w_ox    = float(self._env_opts["task_track_omega_x_weight"])
+        w_oy    = float(self._env_opts["task_track_omega_y_weight"])
+        w_oz    = float(self._env_opts["task_track_omega_z_weight"])
         if self._env_opts["directional_tracking"]:
-            self._task_err_weights[0, 0] = self._env_opts["task_track_front_weight"] # frontal
-            self._task_err_weights[0, 1] = self._env_opts["task_track_lat_weight"] # lateral
-            self._task_err_weights[0, 2] = self._env_opts["task_track_vert_weight"] # vertical
-            self._task_err_weights[0, 3] = self._env_opts["task_track_omega_x_weight"]
-            self._task_err_weights[0, 4] = self._env_opts["task_track_omega_y_weight"]
-            self._task_err_weights[0, 5] = self._env_opts["task_track_omega_z_weight"]
+            self._task_err_weights[0, 0] = w_front # frontal
+            self._task_err_weights[0, 1] = w_lat # lateral
+            self._task_err_weights[0, 2] = w_vert # vertical
+            self._task_err_weights[0, 3] = w_ox
+            self._task_err_weights[0, 4] = w_oy
+            self._task_err_weights[0, 5] = w_oz
         else:
-            self._task_err_weights[0, 0] = self._env_opts["task_track_front_weight"]
-            self._task_err_weights[0, 1] = self._env_opts["task_track_front_weight"]
-            self._task_err_weights[0, 2] = 0.1*self._env_opts["task_track_front_weight"]
-            self._task_err_weights[0, 3] = self._env_opts["task_track_omega_x_weight"]
-            self._task_err_weights[0, 4] = self._env_opts["task_track_omega_y_weight"]
-            self._task_err_weights[0, 5] = self._env_opts["task_track_omega_z_weight"]
-            
+            self._task_err_weights[0, 0] = w_front
+            self._task_err_weights[0, 1] = w_front
+            self._task_err_weights[0, 2] = 0.1*w_front
+            self._task_err_weights[0, 3] = w_ox
+            self._task_err_weights[0, 4] = w_oy
+            self._task_err_weights[0, 5] = w_oz
+
         self._task_pred_err_weights = torch.full((1, 6), dtype=self._dtype, device=device,
-                            fill_value=0.0) 
+                            fill_value=0.0)
         if self._env_opts["directional_tracking"]:
-            self._task_pred_err_weights[0, 0] = self._env_opts["task_track_front_weight"]
-            self._task_pred_err_weights[0, 1] = self._env_opts["task_track_lat_weight"]
-            self._task_pred_err_weights[0, 2] = self._env_opts["task_track_vert_weight"]
-            self._task_pred_err_weights[0, 3] = self._env_opts["task_track_omega_x_weight"]
-            self._task_pred_err_weights[0, 4] = self._env_opts["task_track_omega_y_weight"]
-            self._task_pred_err_weights[0, 5] = self._env_opts["task_track_omega_z_weight"]
+            self._task_pred_err_weights[0, 0] = w_front
+            self._task_pred_err_weights[0, 1] = w_lat
+            self._task_pred_err_weights[0, 2] = w_vert
+            self._task_pred_err_weights[0, 3] = w_ox
+            self._task_pred_err_weights[0, 4] = w_oy
+            self._task_pred_err_weights[0, 5] = w_oz
         else:
-            self._task_pred_err_weights[0, 0] = self._env_opts["task_track_front_weight"]
-            self._task_pred_err_weights[0, 1] = self._env_opts["task_track_front_weight"]
-            self._task_pred_err_weights[0, 2] = 0.1*self._env_opts["task_track_front_weight"]
-            self._task_pred_err_weights[0, 3] = self._env_opts["task_track_omega_x_weight"]
-            self._task_pred_err_weights[0, 4] = self._env_opts["task_track_omega_y_weight"]
-            self._task_pred_err_weights[0, 5] = self._env_opts["task_track_omega_z_weight"]
+            self._task_pred_err_weights[0, 0] = w_front
+            self._task_pred_err_weights[0, 1] = w_front
+            self._task_pred_err_weights[0, 2] = 0.1*w_front
+            self._task_pred_err_weights[0, 3] = w_ox
+            self._task_pred_err_weights[0, 4] = w_oy
+            self._task_pred_err_weights[0, 5] = w_oz
 
         self._power_penalty_weights = torch.full((1, self._n_jnts), dtype=self._dtype, device=device,
                             fill_value=1.0)
